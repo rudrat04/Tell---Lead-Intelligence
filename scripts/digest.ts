@@ -22,5 +22,5 @@ if (dry && r.email) {
   writeFileSync("digest-preview.html", r.email.html);
   console.log(`dry run: "${r.email.subject}" saved to digest-preview.html`);
 }
-console.log(`digest: status=${r.status}${r.reason ? ` (${r.reason})` : ""} leads=${r.leads} watchlist=${r.watchlist} person_leads=${r.personLeads}`);
+console.log(`digest: status=${r.status}${r.reason ? ` (${r.reason})` : ""} leads=${r.leads} watchlist=${r.watchlist} person_leads=${r.personLeads}${r.sheet ? ` | sheet: ${r.sheet}` : ""}`);
 if (r.status === "skipped" && r.reason?.includes("not set")) process.exit(1);

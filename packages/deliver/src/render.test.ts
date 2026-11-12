@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import type { ScoreRunResult } from "@tell/pipeline";
 import type { AccountScore, Evidence } from "@tell/intel";
-import { renderDigest, opener, describe as describeEvidence } from "./render.js";
+import { renderDigest, opener, leadSheetRow, describe as describeEvidence } from "./render.js";
+import { LEAD_COLUMNS } from "./sheets.js";
 import { buildMime } from "./gmail.js";
 
 const pack = await loadFixturePack();
@@ -67,6 +68,18 @@ describe("freelance gigs section", () => {
     expect(e.html).toContain('href="https://himalayas.app/companies/acme/jobs/x/apply"');
     expect(e.html).toContain('via <a href="https://himalayas.app/companies/acme/jobs/x"');
     expect(e.text).toContain("via Himalayas");
+  });
+});
+
+describe("sheet row", () => {
+  it("has one value per column except the hidden ID, leaves your columns empty, names the person", () => {
+    const contact = { person: { name: "Riya Sample", role: "Founder/CEO", linkedin: "https://linkedin.com/in/riya", source: "yc" }, persona: "Founder / CEO", note: "" };
+    const row = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13");
+    expect(row).toHaveLength(LEAD_COLUMNS.length - 1);
+    const col = (c: (typeof LEAD_COLUMNS)[number]) => row[LEAD_COLUMNS.indexOf(c)];
+    expect(col("Person")).toBe("Riya Sample");
+    expect(col("Opener")).toContain("Hi Riya");
+    expect([col("Label"), col("Reason"), col("Outcome"), col("Notes")]).toEqual(["", "", "", ""]);
   });
 });
 

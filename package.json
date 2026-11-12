@@ -19,7 +19,10 @@
     "score": "tsx scripts/score.ts",
     "digest": "tsx scripts/digest.ts",
     "gmail:auth": "tsx scripts/gmail-auth.ts",
-    "gigs": "tsx scripts/gigs.ts"
+    "gigs": "tsx scripts/gigs.ts",
+    "sheet:setup": "tsx scripts/sheet.ts setup",
+    "sheet:sync": "tsx scripts/sheet.ts sync",
+    "google:auth": "tsx scripts/gmail-auth.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",
@@ -37,6 +40,7 @@
     "dotenv": "^18.0.10",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.0",
+    "yaml": "^2.9.1"
   }
 }

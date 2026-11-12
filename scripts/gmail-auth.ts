@@ -1,5 +1,6 @@
 /**
- * One-time: authorise the sending account (send-only scope) and store its refresh token in .env.
+ * One-time: authorise the sending account and store its refresh token in .env.
+ * Scopes: gmail.send (digest) + drive.file (only the leads Sheet this app creates).
  * Needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env (a "Desktop app" OAuth client).
  * The token is written to .env and never printed.
  *   pnpm gmail:auth
@@ -9,7 +10,7 @@ import { createServer } from "node:http";
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFile } from "node:child_process";
-import { GMAIL_SEND_SCOPE } from "@tell/deliver";
+import { GOOGLE_SCOPES } from "@tell/deliver";
 
 const { GOOGLE_CLIENT_ID: clientId, GOOGLE_CLIENT_SECRET: clientSecret } = process.env;
 if (!clientId || !clientSecret) {
@@ -53,7 +54,7 @@ const server = createServer(async (req, res) => {
   }
   saveToEnv("GMAIL_REFRESH_TOKEN", j.refresh_token);
   res.writeHead(200, { "content-type": "text/plain" }).end("Done. You can close this tab and return to the terminal.");
-  console.log(`Saved GMAIL_REFRESH_TOKEN to .env (scope: ${j.scope}). Next: pnpm digest --test`);
+  console.log(`Saved GMAIL_REFRESH_TOKEN to .env (scopes: ${j.scope}). Next: pnpm sheet:setup`);
   server.close();
 });
 
@@ -61,7 +62,7 @@ server.listen(0, "127.0.0.1", () => {
   const port = (server.address() as { port: number }).port;
   const auth = new URL("https://accounts.google.com/o/oauth2/v2/auth");
   auth.search = new URLSearchParams({
-    client_id: clientId, redirect_uri: `http://127.0.0.1:${port}/callback`, response_type: "code", scope: GMAIL_SEND_SCOPE,
+    client_id: clientId, redirect_uri: `http://127.0.0.1:${port}/callback`, response_type: "code", scope: GOOGLE_SCOPES.join(" "),
     access_type: "offline", prompt: "consent", state, code_challenge: challenge, code_challenge_method: "S256",
   }).toString();
   console.log("Opening your browser to authorise sending. Sign in with the sending account (e.g. your Workspace address).");

@@ -1,12 +1,16 @@
 import type { Pack } from "@tell/config";
 import { runScoring, istDay, contactsFor, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
-import { renderDigest, type DigestHealth, type DigestEmail } from "./render.js";
+import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
+import { appendPendingLeads } from "./sheet-sync.js";
+import { appendRows } from "./sheets.js";
 import type { Sender } from "./gmail.js";
 
 export interface DigestResult {
   status: "sent" | "skipped" | "dry-run";
   reason?: string;
+  /** Sheet outcome after a real send: rows appended, or why not (never fails the digest) */
+  sheet?: string;
   leads: number;
   watchlist: number;
   personLeads: number;
@@ -86,9 +90,22 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (score.ranking.leads.length) {
     batch.push(db.insert(deliveries).values(score.ranking.leads.map((l) => ({
       accountId: l.account.id, deliveredAt: now, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
+      sheetRow: leadSheetRow(l, contacts.get(l.account.id), day),
     }))));
   }
   await db.batch(batch as unknown as Parameters<typeof db.batch>[0]);
   await markGigsDelivered(gigList.map((g) => g.id), now);
-  return { status: "sent", email, score, ...counts };
+
+  // Sheet: append after the email is out; a Sheet problem never fails the digest (rows are retried next run)
+  let sheet = "no sheet configured";
+  if (pack.delivery.sheet.spreadsheet_id) {
+    try {
+      const n = await appendPendingLeads(pack);
+      if (gigList.length) await appendRows(pack.delivery.sheet.spreadsheet_id, "Gigs", gigList.map((g) => gigSheetRow(g, day)));
+      sheet = `appended ${n} lead${n === 1 ? "" : "s"}${gigList.length ? ` + ${gigList.length} gig${gigList.length === 1 ? "" : "s"}` : ""}`;
+    } catch (e) {
+      sheet = `append failed (retried next run): ${String(e).slice(0, 160)}`;
+    }
+  }
+  return { status: "sent", email, score, sheet, ...counts };
 }

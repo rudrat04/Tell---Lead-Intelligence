@@ -164,3 +164,30 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 
   return { subject: subjectFull, html, text };
 }
+
+/** The Sheet row for a delivered lead, in LEAD_COLUMNS order minus ID (appended when the delivery id exists). */
+export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string): string[] {
+  const a = l.account, s = l.score;
+  const company = a.name ?? a.domain;
+  return [
+    date,
+    contact?.person.name ?? "",
+    contact?.person.role ?? "",
+    contact?.person.linkedin ?? contact?.person.twitter ?? "",
+    company,
+    `https://${a.domain}`,
+    a.sizeBand ?? "",
+    a.segment ?? "",
+    a.region ?? "",
+    s.plays.map((p) => p.title).join(" + "),
+    s.drivers.slice(0, 3).map((e) => `${describe(e)} (${e.url})`).join("\n"),
+    opener(contact, company, s.drivers[0]) ?? "",
+    s.plays[0]?.angle ?? "",
+    s.priority.toFixed(3),
+    "", "", "", "", // Label, Reason, Outcome, Notes: yours
+  ];
+}
+
+export function gigSheetRow(g: DigestGig, date: string): string[] {
+  return [date, g.title, g.company ?? "", g.employmentType ?? "", g.location ?? "", g.applyUrl ?? g.url, `${SOURCE_NAME[g.source] ?? g.source}: ${g.url}`, "", "", g.id];
+}

@@ -9,6 +9,9 @@ export interface Sender {
 }
 
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+/** Only files this app creates (the leads Sheet): no access to anything else in Drive. */
+export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+export const GOOGLE_SCOPES = [GMAIL_SEND_SCOPE, DRIVE_FILE_SCOPE];
 
 export async function googleAccessToken(env = process.env): Promise<string> {
   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GMAIL_REFRESH_TOKEN } = env;

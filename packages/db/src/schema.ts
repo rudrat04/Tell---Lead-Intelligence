@@ -214,6 +214,9 @@ export const deliveries = pgTable("deliveries", {
   deliveredAt: ts("delivered_at").notNull().defaultNow(),
   kind: text("kind").notNull(), // normal|fast|exploration|interleaved
   configVersion: text("config_version").notNull(),
+  /** the Google Sheet row written for this lead (kept so a failed append can be retried without resending) */
+  sheetRow: jsonb("sheet_row"),
+  sheetAppendedAt: ts("sheet_appended_at"),
 });
 
 export const labels = pgTable("labels", {
@@ -222,8 +225,10 @@ export const labels = pgTable("labels", {
   label: text("label"), // good|bad
   reason: text("reason"),
   outcome: text("outcome"), // contacted|replied|meeting|won
+  notes: text("notes"),
   createdAt: ts("created_at").notNull().defaultNow(),
-});
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("labels_delivery_uq").on(t.deliveryId)]);
 
 export const suppressionList = pgTable("suppression_list", {
   hashedEmail: text("hashed_email"),

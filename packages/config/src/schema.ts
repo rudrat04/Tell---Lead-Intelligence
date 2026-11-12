@@ -165,6 +165,8 @@ export const DeliverySchema = z.object({
     send_hour_local: z.number().int().min(0).max(23).default(9),
   }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9 }),
   redeliver_after_days: z.number().int().min(1).default(90),
+  /** Google Sheet for leads + your labels (created by `pnpm sheet:setup`; private: it holds lead names) */
+  sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),
 });
 
 export const PackSchema = z.object({

@@ -57,6 +57,13 @@
       "when": 1794496223962,
       "tag": "0007_gigs",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794514432405,
+      "tag": "0008_sheet_labels",
+      "breakpoints": true
     }
   ]
 }
