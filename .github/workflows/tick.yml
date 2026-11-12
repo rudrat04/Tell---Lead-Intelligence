@@ -4,6 +4,8 @@ name: Tick (30 min)
 # Stand-in for the Trigger.dev schedule while Trigger.dev deployments are blocked for this org.
 # The repo is public, so this log is public: scripts/tick.ts prints counts only.
 on:
+  # Primary trigger: the Cloudflare scheduler Worker (infra/scheduler) dispatches this every 30 min.
+  # GitHub's own cron stays as a backup.
   schedule:
     - cron: "7,37 * * * *" # off the :00/:30 rush, when GitHub delays scheduled runs most
   workflow_dispatch:
@@ -44,3 +46,13 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
           TICK_MAX_PER_SOURCE: ${{ inputs.max_per_source }}
+
+      # Optional dead-man's switch for the 30-minute tick (add the secret once the external scheduler is live)
+      - name: Dead-man's switch ping
+        if: always()
+        env:
+          HC_URL: ${{ secrets.HEALTHCHECK_TICK_URL }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          if [ -z "$HC_URL" ]; then exit 0; fi
+          if [ "$OUTCOME" = "success" ]; then curl -fsS -m 10 --retry 3 "$HC_URL" >/dev/null; else curl -fsS -m 10 --retry 3 "$HC_URL/fail" >/dev/null; fi

@@ -5,6 +5,20 @@
 import "dotenv/config";
 import { loadPack } from "@tell/config";
 import { runScheduledTick } from "@tell/pipeline";
+import { getDb, runs, sql } from "@tell/db";
+
+// --if-stale-minutes N: only run when no tick has run in the last N minutes (the daily chain's fallback,
+// so it never overlaps a regular tick and processes the same items twice).
+const i = process.argv.indexOf("--if-stale-minutes");
+if (i > 0) {
+  const minutes = Number(process.argv[i + 1] ?? 120);
+  const [row] = await getDb().select({ last: sql<Date | null>`max(${runs.startedAt})` }).from(runs).where(sql`${runs.task} like 'tick:%'`);
+  const last = row?.last ? new Date(row.last) : null;
+  if (last && Date.now() - last.getTime() < minutes * 60_000) {
+    console.log(`tick skipped: last tick ${Math.round((Date.now() - last.getTime()) / 60_000)} min ago (< ${minutes})`);
+    process.exit(0);
+  }
+}
 
 const res = await runScheduledTick({
   pack: await loadPack(),

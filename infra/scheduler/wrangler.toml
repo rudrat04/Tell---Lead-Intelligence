@@ -1,0 +1,9 @@
+name = "tell-scheduler"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[triggers]
+crons = ["*/30 * * * *", "0 2 * * *", "15 22 * * 6"]
+
+[vars]
+GH_REPO = "rudrat04/Tell---Lead-Intelligence"
