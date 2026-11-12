@@ -59,6 +59,17 @@ describe("people-first digest", () => {
   });
 });
 
+describe("freelance gigs section", () => {
+  it("lists gigs with apply links and source attribution (Remote OK / Himalayas terms)", () => {
+    const gig = { id: "g1", source: "himalayas", title: "Fractional RevOps Lead", company: "Acme", url: "https://himalayas.app/companies/acme/jobs/x", applyUrl: "https://himalayas.app/companies/acme/jobs/x/apply", employmentType: "Contractor", location: "Worldwide", postedAt: null };
+    const e = renderDigest(result(1), pack, health, "2026-11-12", undefined, [gig]);
+    expect(e.subject).toContain("+ 1 gig");
+    expect(e.html).toContain('href="https://himalayas.app/companies/acme/jobs/x/apply"');
+    expect(e.html).toContain('via <a href="https://himalayas.app/companies/acme/jobs/x"');
+    expect(e.text).toContain("via Himalayas");
+  });
+});
+
 describe("MIME", () => {
   it("builds a multipart message with encoded non-ASCII headers", () => {
     const m = buildMime({ from: "a@x.com", fromName: "Lead digest", to: "b@y.com", subject: "Leads — today", html: "<b>hi</b>", text: "hi" }, "BOUND");

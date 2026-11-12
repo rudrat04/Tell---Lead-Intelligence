@@ -1,7 +1,7 @@
 name: Daily chain
 
 # One chain instead of separate crons that must line up (plan v3 section 14 "Daily").
-# migrations -> pack check -> partitions -> job-board diff -> scoring + digest (sent once per IST day).
+# migrations -> pack check -> partitions -> job-board diff -> gigs -> tick (fallback) -> scoring + digest (once per IST day).
 # Starts 07:30 IST so the digest lands before 09:00 even when GitHub delays scheduled runs.
 # Public repo: every script prints counts only.
 on:
@@ -55,6 +55,21 @@ jobs:
         run: pnpm boards:check
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Freelance gigs
+        continue-on-error: true
+        run: pnpm gigs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      # Fallback while GitHub's 30-minute schedule isn't firing: process HN once a day here too.
+      - name: Tick (fallback)
+        continue-on-error: true
+        run: pnpm tick
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
 
       - name: Score accounts and send digest
         run: pnpm digest

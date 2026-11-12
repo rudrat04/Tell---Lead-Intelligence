@@ -18,7 +18,8 @@
     "db:generate": "pnpm --filter @tell/db generate",
     "score": "tsx scripts/score.ts",
     "digest": "tsx scripts/digest.ts",
-    "gmail:auth": "tsx scripts/gmail-auth.ts"
+    "gmail:auth": "tsx scripts/gmail-auth.ts",
+    "gigs": "tsx scripts/gigs.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",

@@ -322,3 +322,29 @@ export const companySeeds = pgTable("company_seeds", {
   siteCheckedAt: ts("site_checked_at"),
   updatedAt: ts("updated_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.source, t.sourceId] })]);
+
+/** Freelance/contract gigs matching the offer (kept apart from account intent; each delivered once). */
+export const gigs = pgTable("gigs", {
+  id: id(),
+  source: text("source").notNull(), // remoteok | himalayas | yc
+  externalId: text("external_id").notNull(),
+  title: text("title").notNull(),
+  company: text("company"),
+  companyDomain: text("company_domain"),
+  /** the source's page for the gig (attribution link) */
+  url: text("url").notNull(),
+  /** where to apply (Himalayas terms: must be the API's applicationLink) */
+  applyUrl: text("apply_url"),
+  employmentType: text("employment_type"),
+  location: text("location"),
+  tags: jsonb("tags"),
+  /** normalised company + title, to collapse the same gig posted on several boards */
+  dedupeKey: text("dedupe_key").notNull(),
+  postedAt: ts("posted_at"),
+  expiresAt: ts("expires_at"),
+  firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+  deliveredAt: ts("delivered_at"),
+}, (t) => [
+  uniqueIndex("gigs_source_external_uq").on(t.source, t.externalId),
+  index("gigs_dedupe_idx").on(t.dedupeKey),
+]);

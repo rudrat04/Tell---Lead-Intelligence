@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
-import { runScoring, istDay, contactsFor, type ScoreRunResult } from "@tell/pipeline";
-import { getDb, runs, deliveries, jobBoards, usageDaily, eq, and, sql } from "@tell/db";
+import { runScoring, istDay, contactsFor, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
+import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, type DigestHealth, type DigestEmail } from "./render.js";
 import type { Sender } from "./gmail.js";
 
@@ -26,10 +26,11 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
     select count(*)::int as n, count(*) filter (where ${runs.status} <> 'ok')::int as errors
     from ${runs} where ${runs.task} like 'tick:%' and ${runs.startedAt} > ${since}`)).rows as { n: number; errors: number }[];
   const spend = await db.select({ used: usageDaily.used }).from(usageDaily).where(and(eq(usageDaily.day, istDay()), eq(usageDaily.service, "haiku")));
+  const [india] = (await db.execute(sql`select count(*)::int as n from ${accounts} where ${accounts.region} = 'India' and ${accounts.status} = 'active'`)).rows as { n: number }[];
   void pack;
   return {
     boardsTotal: b?.total ?? 0, boardsChecked24h: b?.checked ?? 0, boardsFailing: b?.failing ?? 0,
-    ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd,
+    ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd, indiaTracked: india?.n ?? 0,
   };
 }
 
@@ -54,7 +55,10 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
   const score = await runScoring({ pack, write: !opts.dryRun && !opts.test });
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, { write: !opts.dryRun });
-  const email = renderDigest(score, pack, await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1)), day, contacts);
+  const gigList = await gigsForDigest(pack);
+  const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
+  h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;
+  const email = renderDigest(score, pack, h, day, contacts, gigList);
   const counts = { leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   // no sender configured yet: scores are written, nothing is sent, the day stays open
@@ -85,5 +89,6 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     }))));
   }
   await db.batch(batch as unknown as Parameters<typeof db.batch>[0]);
+  await markGigsDelivered(gigList.map((g) => g.id), now);
   return { status: "sent", email, score, ...counts };
 }

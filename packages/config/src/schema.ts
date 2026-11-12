@@ -131,6 +131,28 @@ export const DomainsSchema = z.object({
   shorteners: z.array(z.string()).default([]),
 });
 
+/** Freelance / contract gigs that match the offer (a separate digest section; not account intent). */
+export const GigsSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** title or tags must match one of these (the work you sell) */
+  match_any: z.array(pattern).default([]),
+  /** titles that look similar but aren't your work */
+  exclude: z.array(pattern).default([]),
+  /** contract-ness: employment type, title or tags must match one of these */
+  contract_any: z.array(pattern).default(["(?i)\\b(contract(or)?|freelance|part[- ]time|temporary|fractional|consultant|project[- ]based)\\b"]),
+  /** location text that is open to you (empty/"worldwide" always passes) */
+  locations_allowed: z.array(pattern).default(["(?i)\\b(worldwide|anywhere|global)\\b"]),
+  max_age_days: z.number().int().min(1).default(14),
+  max_in_digest: z.number().int().min(0).default(8),
+  sources: z.object({
+    remoteok: z.boolean().default(true),
+    himalayas: z.boolean().default(true),
+    yc: z.boolean().default(true),
+    /** contract/freelance posts in HN "Who is hiring" */
+    hn_hiring_thread: z.boolean().default(true),
+  }).default({ remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true }),
+});
+
 export const DeliverySchema = z.object({
   digest: z.object({
     to: z.string().email().optional(),
@@ -153,6 +175,7 @@ export const PackSchema = z.object({
   sources: SourcesSchema,
   domains: DomainsSchema,
   delivery: DeliverySchema,
+  gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
 }).superRefine((p, ctx) => {
   for (const t of CODE_SIGNAL_TYPES) {
     if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["signals", "signals", t], message: `signal type "${t}" is emitted by the code and must be defined` });
@@ -168,4 +191,4 @@ export const PackSchema = z.object({
 });
 
 export type Pack = z.infer<typeof PackSchema>;
-export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery"] as const;
+export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs"] as const;

@@ -50,6 +50,13 @@
       "when": 1794495721638,
       "tag": "0006_people_profiles",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794496223962,
+      "tag": "0007_gigs",
+      "breakpoints": true
     }
   ]
 }

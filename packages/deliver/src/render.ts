@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import type { Evidence } from "@tell/intel";
-import type { ScoreRunResult } from "@tell/pipeline";
+import type { ScoreRunResult, DigestGig } from "@tell/pipeline";
 import { firstName, type Contact } from "@tell/people";
 
 /** Daily digest (plan section 10). "Why now" is written by code from cited evidence: free and deterministic. */
@@ -13,6 +13,9 @@ export interface DigestHealth {
   tickErrors24h: number;
   haikuTodayUsd: number;
   haikuCapUsd: number;
+  /** India coverage (eval requirement): tracked Indian accounts, and how many made today's leads */
+  indiaTracked?: number;
+  indiaInLeads?: number;
 }
 
 export interface DigestEmail { subject: string; html: string; text: string }
@@ -101,20 +104,30 @@ function leadText(l: Lead, i: number, contacts?: Contacts): string {
   ].filter(Boolean).join("\n");
 }
 
-export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts): DigestEmail {
+const SOURCE_NAME: Record<string, string> = { remoteok: "Remote OK", himalayas: "Himalayas", hn: "Hacker News", yc: "YC" };
+
+function gigHtml(g: DigestGig): string {
+  const meta = [g.company, g.employmentType, g.location].filter(Boolean).map((x) => esc(x!)).join(" · ");
+  const via = `via <a href="${esc(g.url)}" style="color:#6b7280">${esc(SOURCE_NAME[g.source] ?? g.source)}</a>`;
+  return `<li style="margin:6px 0"><a href="${esc(g.applyUrl ?? g.url)}" style="color:#111827;font-weight:600">${esc(g.title)}</a><div style="font-size:12px;color:#6b7280">${meta}${meta ? " · " : ""}${via}</div></li>`;
+}
+
+export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = []): DigestEmail {
   const leads = r.ranking.leads, watch = r.ranking.watchlist, people = r.personLeads;
   const named = (l: Lead) => { const c = contacts?.get(l.account.id); const co = l.account.name ?? l.account.domain; return c ? `${firstName(c.person.name)} at ${co}` : co; };
   const subject = leads.length
     ? `${leads.length} ${contacts ? (leads.length === 1 ? "person to contact" : "people to contact") : `lead${leads.length === 1 ? "" : "s"}`} for ${date}: ${leads.slice(0, 3).map(named).join(", ")}`
     : `No new leads for ${date}`;
+  const subjectFull = gigs.length ? `${subject} + ${gigs.length} gig${gigs.length === 1 ? "" : "s"}` : subject;
 
   const healthLines = [
     `Job boards checked in the last 24h: ${health.boardsChecked24h} of ${health.boardsTotal}${health.boardsFailing ? ` (${health.boardsFailing} failing)` : ""}`,
     `30-minute ticks in the last 24h: ${health.ticks24h}${health.tickErrors24h ? ` (${health.tickErrors24h} with errors)` : ""}${health.ticks24h < 40 ? " (expected about 48: check the schedule)" : ""}`,
     `Haiku spend today: $${health.haikuTodayUsd.toFixed(3)} of $${health.haikuCapUsd} cap`,
     `Accounts scored: ${r.scored} · held back (source outage): ${r.ranking.held.incomplete} · already sent recently: ${r.ranking.held.recentlyDelivered}`,
+    health.indiaTracked != null ? `India: ${health.indiaTracked} Indian companies tracked, ${health.indiaInLeads ?? 0} in today's leads` : "",
     `Config: ${r.configVersion}`,
-  ];
+  ].filter(Boolean);
 
   const watchHtml = watch.length
     ? `<h3 style="font-size:15px;margin:24px 0 4px">Watchlist</h3><ul style="margin:0 0 0 18px;padding:0;font-size:14px">${watch.map((w) =>
@@ -131,6 +144,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   <h2 style="font-size:20px;margin:4px 0 4px">${leads.length ? `${leads.length} ${leads.length === 1 ? "person" : "people"} to contact today` : "No leads today"}</h2>
   <div style="font-size:13px;color:#6b7280">Ranked by need now × ICP fit × timing. Month one: trust the order more than the percentages, and label what you see.</div>
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px">${leads.map((l, i) => leadHtml(l, i, contacts)).join("")}</table>
+  ${gigs.length ? `<h3 style="font-size:15px;margin:24px 0 4px">Freelance gigs (${gigs.length})</h3><ul style="margin:0 0 0 18px;padding:0;font-size:14px">${gigs.map(gigHtml).join("")}</ul>` : ""}
   ${watchHtml}${peopleHtml}
   <h3 style="font-size:15px;margin:24px 0 4px">Health</h3>
   <ul style="margin:0 0 0 18px;padding:0;font-size:13px;color:#374151">${healthLines.map((h) => `<li style="margin:2px 0">${esc(h)}</li>`).join("")}</ul>
@@ -141,11 +155,12 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     leads.length ? `TOP ${leads.length} LEADS` : "NO LEADS TODAY",
     "",
     ...leads.map((l, i) => leadText(l, i, contacts) + "\n"),
+    gigs.length ? `FREELANCE GIGS\n${gigs.map((g) => `- ${g.title}${g.company ? ` (${g.company})` : ""}: ${g.applyUrl ?? g.url} (via ${SOURCE_NAME[g.source] ?? g.source}: ${g.url})`).join("\n")}\n` : "",
     watch.length ? `WATCHLIST\n${watch.map((w) => `- ${w.account.name ?? w.account.domain} (${w.account.domain})`).join("\n")}\n` : "",
     people.length ? `PERSON LEADS\n${people.map((p) => `- ${p.platform}/${p.handle}: "${p.quote}" ${p.url}`).join("\n")}\n` : "",
     "HEALTH",
     ...healthLines.map((h) => `- ${h}`),
   ].join("\n");
 
-  return { subject, html, text };
+  return { subject: subjectFull, html, text };
 }

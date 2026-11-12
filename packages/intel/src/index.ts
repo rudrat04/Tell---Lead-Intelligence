@@ -4,3 +4,4 @@ export * from "./gate5.js";
 export * from "./jobs.js";
 export * from "./icp.js";
 export * from "./rank.js";
+export * from "./gigs.js";

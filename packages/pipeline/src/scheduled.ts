@@ -47,7 +47,7 @@ export function makeOnConfirmed(pack: Pack, leads: LeadStore, net: ResolverNet) 
     try {
       res = await resolveItem(item, x, lists, net);
     } catch {
-      const platform = item.sourceId === "hn" ? "hn" : "reddit";
+      const platform = item.sourceId.startsWith("hn") ? "hn" : "reddit";
       res = item.author ? { kind: "person", platform, handle: item.author, reason: "resolution failed" } : { kind: "unresolved", reason: "resolution failed" };
     }
     return recordConfirmed(item, x, res, specs, leads);

@@ -1,0 +1,10 @@
+# Freelance / contract gigs that match the offer (separate digest section).
+enabled: true
+match_any:
+  - "(?i)\\b(hubspot|salesforce|crm|rev ?ops|revenue operations|gtm|go[- ]to[- ]market)\\b"
+  - "(?i)\\b(outbound|cold email|clay|lead routing|marketing automation|zapier|n8n)\\b"
+exclude:
+  - "(?i)\\b(intern|internship|software engineer|backend|full[- ]stack|commission[- ]only|recruit(er|ing))\\b"
+locations_allowed:
+  - "(?i)\\b(worldwide|anywhere|global)\\b"
+max_age_days: 14

@@ -8,3 +8,4 @@ export * from "./policy.js";
 export * from "./robots.js";
 export * from "./board-links.js";
 export * from "./yc.js";
+export * from "./gigs.js";
