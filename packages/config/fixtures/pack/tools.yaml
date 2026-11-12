@@ -1,0 +1,29 @@
+# GTM tools detected from a company's homepage scripts and DNS TXT records.
+# Your own short list (not copied from GPL fingerprint sets): the tools your offer touches.
+sprawl_min: 4
+tools:
+  hubspot:     { label: HubSpot, category: crm, site: ["(?i)js\\.hs-scripts\\.com|js\\.hsforms\\.net|js\\.hs-analytics\\.net|js\\.hubspot\\.com"], dns: ["(?i)hubspot-developer-verification|include:[\\w.]*hubspotemail\\.net"] }
+  salesforce:  { label: Salesforce, category: crm, site: ["(?i)\\.force\\.com/|salesforceliveagent|\\.my\\.salesforce\\.com"], dns: ["(?i)include:_spf\\.salesforce\\.com|salesforce-domain-verification"] }
+  zoho:        { label: Zoho, category: crm, site: ["(?i)salesiq\\.zoho\\.(com|in)|zohopublic\\.(com|in)|forms\\.zohopublic"], dns: ["(?i)include:(zoho\\.(com|in|eu)|zcsend\\.net)|zoho-verification"] }
+  pipedrive:   { label: Pipedrive, category: crm, site: ["(?i)leadbooster-chat\\.pipedrive\\.com|webforms\\.pipedrive\\.com"], dns: [] }
+  pardot:      { label: Pardot, category: marketing_automation, site: ["(?i)pi\\.pardot\\.com|go\\.pardot\\.com"], dns: ["(?i)include:aspmx\\.pardot\\.com"] }
+  marketo:     { label: Marketo, category: marketing_automation, site: ["(?i)munchkin\\.marketo\\.net|mktoForms2|marketo\\.com/js"], dns: ["(?i)include:mktomail\\.com"] }
+  mailchimp:   { label: Mailchimp, category: email, site: ["(?i)chimpstatic\\.com|list-manage\\.com"], dns: ["(?i)include:servers\\.mcsv\\.net"] }
+  sendgrid:    { label: SendGrid, category: email, site: [], dns: ["(?i)include:sendgrid\\.net"] }
+  customerio:  { label: Customer.io, category: email, site: ["(?i)assets\\.customer\\.io|track\\.customer\\.io"], dns: ["(?i)include:[\\w.]*customeriomail\\.com"] }
+  klaviyo:     { label: Klaviyo, category: email, site: ["(?i)static\\.klaviyo\\.com|klaviyo\\.js"], dns: ["(?i)include:[\\w.]*klaviyo"] }
+  intercom:    { label: Intercom, category: chat, site: ["(?i)widget\\.intercom\\.io|js\\.intercomcdn\\.com"], dns: ["(?i)include:[\\w.]*intercom(mail)?\\.(io|com)"] }
+  drift:       { label: Drift, category: chat, site: ["(?i)js\\.driftt\\.com|drift\\.com/include"], dns: [] }
+  qualified:   { label: Qualified, category: chat, site: ["(?i)js\\.qualified\\.com"], dns: [] }
+  chilipiper:  { label: Chili Piper, category: routing, site: ["(?i)js\\.chilipiper\\.com"], dns: [] }
+  calendly:    { label: Calendly, category: scheduling, site: ["(?i)assets\\.calendly\\.com"], dns: [] }
+  segment:     { label: Segment, category: data, site: ["(?i)cdn\\.segment\\.com|cdn\\.segment\\.io"], dns: [] }
+  clearbit:    { label: Clearbit, category: enrichment, site: ["(?i)tag\\.clearbitscripts\\.com|x\\.clearbitjs\\.com"], dns: [] }
+  apollo:      { label: Apollo, category: outbound, site: ["(?i)assets\\.apollo\\.io/micro/website-tracker"], dns: ["(?i)apollo"] }
+  sixsense:    { label: 6sense, category: intent, site: ["(?i)j\\.6sc\\.co"], dns: [] }
+  zoominfo:    { label: ZoomInfo, category: intent, site: ["(?i)ws\\.zoominfo\\.com|js\\.zi-scripts\\.com"], dns: [] }
+  rb2b:        { label: RB2B, category: intent, site: ["(?i)rb2b\\.com|reb2b\\.js"], dns: [] }
+  leadfeeder:  { label: Leadfeeder, category: intent, site: ["(?i)sc\\.lfeeder\\.com|lftracker"], dns: [] }
+  linkedin_ads: { label: LinkedIn Ads, category: ads, site: ["(?i)snap\\.licdn\\.com"], dns: [] }
+  google_ads:  { label: Google Ads, category: ads, site: ["(?i)googleadservices\\.com|gtag\\([\\s'\"]*config[\\s'\",]*AW-"], dns: [] }
+  meta_ads:    { label: Meta Ads, category: ads, site: ["(?i)connect\\.facebook\\.net/[\\w_]+/fbevents\\.js"], dns: [] }

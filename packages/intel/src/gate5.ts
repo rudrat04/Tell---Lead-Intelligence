@@ -13,9 +13,10 @@ export interface ConfirmedSignal {
 
 const DAY = 86_400_000;
 
-export function corroborated(candidate: ConfirmedSignal, others: ConfirmedSignal[], windowDays = 30): boolean {
+/** `needs`: which classes require corroboration (pack signals.eligibility.corroborate; default trigger + pain). */
+export function corroborated(candidate: ConfirmedSignal, others: ConfirmedSignal[], windowDays = 30, needs: readonly string[] = ["trigger", "pain"]): boolean {
   if (candidate.class === "explicit" || candidate.class === "implicit" || candidate.fastLane) return true;
-  if (candidate.class !== "trigger" && candidate.class !== "pain") return true; // negatives always recorded
+  if (!needs.includes(candidate.class)) return true; // negatives always recorded; classes the pack trusts alone
   const near = others.filter(
     (o) => o.clusterId !== candidate.clusterId && Math.abs(o.observedAt.getTime() - candidate.observedAt.getTime()) <= windowDays * DAY,
   );

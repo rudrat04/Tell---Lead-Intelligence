@@ -1,4 +1,4 @@
-name: Job boards discovery
+name: Weekly discovery + account watch
 
 # Weekly: YC companies -> ICP hard filters -> accounts + job boards.
 # The daily board diff runs inside daily.yml. Public repo: the script prints counts only.
@@ -33,5 +33,28 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm boards:discover
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  # Weekly non-hiring signals: funding/launches (YC pages), website changes, GTM tools (site + DNS).
+  watch:
+    needs: discover
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TELL_PACK_R2_PREFIX: ${{ vars.TELL_PACK_R2_PREFIX }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm watch
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

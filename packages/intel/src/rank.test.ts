@@ -124,3 +124,28 @@ describe("fixes from the first live ranking", () => {
     expect(buildEvidence([job("Founding GTM Recruiter", 5)], [], pack, roles, now)).toEqual([]);
   });
 });
+
+describe("non-hiring signals: eligibility and absent conditions", () => {
+  const lenient = { ...pack, signals: { ...pack.signals, eligibility: { alone: ["explicit", "implicit", "pain"] as ("explicit" | "implicit" | "pain" | "trigger")[], triggers_needed: 2, corroborate: ["trigger"] as ("trigger" | "pain")[], fresh_days: 30 } } };
+  const scoreWith = (p: typeof pack, jobs: JobRow[], signals: SignalRow[] = []) => scoreAccount(buildEvidence(jobs, signals, p, roles, now), facts, p);
+  it("one trigger alone is not enough; two independent fresh triggers are", () => {
+    expect(score([], [sig("funding_raise", 5)]).eligible).toBe(false);
+    expect(score([], [sig("funding_raise", 5), sig("cta_sales_led", 3)]).eligible).toBe(true);
+    expect(score([], [sig("funding_raise", 5), sig("cta_sales_led", 3)]).intent).toBeGreaterThan(pack.signals.base_rate);
+  });
+  it("a tool signal (implicit) is eligible alone", () => {
+    expect(score([], [sig("gtm_tool_added", 4)]).eligible).toBe(true);
+  });
+  it("pain counts alone only when the pack says so", () => {
+    expect(score([], [sig("pain_post", 2)]).eligible).toBe(false);
+    expect(scoreWith(lenient, [], [sig("pain_post", 2)]).eligible).toBe(true);
+  });
+  it("stale signals don't make an account eligible", () => {
+    expect(score([], [sig("gtm_tool_added", 60)]).eligible).toBe(false);
+  });
+  it("absent: 'tool sprawl, no owner' fires only without an open core role", () => {
+    expect(score([], [sig("stack_sprawl", 3)]).plays.map((p) => p.id)).toContain("stack_chaos");
+    expect(score([job("RevOps Manager", 10)], [sig("stack_sprawl", 3)]).plays.map((p) => p.id)).not.toContain("stack_chaos");
+  });
+});
+

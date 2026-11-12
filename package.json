@@ -22,7 +22,8 @@
     "gigs": "tsx scripts/gigs.ts",
     "sheet:setup": "tsx scripts/sheet.ts setup",
     "sheet:sync": "tsx scripts/sheet.ts sync",
-    "google:auth": "tsx scripts/gmail-auth.ts"
+    "google:auth": "tsx scripts/gmail-auth.ts",
+    "watch": "tsx scripts/watch.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",

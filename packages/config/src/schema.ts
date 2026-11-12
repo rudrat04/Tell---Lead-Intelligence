@@ -64,6 +64,8 @@ export const IcpSchema = z.object({
 export const CODE_SIGNAL_TYPES = [
   "explicit_hire_request", "pain_post", // posts (Gate 3)
   "contract_role", "first_role", "core_role_open", "adjacent_role_open", "core_role_open_45d", "core_role_filled", // job boards
+  "funding_raise", "product_launch", // YC company pages (news, launches)
+  "cta_sales_led", "pricing_page_added", "gtm_tool_added", "stack_sprawl", // website + DNS watch
 ] as const;
 
 export const SignalsSchema = z.object({
@@ -85,6 +87,17 @@ export const SignalsSchema = z.object({
     required_any: z.array(pattern).default([]),
     never: z.array(pattern).default([]),
   }),
+  /**
+   * When an account may be delivered. One fresh signal of a class in `alone` is enough; otherwise it needs
+   * `triggers_needed` independent fresh trigger events. Classes in `corroborate` must be backed by another signal
+   * (Gate 5) before they count at all.
+   */
+  eligibility: z.object({
+    alone: z.array(z.enum(["explicit", "implicit", "pain", "trigger"])).default(["explicit", "implicit"]),
+    triggers_needed: z.number().int().min(1).default(2),
+    corroborate: z.array(z.enum(["trigger", "pain"])).default(["trigger", "pain"]),
+    fresh_days: z.number().int().min(1).default(30),
+  }).default({ alone: ["explicit", "implicit"], triggers_needed: 2, corroborate: ["trigger", "pain"], fresh_days: 30 }),
 });
 
 export const PlaysSchema = z.object({
@@ -92,6 +105,8 @@ export const PlaysSchema = z.object({
     title: z.string(),
     /** all of these signal types within window_days */
     requires: z.array(z.string()).min(1),
+    /** and none of these (current or within the window), e.g. "no RevOps hire yet" */
+    absent: z.array(z.string()).default([]),
     window_days: z.number().int().min(1),
     angle: z.string(),
   })),
@@ -131,6 +146,20 @@ export const DomainsSchema = z.object({
   never_company: z.array(z.string()).default([]),
   free_mail: z.array(z.string()).default([]),
   shorteners: z.array(z.string()).default([]),
+});
+
+/** GTM tools detected on a company's website scripts or DNS records (your own short list: what your offer touches). */
+export const ToolsSchema = z.object({
+  /** this many detected GTM tools = stack sprawl */
+  sprawl_min: z.number().int().min(2).default(4),
+  tools: z.record(z.string().regex(/^[a-z0-9_]+$/), z.object({
+    label: z.string(),
+    category: z.string(),
+    /** matched against script/link URLs and inline script text on the homepage */
+    site: z.array(pattern).default([]),
+    /** matched against TXT records (SPF includes, domain verification tokens) */
+    dns: z.array(pattern).default([]),
+  })).default({}),
 });
 
 /** Freelance / contract gigs that match the offer (a separate digest section; not account intent). */
@@ -179,12 +208,16 @@ export const PackSchema = z.object({
   sources: SourcesSchema,
   domains: DomainsSchema,
   delivery: DeliverySchema,
+  tools: ToolsSchema.default({ sprawl_min: 4, tools: {} }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
 }).superRefine((p, ctx) => {
   for (const t of CODE_SIGNAL_TYPES) {
     if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["signals", "signals", t], message: `signal type "${t}" is emitted by the code and must be defined` });
   }
   for (const [name, play] of Object.entries(p.plays.plays)) {
+    for (const r of play.absent) {
+      if (!p.signals.signals[r]) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "absent"], message: `unknown signal type "${r}"` });
+    }
     for (const r of play.requires) {
       if (!p.signals.signals[r]) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "requires"], message: `unknown signal type "${r}"` });
     }
@@ -195,4 +228,4 @@ export const PackSchema = z.object({
 });
 
 export type Pack = z.infer<typeof PackSchema>;
-export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs"] as const;
+export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools"] as const;

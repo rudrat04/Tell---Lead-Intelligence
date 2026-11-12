@@ -35,6 +35,12 @@ export function describe(e: Evidence): string {
     case "adjacent_role_open": return `Hiring ${t}`;
     case "explicit_hire_request": return `Asked for help: ${t}`;
     case "pain_post": return `Pain in public: ${t}`;
+    case "funding_raise": return `Just raised: ${t}`;
+    case "product_launch": return e.quote;
+    case "cta_sales_led": return e.quote;
+    case "pricing_page_added": return e.quote;
+    case "gtm_tool_added": return e.quote;
+    case "stack_sprawl": return `Tool sprawl: ${e.quote}`;
     default: return `${e.type}: ${t}`;
   }
 }
@@ -54,6 +60,12 @@ export function opener(c: Contact | null | undefined, company: string, e: Eviden
     adjacent_role_open: `saw ${company} is hiring ${t}`,
     explicit_hire_request: `saw your post asking for help: ${t}`,
     pain_post: `saw your post: ${t}`,
+    funding_raise: `congrats on the raise (${t})`,
+    product_launch: `saw ${company} just launched (${t.replace(/^"Launched: /, '"')})`,
+    cta_sales_led: `saw ${company} just switched its site to sales-led (${e.quote.replace(/^Homepage now says /, "")})`,
+    pricing_page_added: `saw ${company} just put pricing on the site`,
+    gtm_tool_added: `saw ${company} just ${e.quote.replace(/^Added /, "added ").replace(/ \((website|DNS record)\)$/, "")}`,
+    stack_sprawl: `noticed ${company} runs ${e.quote.replace(/:.*/, "")}`,
   }[e.type] ?? `saw ${company}: ${t}`;
   return c ? `Hi ${firstName(c.person.name)}, ${phrase}.` : `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}.`;
 }

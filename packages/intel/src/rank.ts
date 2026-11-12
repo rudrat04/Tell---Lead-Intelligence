@@ -115,10 +115,15 @@ export function softFit(a: AccountFacts, icp: Pack["icp"]): number {
 
 export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[] }
 
-/** A play fires when every required signal type is present within its window (current evidence always is). */
+/**
+ * A play fires when every required signal type is present within its window (current evidence always is) and none
+ * of its `absent` types is (e.g. "just raised" + no RevOps role open).
+ */
 export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayMatch[] {
   const out: PlayMatch[] = [];
   for (const [id, p] of Object.entries(plays)) {
+    const inWindow = (e: Evidence) => e.current || e.ageDays <= p.window_days;
+    if ((p.absent ?? []).some((t) => ev.some((e) => e.type === t && inWindow(e)))) continue;
     const used: Evidence[] = [];
     const ok = p.requires.every((t) => {
       const hit = ev.filter((e) => e.type === t && (e.current || e.ageDays <= p.window_days)).sort((a, b) => a.ageDays - b.ageDays)[0];
@@ -149,12 +154,13 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const specs = pack.signals.signals;
   const cap = pack.signals.max_events_per_type;
 
-  // Gate 5: trigger/pain evidence needs corroboration
+  // Gate 5: classes listed in eligibility.corroborate need another signal behind them
   const asConfirmed = (e: Evidence, i: number): ConfirmedSignal => ({
     class: e.class as ConfirmedSignal["class"], type: e.type, observedAt: new Date(Date.now() - e.ageDays * DAY), fastLane: specs[e.type]?.fast_lane, clusterId: `${i}`,
   });
   const confirmed = ev.map(asConfirmed);
-  const usable = ev.filter((e, i) => corroborated(confirmed[i]!, confirmed.filter((_, k) => k !== i)));
+  const elig = pack.signals.eligibility;
+  const usable = ev.filter((e, i) => corroborated(confirmed[i]!, confirmed.filter((_, k) => k !== i), 30, elig.corroborate));
 
   // at most `cap` events per type (a hiring spree of 10 SDRs is one story, not ten)
   const perType = new Map<string, Evidence[]>();
@@ -175,7 +181,9 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const plays = matchPlays(counted, pack.plays.plays);
   // fast lane = one strong, fresh signal is enough to deliver (plan 8d-2); stale "strong" signals aren't urgent
   const fast = counted.some((e) => (specs[e.type]?.fast_lane || specs[e.type]?.strength === 5) && e.ageDays <= FAST_LANE_MAX_AGE_DAYS);
-  const eligible = counted.some((e) => (e.class === "explicit" || e.class === "implicit") && (e.current || e.ageDays <= 30));
+  // eligible: one fresh signal of a class the pack trusts alone, or enough independent fresh triggers
+  const fresh = counted.filter((e) => e.class !== "negative" && (e.current || e.ageDays <= elig.fresh_days));
+  const eligible = fresh.some((e) => (elig.alone as string[]).includes(e.class)) || fresh.filter((e) => e.class === "trigger").length >= elig.triggers_needed;
   const drivers = [...positives].sort((a, b) => Math.log(specs[b.type]!.lr) * 0.5 ** (b.ageDays / specs[b.type]!.half_life_days) - Math.log(specs[a.type]!.lr) * 0.5 ** (a.ageDays / specs[a.type]!.half_life_days));
 
   return { intent, fit, timing, priority: intent * fit * timing, lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers };

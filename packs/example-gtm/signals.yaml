@@ -13,11 +13,15 @@ signals:
   adjacent_role_open:    { class: implicit, lr: 2,  half_life_days: 30, strength: 3 }
   core_role_filled:      { class: negative, lr: 0.2, half_life_days: 90, strength: 3 }
   # not emitted yet (future sources)
-  new_gtm_tool:          { class: implicit, lr: 2.5, half_life_days: 45 }
   lookalike_domain_owned: { class: implicit, lr: 4, half_life_days: 45 }
-  funding_raise:         { class: trigger,  lr: 2,  half_life_days: 60 }
-  cta_book_demo:         { class: trigger,  lr: 2.5, half_life_days: 45 }
   ops_team_2plus:        { class: negative, lr: 0.15, half_life_days: 180 }
+  # company pages, website and DNS watch
+  funding_raise:         { class: trigger,  lr: 2.5, half_life_days: 60, strength: 3 }
+  product_launch:        { class: trigger,  lr: 2,   half_life_days: 45, strength: 3 }
+  cta_sales_led:         { class: trigger,  lr: 2.5, half_life_days: 45, strength: 3 }
+  pricing_page_added:    { class: trigger,  lr: 1.8, half_life_days: 45, strength: 3 }
+  gtm_tool_added:        { class: implicit, lr: 2.5, half_life_days: 45, strength: 3 }
+  stack_sprawl:          { class: implicit, lr: 2.5, half_life_days: 90, strength: 3, max_events: 1 }
 gate1:
   # a post must mention at least one of these to reach the LLM (free filter)
   required_any:

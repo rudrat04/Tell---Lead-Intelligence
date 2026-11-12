@@ -25,3 +25,14 @@ plays:
     requires: [funding_raise, first_role]
     window_days: 60
     angle: "Fresh funding plus a first GTM hire: build the system before the hire starts."
+  stack_chaos:
+    title: Tool sprawl, no owner
+    requires: [stack_sprawl]
+    absent: [core_role_open, core_role_open_45d]
+    window_days: 120
+    angle: "Several GTM tools and nobody to run them: offer an audit and consolidation."
+  sales_led_shift:
+    title: Switching to sales-led
+    requires: [cta_sales_led]
+    window_days: 60
+    angle: "Their site moved to 'Book a demo': set up CRM, routing and follow-up for the new motion."

@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { fetchYcCompanyProfile } from "@tell/watchers";
+import { fetchYcCompanyProfile, type YcCompanyProfile } from "@tell/watchers";
 import { applyPackIdentity } from "./scheduled.js";
 import { pickContact, type Contact, type Person } from "@tell/people";
 import { getDb, people, jobBoards, accounts, and, eq, inArray, sql } from "@tell/db";
@@ -41,15 +41,7 @@ export async function contactsFor(accountIds: string[], pack: Pack, opts: { writ
       const list = byAccount.get(a)?.filter((p) => p.source !== "yc") ?? [];
       for (const f of founders) list.push({ name: f.name, role: f.title, linkedin: f.linkedin, twitter: f.twitter, source: "yc", sourceUrl: prof.url });
       byAccount.set(a, list);
-      if (write && founders.length) {
-        await db.insert(people).values(founders.map((f) => ({
-          accountId: a, fullName: f.name, role: f.title, source: "yc", confidence: 0.95, sourceUrl: prof.url,
-          profileUrls: { linkedin: f.linkedin ?? undefined, twitter: f.twitter ?? undefined }, fetchedAt: new Date(),
-        }))).onConflictDoUpdate({
-          target: [people.accountId, people.fullName, people.source],
-          set: { role: sql`excluded.role`, profileUrls: sql`excluded.profile_urls`, sourceUrl: sql`excluded.source_url`, fetchedAt: sql`excluded.fetched_at` },
-        });
-      }
+      if (write) await saveYcFounders(a, prof);
     } catch {
       /* page unavailable: use what we already have */
     }
@@ -57,4 +49,18 @@ export async function contactsFor(accountIds: string[], pack: Pack, opts: { writ
 
   for (const id of accountIds) out.set(id, pickContact(byAccount.get(id) ?? [], pack.icp.personas, sizes.get(id) ?? null));
   return out;
+}
+
+/** Store a YC page's active founders as people (provenance: the YC page). Shared with the weekly account watch. */
+export async function saveYcFounders(accountId: string, prof: YcCompanyProfile): Promise<number> {
+  const founders = prof.founders.filter((f) => f.active);
+  if (!founders.length) return 0;
+  await getDb().insert(people).values(founders.map((f) => ({
+    accountId, fullName: f.name, role: f.title, source: "yc", confidence: 0.95, sourceUrl: prof.url,
+    profileUrls: { linkedin: f.linkedin ?? undefined, twitter: f.twitter ?? undefined }, fetchedAt: new Date(),
+  }))).onConflictDoUpdate({
+    target: [people.accountId, people.fullName, people.source],
+    set: { role: sql`excluded.role`, profileUrls: sql`excluded.profile_urls`, sourceUrl: sql`excluded.source_url`, fetchedAt: sql`excluded.fetched_at` },
+  });
+  return founders.length;
 }

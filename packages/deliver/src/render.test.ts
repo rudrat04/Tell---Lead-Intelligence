@@ -83,6 +83,16 @@ describe("sheet row", () => {
   });
 });
 
+describe("non-hiring signal wording", () => {
+  const c = { person: { name: "Riya S", role: "CEO", source: "yc" }, persona: "Founder / CEO", note: "" };
+  it.each([
+    [ev({ type: "funding_raise", quote: "Acme lands $3M seed" }), 'Hi Riya, congrats on the raise ("Acme lands $3M seed").'],
+    [ev({ type: "cta_sales_led", quote: 'Homepage now says "Book a demo" (was self-serve)' }), 'Hi Riya, saw Acme just switched its site to sales-led ("Book a demo" (was self-serve)).'],
+    [ev({ type: "gtm_tool_added", quote: "Added HubSpot (website)" }), "Hi Riya, saw Acme just added HubSpot."],
+    [ev({ type: "stack_sprawl", quote: "5 GTM tools: HubSpot, Intercom, Segment, Apollo, Calendly" }), "Hi Riya, noticed Acme runs 5 GTM tools."],
+  ])("%#", (e, want) => expect(opener(c, "Acme", e)).toBe(want));
+});
+
 describe("MIME", () => {
   it("builds a multipart message with encoded non-ASCII headers", () => {
     const m = buildMime({ from: "a@x.com", fromName: "Lead digest", to: "b@y.com", subject: "Leads — today", html: "<b>hi</b>", text: "hi" }, "BOUND");

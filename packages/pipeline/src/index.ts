@@ -6,3 +6,4 @@ export * from "./boards.js";
 export * from "./score.js";
 export * from "./contacts.js";
 export * from "./gigs.js";
+export * from "./watch.js";
