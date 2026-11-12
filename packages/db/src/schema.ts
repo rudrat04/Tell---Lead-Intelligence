@@ -272,3 +272,44 @@ export const usageDaily = pgTable("usage_daily", {
   used: real("used").notNull(),
   limit: real("limit").notNull(),
 }, (t) => [primaryKey({ columns: [t.day, t.service] })]);
+
+/** Job boards tracked per account (plan 5b careers watch). source: yc | greenhouse | lever | ashby */
+export const jobBoards = pgTable("job_boards", {
+  id: id(),
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  source: text("source").notNull(),
+  slug: text("slug").notNull(),
+  /** where ownership was proven: the company's own page that links the board, or the YC directory */
+  proofUrl: text("proof_url").notNull(),
+  status: text("status").notNull().default("active"), // active | dead
+  baselineDone: boolean("baseline_done").notNull().default(false),
+  failCount: integer("fail_count").notNull().default(0),
+  lastCheckedAt: ts("last_checked_at"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("job_boards_source_slug_uq").on(t.source, t.slug)]);
+
+/** GTM/ops roles seen on tracked boards; the daily diff of this table produces job signals. */
+export const jobs = pgTable("jobs", {
+  id: id(),
+  boardId: uuid("board_id").notNull().references(() => jobBoards.id),
+  externalId: text("external_id").notNull(),
+  title: text("title").notNull(),
+  url: text("url").notNull(),
+  employmentType: text("employment_type"),
+  family: text("family").notNull(), // ops | gtm
+  postedAt: ts("posted_at"),
+  firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
+  closedAt: ts("closed_at"),
+}, (t) => [uniqueIndex("jobs_board_external_uq").on(t.boardId, t.externalId)]);
+
+/** Companies evaluated against the ICP hard filters; tombstoned ones are never re-processed (plan 12). */
+export const companySeeds = pgTable("company_seeds", {
+  source: text("source").notNull(), // yc
+  sourceId: text("source_id").notNull(),
+  domain: text("domain"),
+  fitPass: boolean("fit_pass").notNull(),
+  reason: text("reason"),
+  siteCheckedAt: ts("site_checked_at"),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.source, t.sourceId] })]);

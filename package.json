@@ -10,7 +10,9 @@
     "test": "vitest run",
     "db:generate": "pnpm --filter @tell/db generate",
     "smoke": "tsx scripts/smoke-tick.ts",
-    "tick": "tsx scripts/tick.ts"
+    "tick": "tsx scripts/tick.ts",
+    "boards:discover": "tsx scripts/discover-boards.ts",
+    "boards:check": "tsx scripts/check-boards.ts"
   },
   "devDependencies": {
     "@tell/extract": "workspace:*",

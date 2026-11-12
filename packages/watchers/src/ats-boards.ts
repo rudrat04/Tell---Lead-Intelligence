@@ -1,5 +1,6 @@
 import { getJson } from "./http.js";
 import { RawItemSchema, type RawItem } from "./types.js";
+import type { JobPosting } from "./yc.js";
 
 export type Ats = "greenhouse" | "lever" | "ashby";
 export interface TrackedBoard { ats: Ats; slug: string; domain: string }
@@ -9,6 +10,20 @@ const GTM_TITLE = /(revops|revenue operations|marketing ops|sales ops|gtm|growth
 interface GhJob { id: number; title: string; absolute_url: string; updated_at: string; content?: string; location?: { name: string } }
 interface LeverJob { id: string; text: string; hostedUrl: string; createdAt: number; descriptionPlain?: string; categories?: { location?: string; commitment?: string } }
 interface AshbyResp { jobs: { id: string; title: string; jobUrl: string; publishedAt: string; descriptionPlain?: string; employmentType?: string }[] }
+
+/** All open roles on a public ATS board, normalised (titles only; no descriptions). Throws if the board can't be read. */
+export async function fetchBoardPostings(ats: Ats, slug: string): Promise<JobPosting[]> {
+  if (ats === "greenhouse") {
+    const d = await getJson<{ jobs: (GhJob & { first_published?: string })[] }>(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`);
+    return d.jobs.map((j) => ({ externalId: String(j.id), title: j.title, url: j.absolute_url, postedAt: j.first_published ? new Date(j.first_published) : undefined }));
+  }
+  if (ats === "lever") {
+    const d = await getJson<LeverJob[]>(`https://api.lever.co/v0/postings/${slug}?mode=json`);
+    return d.map((j) => ({ externalId: j.id, title: j.text, url: j.hostedUrl, employmentType: j.categories?.commitment, postedAt: new Date(j.createdAt) }));
+  }
+  const d = await getJson<AshbyResp>(`https://api.ashbyhq.com/posting-api/job-board/${slug}`);
+  return d.jobs.map((j) => ({ externalId: j.id, title: j.title, url: j.jobUrl, employmentType: j.employmentType, postedAt: j.publishedAt ? new Date(j.publishedAt) : undefined }));
+}
 
 /** Fetch GTM-relevant open roles from one company's public ATS board. */
 export async function fetchBoard(b: TrackedBoard): Promise<RawItem[]> {
