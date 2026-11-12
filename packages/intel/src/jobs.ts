@@ -89,7 +89,7 @@ export function diffBoard(open: OpenJobRow[], fetched: FetchedJob[], now: Date, 
 
   if (baselineDone) {
     for (const f of insert) {
-      const type = f.cls.contract ? "contract_role" : f.cls.founding ? "first_role" : f.cls.family === "core" ? "core_role_open" : "adjacent_role_open";
+      const type = f.cls.contract && f.cls.family === "core" ? "contract_role" : f.cls.founding ? "first_role" : f.cls.family === "core" ? "core_role_open" : "adjacent_role_open";
       signals.push({ type, quote: f.title, url: f.url, observedAt: f.postedAt && f.postedAt < now ? f.postedAt : now });
     }
   }

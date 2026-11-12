@@ -11,3 +11,4 @@ adjacent:
 exclude:
   - "(?i)\\b(sales engineer|solutions engineer|engineering manager|software engineer|data engineer)\\b"
   - "(?i)\\b(intern|internship|working student|apprentice)\\b"
+  - "(?i)\\b(recruit(er|ing)|talent|people (ops|operations|partner)|hr (manager|generalist|business partner))\\b"

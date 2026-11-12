@@ -68,6 +68,8 @@ export const SignalsSchema = z.object({
   base_rate: z.number().gt(0).lt(1),
   /** minimum Gate 3 strength for a post to count as a signal */
   min_post_strength: z.number().int().min(1).max(5).default(3),
+  /** at most this many events of one type count toward intent (a hiring spree is one story) */
+  max_events_per_type: z.number().int().min(1).default(3),
   signals: z.record(z.string(), z.object({
     class: z.enum(["explicit", "implicit", "trigger", "pain", "negative"]),
     lr: z.number().gt(0),

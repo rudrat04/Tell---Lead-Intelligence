@@ -1,7 +1,7 @@
 name: Daily chain
 
 # One chain instead of separate crons that must line up (plan v3 section 14 "Daily").
-# partitions -> job-board diff -> (scoring) -> (digest). Scoring and digest steps are added in later phases.
+# migrations -> pack check -> partitions -> job-board diff -> scoring -> (digest, next phase).
 # Starts 07:30 IST so the digest lands before 09:00 even when GitHub delays scheduled runs.
 # Public repo: every script prints counts only.
 on:
@@ -53,6 +53,11 @@ jobs:
         id: boards
         continue-on-error: true # a board outage must not stop scoring/digest; the digest reports it
         run: pnpm boards:check
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Score accounts
+        run: pnpm score
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 

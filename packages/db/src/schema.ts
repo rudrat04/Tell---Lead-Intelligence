@@ -135,8 +135,12 @@ export const playsMatched = pgTable("plays_matched", {
   accountId: uuid("account_id").notNull().references(() => accounts.id),
   playId: text("play_id").notNull(),
   evidenceSignalIds: uuid("evidence_signal_ids").array().notNull(),
+  /** first time this play fired for this account (a play first matched after a delivery = new reason to re-deliver) */
   matchedAt: ts("matched_at").notNull().defaultNow(),
-});
+  lastMatchedAt: ts("last_matched_at").notNull().defaultNow(),
+  /** cited evidence: [{kind: job|signal, id, type, quote, url}] */
+  evidence: jsonb("evidence"),
+}, (t) => [uniqueIndex("plays_matched_account_play_uq").on(t.accountId, t.playId)]);
 
 export const scores = pgTable("scores", {
   id: uuid("id").notNull().defaultRandom(),
