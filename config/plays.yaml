@@ -1,0 +1,8 @@
+version: 1
+plays:
+  gtm_from_zero:        { requires: [funding_raise, first_gtm_role], window_days: 60 }
+  struggling_to_hire:   { requires: [ops_role_open_45d], window_days: 60 }
+  sales_led_shift:      { requires: [cta_book_demo, first_gtm_role], window_days: 45 }
+  stack_chaos:          { requires: [new_gtm_tool, pain_post], window_days: 90 }
+  explicit_ask:         { requires: [explicit_hire_request], window_days: 14 }
+  diy_outbound:         { requires: [lookalike_domain_owned], window_days: 60 }

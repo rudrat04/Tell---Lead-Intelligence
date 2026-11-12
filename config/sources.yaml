@@ -1,0 +1,4 @@
+version: 1
+sources:
+  hn:         { cadence: 30m, fallback: algolia }
+  ats-boards: { cadence: 1d }

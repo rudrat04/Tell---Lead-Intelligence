@@ -1,0 +1,18 @@
+version: 1
+base_rate: 0.02
+signals:
+  explicit_hire_request:   { class: explicit, lr: 12, half_life_days: 14, fast_lane: true }
+  contract_gtm_role:       { class: explicit, lr: 10, half_life_days: 21, fast_lane: true }
+  first_gtm_role:          { class: implicit, lr: 6,  half_life_days: 30 }
+  ops_role_open_45d:       { class: implicit, lr: 5,  half_life_days: 30 }
+  new_gtm_tool:            { class: implicit, lr: 2.5, half_life_days: 45 }
+  lookalike_domain_owned:  { class: implicit, lr: 4,  half_life_days: 45 }
+  funding_raise:           { class: trigger,  lr: 2,  half_life_days: 60 }
+  cta_book_demo:           { class: trigger,  lr: 2.5, half_life_days: 45 }
+  pain_post:               { class: pain,     lr: 3,  half_life_days: 21 }
+  ops_role_filled:         { class: negative, lr: 0.2, half_life_days: 90 }
+  ops_team_2plus:          { class: negative, lr: 0.15, half_life_days: 180 }
+never_patterns:
+  - "(?i)we are a (recruiting|staffing) (agency|firm)"
+  - "(?i)looking for (a )?job"
+  - "(?i)available for hire"
