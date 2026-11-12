@@ -25,3 +25,9 @@ export function sizeBand(teamSize: number | null, icp: IcpConfig): string | null
   if (teamSize == null) return null;
   return icp.size_bands.find((b) => teamSize <= b.max)?.band ?? null;
 }
+
+/** Map source industry labels to the pack's segment names (first match wins). */
+export function segmentFor(industries: string[], icp: IcpConfig): string | null {
+  for (const i of industries) if (icp.segment_map[i]) return icp.segment_map[i]!;
+  return null;
+}

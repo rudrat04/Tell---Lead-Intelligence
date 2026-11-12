@@ -3,7 +3,7 @@ import {
   fetchYcCompanies, fetchYcJobs, fetchBoardPostings, findBoardLinks, robotsAllows,
   userAgent, type YcCompany, type JobPosting, type Ats,
 } from "@tell/watchers";
-import { classifyJob, compileRoles, diffBoard, passesHardFilters, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
+import { classifyJob, compileRoles, diffBoard, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
 import { registrableDomain } from "@tell/people";
 import { applyPackIdentity } from "./scheduled.js";
 import { getDb, accounts, jobBoards, jobs, signals, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -69,10 +69,10 @@ export async function runDiscovery(opts: { pack: Pack; maxSiteChecks?: number; c
   const accountIds = new Map<string, string>();
   for (const part of chunk([...byDomain.values()], 300)) {
     const rows = await db.insert(accounts)
-      .values(part.map((e) => ({ domain: e.domain!, name: e.c.name, segment: "saas", sizeBand: sizeBand(e.c.team_size, icp), region: e.c.regions?.[0] ?? null })))
+      .values(part.map((e) => ({ domain: e.domain!, name: e.c.name, segment: segmentFor([e.c.industry, ...(e.c.industries ?? [])], icp), sizeBand: sizeBand(e.c.team_size, icp), region: e.c.regions?.[0] ?? null })))
       .onConflictDoUpdate({
         target: accounts.domain,
-        set: { name: sql`coalesce(${accounts.name}, excluded.name)`, segment: sql`coalesce(${accounts.segment}, excluded.segment)`, sizeBand: sql`excluded.size_band`, region: sql`coalesce(${accounts.region}, excluded.region)` },
+        set: { name: sql`coalesce(${accounts.name}, excluded.name)`, segment: sql`excluded.segment`, sizeBand: sql`excluded.size_band`, region: sql`coalesce(${accounts.region}, excluded.region)` },
       })
       .returning({ id: accounts.id, domain: accounts.domain });
     for (const r of rows) accountIds.set(r.domain, r.id);

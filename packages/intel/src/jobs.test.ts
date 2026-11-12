@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import { classifyJob as classify, compileRoles, diffBoard, type OpenJobRow, type FetchedJob } from "./jobs.js";
-import { passesHardFilters, sizeBand } from "./icp.js";
+import { passesHardFilters, sizeBand, segmentFor } from "./icp.js";
 
 const pack = await loadFixturePack();
 const roles = compileRoles(pack.roles);
@@ -81,6 +81,11 @@ describe("ICP hard filters", () => {
     [{ status: "Inactive" }, "status Inactive"],
     [{ domain: null }, "no domain"],
   ])("rejects %o", (patch, reason) => expect(passesHardFilters({ ...base, ...patch }, icp)).toEqual({ pass: false, reason }));
+  it("segments from industry labels; personas parsed", () => {
+    expect(segmentFor(["Fintech", "B2B"], icp)).toBe("b2b");
+    expect(segmentFor(["Healthcare"], icp)).toBeNull();
+    expect(pack.icp.personas[0]).toMatchObject({ title: "Founder / CEO", size_bands: ["2-10", "11-50"] });
+  });
   it("size bands", () => {
     expect(sizeBand(8, icp)).toBe("2-10");
     expect(sizeBand(40, icp)).toBe("11-50");

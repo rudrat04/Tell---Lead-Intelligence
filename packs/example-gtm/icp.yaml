@@ -8,8 +8,13 @@ size_bands:
   - { band: "2-10", max: 10 }
   - { band: "11-50", max: 50 }
   - { band: "51-150", max: 150 }
+segment_map:
+  B2B: b2b
+  Fintech: b2b
 soft_fit:
   weights: { size_band: 0.5, region: 0.3, segment: 0.2 }
+  segment: { b2b: 1.0 }
+  segment_default: 0.3
   size_band: { "2-10": 0.9, "11-50": 1.0, "51-150": 0.6 }
   region:
     "United States of America": 1.0
@@ -20,3 +25,12 @@ soft_fit:
     "India": 0.8
     "Remote": 0.8
   region_default: 0.5
+# Who to contact at a matching company, most preferred first (size_bands empty = any size)
+personas:
+  - title: Founder / CEO
+    patterns: ["(?i)\\b(founder|co-?founder|ceo)\\b"]
+    size_bands: ["2-10", "11-50"]
+  - title: Head of GTM / Revenue
+    patterns: ["(?i)\\b(head of (gtm|growth|revenue)|vp,? (of )?(sales|revenue)|chief revenue officer)\\b"]
+  - title: RevOps lead
+    patterns: ["(?i)\\b(rev ?ops|revenue operations|sales operations)\\b"]

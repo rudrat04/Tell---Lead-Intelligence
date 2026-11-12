@@ -37,13 +37,25 @@ export const IcpSchema = z.object({
     exclude_domains: z.array(z.string()).default([]),
   }),
   size_bands: z.array(z.object({ band: z.string(), max: z.number().int() })).min(1),
+  /** source industry label (e.g. YC "B2B", "Consumer") -> your segment name */
+  segment_map: z.record(z.string(), z.string()).default({ B2B: "b2b" }),
   /** soft fit (0..1 per factor, weights sum to 1) */
   soft_fit: z.object({
     weights: z.record(z.string(), z.number().min(0)),
     size_band: z.record(z.string(), z.number().min(0).max(1)).default({}),
     region: z.record(z.string(), z.number().min(0).max(1)).default({}),
     region_default: z.number().min(0).max(1).default(0.5),
+    segment: z.record(z.string(), z.number().min(0).max(1)).default({}),
+    segment_default: z.number().min(0).max(1).default(0.5),
   }),
+  /** who to contact at a matching company, in order of preference, by company size */
+  personas: z.array(z.object({
+    title: z.string(),
+    /** title patterns that count as this persona */
+    patterns: z.array(pattern).min(1),
+    /** company size bands where this persona is the right first contact (empty = any) */
+    size_bands: z.array(z.string()).default([]),
+  })).default([]),
 });
 
 /** Signal types the code emits; a pack must define each of them in signals.yaml. */
