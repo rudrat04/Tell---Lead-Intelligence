@@ -200,21 +200,24 @@ export async function runBoardCheck(opts: { configDir: string; maxBoards?: numbe
     }
     if (d.touch.length) stmts.push(db.update(jobs).set({ lastSeenAt: now }).where(inArray(jobs.id, d.touch)));
     if (d.close.length) stmts.push(db.update(jobs).set({ closedAt: now }).where(inArray(jobs.id, d.close)));
+    const signalStmt = stmts.length;
     if (d.signals.length) {
       stmts.push(db.insert(signals).values(d.signals.map((s) => ({
         accountId: b.accountId, class: specs[s.type]!.class, type: s.type, strength: JOB_STRENGTH[s.type] ?? 3,
         evidenceQuote: s.quote, evidenceUrl: s.url, observedAt: s.observedAt, halfLifeDays: specs[s.type]!.half_life_days,
-      }))).onConflictDoNothing({ target: [signals.evidenceUrl, signals.type] }));
+      }))).onConflictDoNothing({ target: [signals.evidenceUrl, signals.type] }).returning({ type: signals.type }));
     }
     stmts.push(db.update(jobBoards).set({ baselineDone: true, failCount: 0, lastCheckedAt: now }).where(eq(jobBoards.id, b.id)));
-    await db.batch(stmts as unknown as Parameters<typeof db.batch>[0]);
+    const results = (await db.batch(stmts as unknown as Parameters<typeof db.batch>[0])) as readonly unknown[];
+    // count only signals actually inserted (re-emitted 45-day drafts hit the unique key and are skipped)
+    const inserted = d.signals.length ? (results[signalStmt] as { type: string }[]) : [];
 
     res.checked++;
     if (!b.baselineDone) res.baselines++;
     if (d.suspect) res.suspect++;
     if (b.baselineDone) res.newRoles += d.insert.length;
     res.closedRoles += d.close.length;
-    for (const s of d.signals) res.signals[s.type] = (res.signals[s.type] ?? 0) + 1;
+    for (const s of inserted) res.signals[s.type] = (res.signals[s.type] ?? 0) + 1;
   }
 
   // YC pages share one host: one at a time (politeGet spaces them). ATS APIs are other hosts: separate lane.
