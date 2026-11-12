@@ -5,8 +5,10 @@ export type IcpConfig = Pack["icp"];
 export interface CompanyFacts {
   domain: string | null;
   teamSize: number | null;
+  /** empty = unknown */
   industries: string[];
-  status: string;
+  /** null = unknown */
+  status: string | null;
 }
 
 /** Hard ICP filters (plan 8d: fit = hard filters first). Unknown team size fails: nothing is assumed. */
@@ -14,9 +16,13 @@ export function passesHardFilters(c: CompanyFacts, icp: IcpConfig): { pass: bool
   const f = icp.hard_filters;
   if (!c.domain) return { pass: false, reason: "no domain" };
   if (f.exclude_domains.includes(c.domain)) return { pass: false, reason: "excluded domain" };
-  if (!f.statuses.includes(c.status)) return { pass: false, reason: `status ${c.status}` };
-  if (!c.industries.some((i) => f.industries_any.includes(i))) return { pass: false, reason: "industry" };
-  if (c.teamSize == null) return { pass: false, reason: "team size unknown" };
+  const unknownOk = f.unknown_facts === "pass";
+  if (c.status == null) { if (!unknownOk) return { pass: false, reason: "status unknown" }; }
+  else if (!f.statuses.includes(c.status)) return { pass: false, reason: `status ${c.status}` };
+  const knownIndustries = c.industries.filter((i) => i && i !== "Unspecified");
+  if (knownIndustries.length === 0) { if (!unknownOk) return { pass: false, reason: "industry unknown" }; }
+  else if (!knownIndustries.some((i) => f.industries_any.includes(i))) return { pass: false, reason: "industry" };
+  if (c.teamSize == null) return unknownOk ? { pass: true, reason: "ok (team size unknown: neutral fit)" } : { pass: false, reason: "team size unknown" };
   if (c.teamSize < f.team_size.min || c.teamSize > f.team_size.max) return { pass: false, reason: `team size ${c.teamSize}` };
   return { pass: true, reason: "ok" };
 }

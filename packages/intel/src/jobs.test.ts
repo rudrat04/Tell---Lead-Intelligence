@@ -82,10 +82,19 @@ describe("ICP hard filters", () => {
   it.each([
     [{ teamSize: 400 }, "team size 400"],
     [{ teamSize: null }, "team size unknown"],
+    [{ industries: [] }, "industry unknown"],
     [{ industries: ["Consumer"] }, "industry"],
     [{ status: "Inactive" }, "status Inactive"],
     [{ domain: null }, "no domain"],
   ])("rejects %o", (patch, reason) => expect(passesHardFilters({ ...base, ...patch }, icp)).toEqual({ pass: false, reason }));
+  it("unknown facts: rejected by default, admitted with unknown_facts: pass (known facts still checked)", () => {
+    const unknown = { domain: "acme.in", teamSize: null, industries: [], status: null };
+    expect(passesHardFilters(unknown, icp).pass).toBe(false);
+    const lenient = { ...icp, hard_filters: { ...icp.hard_filters, unknown_facts: "pass" as const } };
+    expect(passesHardFilters(unknown, lenient)).toEqual({ pass: true, reason: "ok (team size unknown: neutral fit)" });
+    expect(passesHardFilters({ ...unknown, teamSize: 900 }, lenient).pass).toBe(false);
+    expect(passesHardFilters({ ...unknown, industries: ["Healthcare"] }, lenient).pass).toBe(false);
+  });
   it("segments from industry labels; personas parsed", () => {
     expect(segmentFor(["Fintech", "B2B"], icp)).toBe("b2b");
     expect(segmentFor(["Healthcare"], icp)).toBeNull();

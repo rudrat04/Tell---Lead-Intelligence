@@ -35,6 +35,8 @@ export const IcpSchema = z.object({
     industries_any: z.array(z.string()).min(1),
     statuses: z.array(z.string()).min(1),
     exclude_domains: z.array(z.string()).default([]),
+    /** sources other than YC rarely give team size / industry / status: "pass" admits them with a neutral fit score */
+    unknown_facts: z.enum(["pass", "fail"]).default("fail"),
   }),
   size_bands: z.array(z.object({ band: z.string(), max: z.number().int() })).min(1),
   /** source industry label (e.g. YC "B2B", "Consumer") -> your segment name */
