@@ -69,6 +69,7 @@ export interface BoardDiff {
 }
 
 const DAY = 86_400_000;
+export const NEW_ROLE_MAX_AGE_DAYS = 14;
 
 /**
  * Daily diff of one board's core/adjacent roles.
@@ -88,7 +89,9 @@ export function diffBoard(open: OpenJobRow[], fetched: FetchedJob[], now: Date, 
   const signals: JobSignalDraft[] = [];
 
   if (baselineDone) {
-    for (const f of insert) {
+    // "new" means new to the world, not new to us: a role the board dates as older (e.g. it only matches now because
+    // the pack's role patterns changed) is recorded but not announced
+    for (const f of insert.filter((f) => !f.postedAt || now.getTime() - f.postedAt.getTime() <= NEW_ROLE_MAX_AGE_DAYS * DAY)) {
       const type = f.cls.contract && f.cls.family === "core" ? "contract_role" : f.cls.founding ? "first_role" : f.cls.family === "core" ? "core_role_open" : "adjacent_role_open";
       signals.push({ type, quote: f.title, url: f.url, observedAt: f.postedAt && f.postedAt < now ? f.postedAt : now });
     }

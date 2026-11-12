@@ -51,6 +51,11 @@ describe("diffBoard", () => {
     const d = diffBoard([], [fj("1", "RevOps Consultant", 1, "Contract"), fj("2", "Founding Account Executive", 1), fj("3", "Marketing Ops Manager", 1), fj("4", "SDR", 1)], now, true);
     expect(d.signals.map((s) => s.type)).toEqual(["contract_role", "first_role", "core_role_open", "adjacent_role_open"]);
   });
+  it("a newly matched but old role (e.g. after a pack change) is recorded, not announced as new", () => {
+    const d = diffBoard([], [fj("1", "SDR", 90), fj("2", "Founding Account Executive", 400), fj("3", "SDR II", 3), fj("4", "BDR")], now, true);
+    expect(d.insert).toHaveLength(4);
+    expect(d.signals.map((s) => s.url)).toEqual(["https://jobs.example/3", "https://jobs.example/4"]);
+  });
   it("roles still open are touched, not re-signalled", () => {
     const d = diffBoard([row("1", "SDR", 3, 3)], [fj("1", "SDR", 3)], now, true);
     expect(d).toMatchObject({ insert: [], touch: ["row-1"], close: [], signals: [] });
