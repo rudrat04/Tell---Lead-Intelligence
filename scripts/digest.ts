@@ -2,7 +2,7 @@
  * Daily digest: score, render, send (once per IST day).
  *   pnpm digest            score + send (counts only in the log: safe for public Actions logs)
  *   pnpm digest --dry      score without writing, save the email to digest-preview.html (local only)
- *   pnpm digest --test     send today's digest now even if one was already sent (local only)
+ *   pnpm digest --test     send today's digest now with a [TEST] subject; records nothing (local only)
  */
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ if ((dry || test) && process.env.CI) {
 }
 
 const gmailReady = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN);
-const r = await runDigest({ pack: await loadPack(), sender: gmailReady ? gmailSender : null, dryRun: dry, force: test });
+const r = await runDigest({ pack: await loadPack(), sender: gmailReady ? gmailSender : null, dryRun: dry, test });
 if (dry && r.email) {
   writeFileSync("digest-preview.html", r.email.html);
   console.log(`dry run: "${r.email.subject}" saved to digest-preview.html`);
