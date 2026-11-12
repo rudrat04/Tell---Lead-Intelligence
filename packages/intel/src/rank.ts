@@ -53,6 +53,13 @@ export interface Evidence {
 
 /** Signal types derived from job state; rows of these types in `signals` are not double-counted. */
 export const JOB_STATE_TYPES = new Set(["contract_role", "first_role", "core_role_open", "core_role_open_45d", "adjacent_role_open"]);
+/** Everything that comes from hiring (job state + the "filled" negative). */
+export const HIRING_TYPES = new Set([...JOB_STATE_TYPES, "core_role_filled"]);
+
+/** Does this account carry hiring evidence / a fresh non-hiring positive signal? */
+export const hasHiring = (s: { evidence: Evidence[] }) => s.evidence.some((e) => HIRING_TYPES.has(e.type));
+export const hasFreshNonHiring = (s: { drivers: Evidence[] }, freshDays: number) =>
+  s.drivers.some((e) => !HIRING_TYPES.has(e.type) && e.class !== "negative" && (e.current || e.ageDays <= freshDays));
 
 const normTitle = (t: string) => t.toLowerCase().replace(/\(.*?\)|\[.*?\]/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -199,7 +206,7 @@ export interface Ranking<A> { leads: RankInput<A>[]; watchlist: RankInput<A>[]; 
  * the combined score would bury them, but don't jump ahead of stronger leads. Never padded. Accounts with incomplete
  * evidence (a source outage) or delivered within the re-delivery window (unless a new play fired) are held back.
  */
-export function rankAccounts<A>(rows: RankInput<A>[], max: number, watchlistSize = 5): Ranking<A> {
+export function rankAccounts<A>(rows: RankInput<A>[], max: number, watchlistSize = 5, opts: { reserveNonHiring?: number; freshDays?: number } = {}): Ranking<A> {
   const held = { incomplete: 0, recentlyDelivered: 0 };
   const pool = rows.filter((r) => {
     if (!r.score.eligible) return false;
@@ -210,6 +217,14 @@ export function rankAccounts<A>(rows: RankInput<A>[], max: number, watchlistSize
   const byPriority = (a: RankInput<A>, b: RankInput<A>) => b.score.priority - a.score.priority;
   const sorted = [...pool].sort(byPriority);
   const guaranteed = sorted.filter((r) => r.score.lane === "fast").slice(0, Math.ceil(max / 2));
+  // reserved slots for non-hiring reasons: companies with no hiring evidence first, then mixed ones
+  const reserve = Math.min(opts.reserveNonHiring ?? 0, Math.max(0, max - guaranteed.length));
+  if (reserve > 0) {
+    const fresh = opts.freshDays ?? 30;
+    const candidates = sorted.filter((r) => !guaranteed.includes(r) && hasFreshNonHiring(r.score, fresh));
+    const pick = [...candidates.filter((r) => !hasHiring(r.score)), ...candidates.filter((r) => hasHiring(r.score))].slice(0, reserve);
+    guaranteed.push(...pick);
+  }
   const rest = sorted.filter((r) => !guaranteed.includes(r));
   const leads = [...guaranteed, ...rest.slice(0, Math.max(0, max - guaranteed.length))].sort(byPriority);
   const watchlist = sorted.filter((r) => !leads.includes(r)).slice(0, watchlistSize);

@@ -149,3 +149,25 @@ describe("non-hiring signals: eligibility and absent conditions", () => {
   });
 });
 
+describe("reserved slots for non-hiring leads", () => {
+  const mk = (name: string, sc: ReturnType<typeof score>) => ({ account: name, score: sc, incomplete: false, recentlyDelivered: false, newPlaySinceDelivery: false });
+  const rows = () => [
+    mk("hiring-1", score([job("RevOps Manager", 90)])),
+    mk("hiring-2", score([job("GTM Engineer", 90)])),
+    mk("funded+launched", score([], [sig("funding_raise", 5), sig("product_launch", 4)])),
+    mk("hiring+tool", score([job("SDR", 5)], [sig("gtm_tool_added", 3)])),
+  ];
+  it("without a reservation, hiring wins the slots", () => {
+    expect(rankAccounts(rows(), 2).leads.map((l) => l.account)).toEqual(["hiring-1", "hiring-2"]);
+  });
+  it("a reserved slot goes to a non-hiring-only company first", () => {
+    const r = rankAccounts(rows(), 2, 5, { reserveNonHiring: 1, freshDays: 30 });
+    expect(r.leads.map((l) => l.account).sort()).toEqual(["funded+launched", "hiring-1"]);
+  });
+  it("then to mixed companies with a fresh non-hiring signal; never more than the list", () => {
+    const r = rankAccounts(rows(), 3, 5, { reserveNonHiring: 5, freshDays: 30 });
+    expect(r.leads).toHaveLength(3);
+    expect(r.leads.map((l) => l.account)).toContain("hiring+tool");
+  });
+});
+

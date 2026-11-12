@@ -1,7 +1,8 @@
 import type { Pack } from "@tell/config";
 import type { Evidence } from "@tell/intel";
 import type { ScoreRunResult, DigestGig } from "@tell/pipeline";
-import { firstName, type Contact } from "@tell/people";
+import { firstName, personaSearchLinks, type Contact } from "@tell/people";
+import { hasHiring } from "@tell/intel";
 
 /** Daily digest (plan section 10). "Why now" is written by code from cited evidence: free and deterministic. */
 
@@ -70,12 +71,17 @@ export function opener(c: Contact | null | undefined, company: string, e: Eviden
   return c ? `Hi ${firstName(c.person.name)}, ${phrase}.` : `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}.`;
 }
 
+function alsoHtml(links: { persona: string; url: string }[]): string {
+  if (!links.length) return "";
+  return `<div style="font-size:12px;color:#6b7280;margin-top:4px">Also reach: ${links.map((x) => `<a href="${esc(x.url)}" style="color:#1a56db">${esc(x.persona)}</a>`).join(" · ")} <span style="color:#9ca3af">(LinkedIn search)</span></div>`;
+}
+
 function contactLinks(c: Contact): string {
   const links = [c.person.linkedin && `<a href="${esc(c.person.linkedin)}" style="color:#1a56db">LinkedIn</a>`, c.person.twitter && `<a href="${esc(c.person.twitter)}" style="color:#1a56db">X</a>`].filter(Boolean);
   return links.join(" · ");
 }
 
-function leadHtml(l: Lead, i: number, contacts?: Contacts): string {
+function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = []): string {
   const a = l.account, s = l.score;
   const play = s.plays[0];
   const c = contacts?.get(a.id);
@@ -92,15 +98,16 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts): string {
   return `
 <tr><td style="padding:16px 0;border-top:1px solid #e5e7eb">
   ${who}
+  ${alsoHtml(personaSearchLinks(personas, a.sizeBand, company, c ?? null))}
   ${open ? `<div style="margin-top:8px;padding:8px 12px;background:#f3f4f6;border-left:3px solid #6366f1;font-size:14px">${esc(open)}</div>` : ""}
-  ${plays ? `<div style="margin-top:4px;font-size:13px"><span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px">${plays}</span>${s.lane === "fast" ? ` <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px">single-source</span>` : ""}</div>` : ""}
+  ${plays || !hasHiring(s) ? `<div style="margin-top:4px;font-size:13px">${plays ? `<span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px">${plays}</span>` : ""}${!hasHiring(s) ? ` <span style="background:#ecfdf5;color:#065f46;padding:2px 8px;border-radius:10px">non-hiring signal</span>` : ""}${s.lane === "fast" ? ` <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px">single-source</span>` : ""}</div>` : ""}
   <ul style="margin:8px 0 0 18px;padding:0;font-size:14px;color:#111827">${why}</ul>
   ${play ? `<div style="margin-top:8px;font-size:14px;color:#374151"><b>Angle:</b> ${esc(play.angle)}</div>` : ""}
   <div style="margin-top:6px;font-size:12px;color:#9ca3af">priority ${s.priority.toFixed(2)} · intent ${pct(s.intent)} · fit ${pct(s.fit)} · timing ${pct(s.timing)}</div>
 </td></tr>`;
 }
 
-function leadText(l: Lead, i: number, contacts?: Contacts): string {
+function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = []): string {
   const a = l.account, s = l.score;
   const c = contacts?.get(a.id);
   const open = opener(c, a.name ?? a.domain, s.drivers[0]);
@@ -109,6 +116,8 @@ function leadText(l: Lead, i: number, contacts?: Contacts): string {
     c ? `   ${[c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}${c.persona ? "" : ` (${c.note})`}` : "",
     `   ${[a.sizeBand && `${a.sizeBand} people`, a.segment, a.region].filter(Boolean).join(", ")}`,
     open ? `   Opener: ${open}` : "",
+    ...personaSearchLinks(personas, a.sizeBand, a.name ?? a.domain, c ?? null).map((x) => `   Also reach ${x.persona}: ${x.url}`),
+    !hasHiring(s) ? "   [non-hiring signal]" : "",
     s.plays.length ? `   Plays: ${s.plays.map((p) => p.title).join(" + ")}${s.lane === "fast" ? " [single-source]" : ""}` : "",
     ...s.drivers.slice(0, 4).map((e) => `   - ${describe(e)}  ${e.url}`),
     s.plays[0] ? `   Angle: ${s.plays[0].angle}` : "",
@@ -155,7 +164,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   <div style="font-size:13px;color:#6b7280">${esc(pack.meta.name)} · ${esc(date)}</div>
   <h2 style="font-size:20px;margin:4px 0 4px">${leads.length ? `${leads.length} ${leads.length === 1 ? "person" : "people"} to contact today` : "No leads today"}</h2>
   <div style="font-size:13px;color:#6b7280">Ranked by need now × ICP fit × timing. Month one: trust the order more than the percentages, and label what you see.</div>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px">${leads.map((l, i) => leadHtml(l, i, contacts)).join("")}</table>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px">${leads.map((l, i) => leadHtml(l, i, contacts, pack.icp.personas)).join("")}</table>
   ${gigs.length ? `<h3 style="font-size:15px;margin:24px 0 4px">Freelance gigs (${gigs.length})</h3><ul style="margin:0 0 0 18px;padding:0;font-size:14px">${gigs.map(gigHtml).join("")}</ul>` : ""}
   ${watchHtml}${peopleHtml}
   <h3 style="font-size:15px;margin:24px 0 4px">Health</h3>
@@ -166,7 +175,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `${pack.meta.name} · ${date}`,
     leads.length ? `TOP ${leads.length} LEADS` : "NO LEADS TODAY",
     "",
-    ...leads.map((l, i) => leadText(l, i, contacts) + "\n"),
+    ...leads.map((l, i) => leadText(l, i, contacts, pack.icp.personas) + "\n"),
     gigs.length ? `FREELANCE GIGS\n${gigs.map((g) => `- ${g.title}${g.company ? ` (${g.company})` : ""}: ${g.applyUrl ?? g.url} (via ${SOURCE_NAME[g.source] ?? g.source}: ${g.url})`).join("\n")}\n` : "",
     watch.length ? `WATCHLIST\n${watch.map((w) => `- ${w.account.name ?? w.account.domain} (${w.account.domain})`).join("\n")}\n` : "",
     people.length ? `PERSON LEADS\n${people.map((p) => `- ${p.platform}/${p.handle}: "${p.quote}" ${p.url}`).join("\n")}\n` : "",

@@ -45,3 +45,17 @@ export function pickContact(people: Person[], personas: Pack["icp"]["personas"],
 }
 
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
+
+/**
+ * For personas nobody is known for yet: a LinkedIn people-search link you open yourself (nothing is scraped).
+ * Only personas meant for this company size, excluding the one the named contact already covers.
+ */
+export function personaSearchLinks(personas: Pack["icp"]["personas"], sizeBand: string | null, company: string, contact: Contact | null): { persona: string; url: string }[] {
+  return personas
+    .filter((p) => !(p.size_bands.length && sizeBand && !p.size_bands.includes(sizeBand)))
+    .filter((p) => p.title !== contact?.persona)
+    .map((p) => {
+      const term = p.search ?? p.title.split("/")[0]!.trim();
+      return { persona: p.title, url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${term} ${company}`)}` };
+    });
+}

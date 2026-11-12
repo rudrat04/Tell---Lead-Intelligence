@@ -57,6 +57,8 @@ export const IcpSchema = z.object({
     patterns: z.array(pattern).min(1),
     /** company size bands where this persona is the right first contact (empty = any) */
     size_bands: z.array(z.string()).default([]),
+    /** what to search for on LinkedIn when nobody with this persona is known (defaults to the title) */
+    search: z.string().optional(),
   })).default([]),
 });
 
@@ -191,8 +193,10 @@ export const DeliverySchema = z.object({
     from: z.string().email().optional(),
     from_name: z.string().default("Lead digest"),
     max_leads: z.number().int().min(1).max(25).default(10),
+    /** slots kept for companies that qualify through non-hiring signals (funding, launches, tools, site changes, posts) */
+    reserved_non_hiring: z.number().int().min(0).default(0),
     send_hour_local: z.number().int().min(0).max(23).default(9),
-  }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9 }),
+  }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9, reserved_non_hiring: 0 }),
   redeliver_after_days: z.number().int().min(1).default(90),
   /** Google Sheet for leads + your labels (created by `pnpm sheet:setup`; private: it holds lead names) */
   sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),

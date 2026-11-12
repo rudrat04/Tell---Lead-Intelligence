@@ -89,7 +89,9 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     results.push({ account, score, incomplete: failing.has(id), recentlyDelivered: !!delivered, newPlaySinceDelivery: newPlay });
   }
 
-  const ranking = rankAccounts(results, opts.maxLeads ?? pack.delivery.digest.max_leads);
+  const ranking = rankAccounts(results, opts.maxLeads ?? pack.delivery.digest.max_leads, 5, {
+    reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days,
+  });
 
   // Person leads: no account, ranked on the post alone (plan 8a): strength x timing
   const pl = await db.select({

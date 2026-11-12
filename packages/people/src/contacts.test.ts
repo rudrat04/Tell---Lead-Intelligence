@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
-import { pickContact, type Person } from "./contacts.js";
+import { pickContact, personaSearchLinks, type Person } from "./contacts.js";
 
 const personas = (await loadFixturePack()).icp.personas;
 const p = (name: string, role: string): Person => ({ name, role, source: "yc", linkedin: `https://linkedin.com/in/${name.split(" ")[0]}` });
@@ -21,3 +21,16 @@ describe("pickContact", () => {
   });
   it("nobody known: null", () => expect(pickContact([], personas, "2-10")).toBeNull());
 });
+
+describe("personaSearchLinks", () => {
+  it("links the other personas that fit the company size, not the one already named", () => {
+    const c = pickContact([p("Riya S", "Founder/CEO")], personas, "11-50");
+    const links = personaSearchLinks(personas, "11-50", "Acme", c);
+    expect(links.map((l) => l.persona)).toEqual(["Head of GTM / Revenue", "RevOps lead"]);
+    expect(links[0]!.url).toBe("https://www.linkedin.com/search/results/people/?keywords=Head%20of%20GTM%20Acme");
+  });
+  it("personas limited to other company sizes are left out (founder persona is for 2-50 people)", () => {
+    expect(personaSearchLinks(personas, "51-150", "Acme", null).map((l) => l.persona)).toEqual(["Head of GTM / Revenue", "RevOps lead"]);
+  });
+});
+
