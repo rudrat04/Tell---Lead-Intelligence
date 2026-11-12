@@ -1,19 +1,11 @@
-name: Job boards
+name: Job boards discovery
 
-# Weekly discovery (YC companies -> ICP filter -> accounts + job boards) and a daily board diff.
-# Public repo: the scripts print counts only.
+# Weekly: YC companies -> ICP hard filters -> accounts + job boards.
+# The daily board diff runs inside daily.yml. Public repo: the script prints counts only.
 on:
   schedule:
-    - cron: "15 22 * * 6" # discovery: Sundays 03:45 IST
-    - cron: "40 21 * * *" # board check: daily 03:10 IST, before the 09:00 digest
+    - cron: "15 22 * * 6" # Sundays 03:45 IST
   workflow_dispatch:
-    inputs:
-      job:
-        description: "discover or check"
-        required: true
-        default: check
-        type: choice
-        options: [check, discover]
 
 concurrency:
   group: boards
@@ -24,7 +16,6 @@ permissions:
 
 jobs:
   discover:
-    if: github.event.schedule == '15 22 * * 6' || (github.event_name == 'workflow_dispatch' && inputs.job == 'discover')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -35,20 +26,5 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm boards:discover
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-  check:
-    if: github.event.schedule == '40 21 * * *' || (github.event_name == 'workflow_dispatch' && inputs.job == 'check')
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with: { version: 10 }
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm boards:check
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

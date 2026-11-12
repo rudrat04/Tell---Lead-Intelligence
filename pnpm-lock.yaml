@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@tell/db':
+        specifier: workspace:*
+        version: link:packages/db
       '@tell/extract':
         specifier: workspace:*
         version: link:packages/extract

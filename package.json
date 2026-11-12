@@ -15,6 +15,7 @@
     "boards:check": "tsx scripts/check-boards.ts"
   },
   "devDependencies": {
+    "@tell/db": "workspace:*",
     "@tell/extract": "workspace:*",
     "@tell/intel": "workspace:*",
     "@tell/people": "workspace:*",
