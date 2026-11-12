@@ -1,5 +1,5 @@
 import { schedules } from "@trigger.dev/sdk";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import { runTick, neonStore } from "@tell/pipeline";
 import { hn, reddit, forhireSubs, isSourceEnabled } from "@tell/watchers";
 import { HaikuClient } from "@tell/extract";
@@ -11,7 +11,8 @@ export const tick = schedules.task({
   cron: "*/30 * * * *",
   maxDuration: 240,
   run: async () => {
-    const rules = loadGate1Rules(fileURLToPath(new URL("../config/signals.yaml", import.meta.url)));
+    // cwd is the project root locally and in the deployed bundle (config/ is shipped via additionalFiles)
+    const rules = loadGate1Rules(resolve(process.cwd(), "config/signals.yaml"));
     const summaries = await runTick({
       store: neonStore(),
       gates: { llm: new HaikuClient({ dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) }), gate1: (t) => gate1(t, rules.never, rules.required) },
