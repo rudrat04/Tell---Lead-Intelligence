@@ -1,0 +1,39 @@
+name: Tick (30 min)
+
+# Runs watchers -> precision cascade -> Neon every 30 minutes.
+# Stand-in for the Trigger.dev schedule while Trigger.dev deployments are blocked for this org.
+# The repo is public, so this log is public: scripts/tick.ts prints counts only.
+on:
+  schedule:
+    - cron: "7,37 * * * *" # off the :00/:30 rush, when GitHub delays scheduled runs most
+  workflow_dispatch:
+    inputs:
+      max_per_source:
+        description: "Max new items per source sent through the cascade"
+        required: false
+
+concurrency:
+  group: tick
+  cancel-in-progress: false # never run two ticks at once; queue instead
+
+permissions:
+  contents: read
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Run tick
+        run: pnpm tick
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
+          TICK_MAX_PER_SOURCE: ${{ inputs.max_per_source }}

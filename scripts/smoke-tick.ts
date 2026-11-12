@@ -1,20 +1,11 @@
-/** Manual smoke test: one HN tick against real Neon + Haiku, capped at a few items. Usage: pnpm smoke [maxItems] */
+/** Manual smoke test: one tick against real Neon + Haiku, capped at a few items per source. Usage: pnpm smoke [maxItems] */
 import "dotenv/config";
-import { fileURLToPath } from "node:url";
-import { runTick, neonStore } from "@tell/pipeline";
-import { hn } from "@tell/watchers";
-import { HaikuClient } from "@tell/extract";
-import { gate1, loadGate1Rules } from "@tell/intel";
+import { resolve } from "node:path";
+import { runScheduledTick } from "@tell/pipeline";
 
-const max = Number(process.argv[2] ?? 3);
-const rules = loadGate1Rules(fileURLToPath(new URL("../config/signals.yaml", import.meta.url)));
-const llm = new HaikuClient({ dailyCapUsd: 0.05 });
-const out = await runTick({
-  store: neonStore(),
-  gates: { llm, gate1: (t) => gate1(t, rules.never, rules.required) },
-  watchers: [hn],
-  maxPerSource: max,
-  defaultLookbackMs: 24 * 3_600_000,
+const res = await runScheduledTick({
+  configPath: resolve(process.cwd(), "config/signals.yaml"),
+  dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1),
+  maxPerSource: Number(process.argv[2] ?? 3),
 });
-console.log(JSON.stringify(out, null, 2));
-console.log("haiku spend (est): $" + llm.spent.toFixed(4));
+console.log(JSON.stringify(res, null, 2));

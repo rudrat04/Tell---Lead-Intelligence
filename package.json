@@ -9,7 +9,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
     "db:generate": "pnpm --filter @tell/db generate",
-    "smoke": "tsx scripts/smoke-tick.ts"
+    "smoke": "tsx scripts/smoke-tick.ts",
+    "tick": "tsx scripts/tick.ts"
   },
   "devDependencies": {
     "@tell/extract": "workspace:*",
