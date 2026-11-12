@@ -30,9 +30,16 @@ describe("cascade", () => {
     const r = await runCascade({ llm: seq(g3, { genuine_need: false, disqualifier: "vendor", reason: "agency pitch" }), gate1: pass1 }, text);
     expect(r).toMatchObject({ status: "uncertain", gate: 4 });
   });
-  it("both negative is rejected", async () => {
-    const r = await runCascade({ llm: seq({ ...g3, self_promotion: true }, { genuine_need: false, disqualifier: "vendor", reason: "pitch" }), gate1: pass1 }, text);
-    expect(r).toMatchObject({ status: "rejected", gate: 4 });
+  it("self-promotion is rejected at gate 3 without a gate 4 call", async () => {
+    let calls = 0;
+    const llm: LlmClient = { complete: async () => { calls++; return JSON.stringify({ ...g3, self_promotion: true }); } };
+    const r = await runCascade({ llm, gate1: pass1 }, text);
+    expect(r).toMatchObject({ status: "rejected", gate: 3 });
+    expect(calls).toBe(1);
+  });
+  it("low-strength (unrelated) posts are rejected at gate 3, not sent to uncertain", async () => {
+    const r = await runCascade({ llm: seq({ ...g3, ask_type: "other", strength: 1 }), gate1: pass1 }, text);
+    expect(r).toMatchObject({ status: "rejected", gate: 3, reason: "no GTM need (low strength)" });
   });
   it("fabricated quote rejected at gate 3", async () => {
     const r = await runCascade({ llm: seq({ ...g3, evidence_quote: "budget is $50k" }), gate1: pass1 }, text);

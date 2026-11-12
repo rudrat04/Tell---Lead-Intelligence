@@ -18,7 +18,7 @@ describe("extractPost", () => {
     expect(r).toEqual({ ok: false, reason: "ungrounded" });
   });
   it("rejects bad schema and bad JSON", async () => {
-    expect(await extractPost(llm({ ...good, strength: 9 }), text)).toEqual({ ok: false, reason: "schema" });
+    expect(await extractPost(llm({ ...good, strength: 9 }), text)).toMatchObject({ ok: false, reason: "schema", detail: expect.stringContaining("strength") });
     expect(await extractPost(llm("nope"), text)).toEqual({ ok: false, reason: "invalid_json" });
   });
   it("caps strength for self-promotion (injection can't raise it)", async () => {

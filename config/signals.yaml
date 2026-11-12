@@ -12,6 +12,14 @@ signals:
   pain_post:               { class: pain,     lr: 3,  half_life_days: 21 }
   ops_role_filled:         { class: negative, lr: 0.2, half_life_days: 90 }
   ops_team_2plus:          { class: negative, lr: 0.15, half_life_days: 180 }
+# Gate 1: a post must mention at least one of these to reach Haiku (free filter)
+required_any:
+  - "(?i)\\b(crm|hubspot|salesforce|pipedrive|attio)\\b"
+  - "(?i)\\b(outbound|cold[- ]email|lead[- ]gen(eration)?|deliverability|enrichment|lead routing)\\b"
+  - "(?i)\\b(rev ?ops|revenue operations|sales ops|marketing ops|marketing automation|demand gen)\\b"
+  - "(?i)\\b(gtm|go[- ]to[- ]market)\\b"
+  - "(?i)\\b(apollo\\.io|clay\\.com|clay table|instantly\\.ai|smartlead|lemlist|zapier|make\\.com|n8n)\\b"
+  - "(?i)\\b(sdr|bdr|account executive|sales engineer)\\b"
 never_patterns:
   - "(?i)we are a (recruiting|staffing) (agency|firm)"
   - "(?i)looking for (a )?job"

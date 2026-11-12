@@ -3,12 +3,15 @@ import { runCascade, type CascadeResult, type GateDeps } from "@tell/extract";
 
 /** Persistence boundary, so the tick is testable without a database. */
 export interface Store {
-  /** Returns the subset of hashes not seen before and records them (90-day dedupe). */
-  claimNewHashes(hashes: string[]): Promise<Set<string>>;
+  /** Returns the subset of hashes not seen before (90-day dedupe). Read-only. */
+  filterUnseen(hashes: string[]): Promise<Set<string>>;
+  /** Saves processed items and marks only those as seen. */
   saveBatch(batch: {
     sourceId: string;
     usedFallback: boolean;
     error?: string;
+    /** true when new items were left unprocessed (per-tick cap or spend cap), so the window must be re-fetched */
+    incomplete: boolean;
     fetched: number;
     items: { item: RawItem; hash: string; result: CascadeResult }[];
   }): Promise<void>;
@@ -42,8 +45,9 @@ export async function runTick(deps: TickDeps): Promise<TickSummary[]> {
     const since = (await deps.store.lastRunAt(w.id)) ?? new Date(Date.now() - (deps.defaultLookbackMs ?? 3_600_000));
     const res = await runWatcher(w, since);
     const hashed = res.items.map((item) => ({ item, hash: contentHash(`${item.sourceId}:${item.externalId}:${item.text}`) }));
-    const fresh = await deps.store.claimNewHashes(hashed.map((h) => h.hash));
-    const todo = hashed.filter((h) => fresh.has(h.hash)).slice(0, deps.maxPerSource ?? 50);
+    const fresh = await deps.store.filterUnseen(hashed.map((h) => h.hash));
+    const allFresh = [...new Map(hashed.filter((h) => fresh.has(h.hash)).map((h) => [h.hash, h])).values()];
+    const todo = allFresh.slice(0, deps.maxPerSource ?? 50);
 
     const processed: { item: RawItem; hash: string; result: CascadeResult }[] = [];
     for (const { item, hash } of todo) {
@@ -55,9 +59,10 @@ export async function runTick(deps: TickDeps): Promise<TickSummary[]> {
         break;
       }
     }
-    await deps.store.saveBatch({ sourceId: w.id, usedFallback: res.usedFallback, error: res.error, fetched: res.items.length, items: processed });
+    const incomplete = processed.length < allFresh.length;
+    await deps.store.saveBatch({ sourceId: w.id, usedFallback: res.usedFallback, error: res.error, incomplete, fetched: res.items.length, items: processed });
     const count = (s: CascadeResult["status"]) => processed.filter((p) => p.result.status === s).length;
-    out.push({ sourceId: w.id, fetched: res.items.length, newItems: todo.length, confirmed: count("confirmed"), rejected: count("rejected"), uncertain: count("uncertain"), usedFallback: res.usedFallback, error: res.error });
+    out.push({ sourceId: w.id, fetched: res.items.length, newItems: allFresh.length, confirmed: count("confirmed"), rejected: count("rejected"), uncertain: count("uncertain"), usedFallback: res.usedFallback, error: res.error });
   }
   return out;
 }

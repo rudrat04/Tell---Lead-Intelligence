@@ -1,4 +1,3 @@
-import { request } from "undici";
 import { createHash } from "node:crypto";
 
 const UA = "TellLeadIntelligence/0.1 (research bot; respects robots.txt)";
@@ -10,9 +9,9 @@ export async function politeGet(url: string, minGapMs = 1000): Promise<string> {
   const wait = (lastHit.get(host) ?? 0) + minGapMs - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastHit.set(host, Date.now());
-  const res = await request(url, { headers: { "user-agent": UA, accept: "*/*" }, maxRedirections: 5 } as never);
-  if (res.statusCode >= 400) throw new Error(`GET ${url} -> ${res.statusCode}`);
-  return res.body.text();
+  const res = await fetch(url, { headers: { "user-agent": UA, accept: "*/*" }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
+  return res.text();
 }
 
 export async function getJson<T = unknown>(url: string, minGapMs?: number): Promise<T> {

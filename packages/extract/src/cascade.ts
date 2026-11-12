@@ -9,6 +9,9 @@ export interface GateDeps {
   gate2?: (text: string) => Promise<{ pass: boolean; reason: string }>;
 }
 
+/** Gate 3 strengths below this are not signals (1 = unrelated, 2 = barely related). */
+export const MIN_SIGNAL_STRENGTH = 3;
+
 export type CascadeResult =
   | { status: "confirmed"; extraction: PostExtraction; log: string[] }
   | { status: "rejected"; gate: number; reason: string; log: string[] }
@@ -30,12 +33,16 @@ export async function runCascade(deps: GateDeps, text: string): Promise<CascadeR
 
   const g3 = await extractPost(deps.llm, text);
   if (!g3.ok) {
-    log.push(`gate3: ${g3.reason}`);
+    log.push(`gate3: ${g3.reason}${g3.detail ? ` (${g3.detail})` : ""}`);
     return g3.reason === "ungrounded"
       ? { status: "rejected", gate: 3, reason: "quote not found in source", log }
       : { status: "uncertain", gate: 3, reason: g3.reason, log };
   }
   log.push(`gate3: ${g3.extraction.ask_type} strength ${g3.extraction.strength}`);
+  // Weak or self-promotional extractions are not signals: reject here and skip the Gate 4 call.
+  if (g3.extraction.strength < MIN_SIGNAL_STRENGTH || g3.extraction.self_promotion || g3.extraction.author_role === "vendor") {
+    return { status: "rejected", gate: 3, reason: g3.extraction.self_promotion || g3.extraction.author_role === "vendor" ? "self-promotion / vendor" : "no GTM need (low strength)", log };
+  }
 
   const g4 = await verifyPost(deps.llm, text, g3.extraction);
   log.push(`gate4: ${g4.decision}`);

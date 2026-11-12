@@ -8,13 +8,18 @@ const g3 = { author_role: "founder", ask_type: "hire", problem_category: "crm", 
 
 function memStore() {
   const seen = new Set<string>();
-  const saved: unknown[] = [];
+  const saved: Parameters<Store["saveBatch"]>[0][] = [];
+  let last: Date | null = null;
   const store: Store = {
-    claimNewHashes: async (hs) => { const f = new Set(hs.filter((h) => !seen.has(h))); f.forEach((h) => seen.add(h)); return f; },
-    saveBatch: async (b) => { saved.push(b); },
-    lastRunAt: async () => null,
+    filterUnseen: async (hs) => new Set(hs.filter((h) => !seen.has(h))),
+    saveBatch: async (b) => {
+      saved.push(b);
+      b.items.forEach((i) => seen.add(i.hash));
+      if (!b.error && !b.incomplete) last = new Date();
+    },
+    lastRunAt: async () => last,
   };
-  return { store, saved };
+  return { store, saved, lastRun: () => last };
 }
 
 const llm: LlmClient = { complete: async ({ system }) => JSON.stringify(system.includes("skeptical") ? { genuine_need: true, disqualifier: "none", reason: "ok" } : g3) };
@@ -30,11 +35,23 @@ describe("runTick", () => {
     expect(second[0]).toMatchObject({ fetched: 2, newItems: 0 });
     expect(saved).toHaveLength(2);
   });
-  it("records watcher failure without throwing", async () => {
-    const { store } = memStore();
+  it("records watcher failure without throwing, and does not advance lastRunAt", async () => {
+    const { store, lastRun } = memStore();
     const w: Watcher = { id: "s", fetch: async () => { throw new Error("down"); } };
     const r = await runTick({ store, gates: { llm, gate1 }, watchers: [w] });
     expect(r[0]!.error).toContain("down");
+    expect(lastRun()).toBeNull();
+  });
+  it("items beyond the per-tick cap are not marked seen and get processed next tick", async () => {
+    const { store, saved, lastRun } = memStore();
+    const w: Watcher = { id: "s", fetch: async () => [1, 2, 3].map((n) => item(String(n), `Need a freelancer to set up HubSpot please #${n}`)) };
+    const first = await runTick({ store, gates: { llm, gate1 }, watchers: [w], maxPerSource: 2 });
+    expect(first[0]).toMatchObject({ newItems: 3, confirmed: 2 });
+    expect(saved[0]!.incomplete).toBe(true);
+    expect(lastRun()).toBeNull();
+    const second = await runTick({ store, gates: { llm, gate1 }, watchers: [w], maxPerSource: 2 });
+    expect(second[0]).toMatchObject({ newItems: 1, confirmed: 1 });
+    expect(lastRun()).not.toBeNull();
   });
   it("stops cascading when the LLM throws (spend cap)", async () => {
     const { store } = memStore();
