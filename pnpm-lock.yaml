@@ -14,6 +14,9 @@ importers:
       '@tell/intel':
         specifier: workspace:*
         version: link:packages/intel
+      '@tell/people':
+        specifier: workspace:*
+        version: link:packages/people
       '@tell/pipeline':
         specifier: workspace:*
         version: link:packages/pipeline
@@ -29,6 +32,9 @@ importers:
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
+      cheerio:
+        specifier: ^1.2.0
+        version: 1.2.0
       dotenv:
         specifier: ^18.0.10
         version: 18.0.10
@@ -76,6 +82,27 @@ importers:
         specifier: ^4.6.7
         version: 4.6.7
 
+  packages/people:
+    dependencies:
+      '@tell/db':
+        specifier: workspace:*
+        version: link:../db
+      '@tell/extract':
+        specifier: workspace:*
+        version: link:../extract
+      '@tell/watchers':
+        specifier: workspace:*
+        version: link:../watchers
+      cheerio:
+        specifier: ^1.2.0
+        version: 1.2.0
+      tldts:
+        specifier: ^7.4.22
+        version: 7.4.22
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
+
   packages/pipeline:
     dependencies:
       '@tell/db':
@@ -87,6 +114,9 @@ importers:
       '@tell/intel':
         specifier: workspace:*
         version: link:../intel
+      '@tell/people':
+        specifier: workspace:*
+        version: link:../people
       '@tell/watchers':
         specifier: workspace:*
         version: link:../watchers
@@ -1622,6 +1652,13 @@ packages:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
 
+  tldts-core@7.4.22:
+    resolution: {integrity: sha512-NRyhrlvJcTwvoRibE0dEZvp6C5RwV4RxpsX1zbkI1k7Fk2pzIhmQ+MvswJEd5KKl3VRFRMDTipXse/ejh/ld/w==}
+
+  tldts@7.4.22:
+    resolution: {integrity: sha512-TmLwkCZ1GFMxGkKfg2ooQhPF8rDMuuXvJHSxFiOU1fofh27L6NaO5T9KSlQXCJX2eoSt14I8F4saSMILOmXmaQ==}
+    hasBin: true
+
   ts-algebra@2.0.0:
     resolution: {integrity: sha512-FPAhNPFMrkwz76P7cdjdmiShwMynZYN6SgOujD1urY4oNm80Ou9oMdmbR45LotcKOXoy7wSmHkRFE6Mxbrhefw==}
 
@@ -2974,6 +3011,12 @@ snapshots:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.7)
       picomatch: 4.0.7
+
+  tldts-core@7.4.22: {}
+
+  tldts@7.4.22:
+    dependencies:
+      tldts-core: 7.4.22
 
   ts-algebra@2.0.0: {}
 

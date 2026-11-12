@@ -21,6 +21,11 @@ describe("gate1", () => {
     expect(r.pass).toBe(true);
   });
   it("detectInjection ignores normal text", () => expect(detectInjection("our CRM is a mess")).toBe(false));
+  it("drops HN SEEKING WORK posts (freelancers advertising), keeps 'seeking a freelancer' asks", () => {
+    expect(gate1("SEEKING WORK | Remote | HubSpot + Clay expert, 8 yrs RevOps", never).pass).toBe(false);
+    expect(gate1("Location: Berlin\nSEEKING WORK - outbound and CRM consultant", never).pass).toBe(false);
+    expect(gate1("We are seeking work from a freelancer to set up our HubSpot CRM", never).pass).toBe(true);
+  });
   it("required keywords: off-topic text is dropped for free, GTM text passes", () => {
     const { never: n, required } = loadGate1Rules(fileURLToPath(new URL("../../../config/signals.yaml", import.meta.url)));
     expect(gate1("Should the CEO be fired over the board's decision about his affair?", n, required)).toMatchObject({ pass: false, reason: "no GTM keyword" });

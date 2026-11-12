@@ -1,5 +1,5 @@
 import { runWatcher, contentHash, type RawItem, type Watcher } from "@tell/watchers";
-import { runCascade, type CascadeResult, type GateDeps } from "@tell/extract";
+import { runCascade, type CascadeResult, type GateDeps, type PostExtraction } from "@tell/extract";
 
 /** Persistence boundary, so the tick is testable without a database. */
 export interface Store {
@@ -25,6 +25,8 @@ export interface TickDeps {
   /** max items per source per tick sent through the cascade (cost guard) */
   maxPerSource?: number;
   defaultLookbackMs?: number;
+  /** resolve + persist a confirmed item; returns where it landed */
+  onConfirmed?: (item: RawItem, extraction: PostExtraction) => Promise<"account" | "person" | "unresolved">;
 }
 
 export interface TickSummary {
@@ -34,6 +36,11 @@ export interface TickSummary {
   confirmed: number;
   rejected: number;
   uncertain: number;
+  /** confirmed items resolved to an account / kept as a person lead / neither */
+  account: number;
+  person: number;
+  unresolved: number;
+  recordErrors: number;
   usedFallback: boolean;
   error?: string;
 }
@@ -61,8 +68,22 @@ export async function runTick(deps: TickDeps): Promise<TickSummary[]> {
     }
     const incomplete = processed.length < allFresh.length;
     await deps.store.saveBatch({ sourceId: w.id, usedFallback: res.usedFallback, error: res.error, incomplete, fetched: res.items.length, items: processed });
+
+    // Entity resolution + signal writes for confirmed items, while the post text is still in memory.
+    const outcomes = { account: 0, person: 0, unresolved: 0, recordErrors: 0 };
+    if (deps.onConfirmed) {
+      for (const p of processed) {
+        if (p.result.status !== "confirmed") continue;
+        try {
+          outcomes[await deps.onConfirmed(p.item, p.result.extraction)]++;
+        } catch {
+          outcomes.recordErrors++; // never fatal: the rest of the tick still runs
+        }
+      }
+    }
+
     const count = (s: CascadeResult["status"]) => processed.filter((p) => p.result.status === s).length;
-    out.push({ sourceId: w.id, fetched: res.items.length, newItems: allFresh.length, confirmed: count("confirmed"), rejected: count("rejected"), uncertain: count("uncertain"), usedFallback: res.usedFallback, error: res.error });
+    out.push({ sourceId: w.id, fetched: res.items.length, newItems: allFresh.length, confirmed: count("confirmed"), rejected: count("rejected"), uncertain: count("uncertain"), ...outcomes, usedFallback: res.usedFallback, error: res.error });
   }
   return out;
 }

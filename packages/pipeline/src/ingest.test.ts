@@ -42,6 +42,14 @@ describe("runTick", () => {
     expect(r[0]!.error).toContain("down");
     expect(lastRun()).toBeNull();
   });
+  it("confirmed items go to onConfirmed; a failing write is counted, not fatal", async () => {
+    const { store } = memStore();
+    const w: Watcher = { id: "s", fetch: async () => [1, 2].map((n) => item(String(n), `Need a freelancer to set up HubSpot please #${n}`)) };
+    let n = 0;
+    const onConfirmed = async () => { if (n++ === 0) throw new Error("db down"); return "account" as const; };
+    const r = await runTick({ store, gates: { llm, gate1 }, watchers: [w], onConfirmed });
+    expect(r[0]).toMatchObject({ confirmed: 2, account: 1, recordErrors: 1 });
+  });
   it("items beyond the per-tick cap are not marked seen and get processed next tick", async () => {
     const { store, saved, lastRun } = memStore();
     const w: Watcher = { id: "s", fetch: async () => [1, 2, 3].map((n) => item(String(n), `Need a freelancer to set up HubSpot please #${n}`)) };

@@ -24,3 +24,5 @@ never_patterns:
   - "(?i)we are a (recruiting|staffing) (agency|firm)"
   - "(?i)looking for (a )?job"
   - "(?i)available for hire"
+  # HN "Seeking freelancer" threads are mostly freelancers advertising themselves (competitors, not leads)
+  - "(?im)^\\s*SEEKING WORK"

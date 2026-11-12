@@ -16,6 +16,7 @@ if (res.skipped) console.log(`skipped: ${res.skipped}`);
 for (const s of res.summaries) {
   console.log(
     `${s.sourceId}: fetched=${s.fetched} new=${s.newItems} confirmed=${s.confirmed} rejected=${s.rejected} uncertain=${s.uncertain}` +
+      ` | accounts=${s.account} person_leads=${s.person} unresolved=${s.unresolved}${s.recordErrors ? ` record_errors=${s.recordErrors}` : ""}` +
       `${s.usedFallback ? " (fallback)" : ""}${s.error ? ` ERROR=${s.error.slice(0, 200)}` : ""}`,
   );
 }

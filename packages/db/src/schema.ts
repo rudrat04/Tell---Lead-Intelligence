@@ -98,7 +98,11 @@ export const signals = pgTable("signals", {
   observedAt: ts("observed_at").notNull(),
   halfLifeDays: real("half_life_days").notNull(),
   eventClusterId: uuid("event_cluster_id").references(() => eventClusters.id),
-}, (t) => [index("signals_account_idx").on(t.accountId, t.observedAt)]);
+}, (t) => [
+  index("signals_account_idx").on(t.accountId, t.observedAt),
+  // one signal per piece of evidence and type: re-runs and catch-up fetches can't inflate intent
+  uniqueIndex("signals_evidence_type_uq").on(t.evidenceUrl, t.type),
+]);
 
 export const signalSummaries = pgTable("signal_summaries", {
   accountId: uuid("account_id").notNull().references(() => accounts.id),
@@ -115,7 +119,7 @@ export const personLeads = pgTable("person_leads", {
   signalId: uuid("signal_id").references(() => signals.id),
   score: real("score"),
   mappedAccountId: uuid("mapped_account_id").references(() => accounts.id),
-});
+}, (t) => [uniqueIndex("person_leads_platform_signal_uq").on(t.platform, t.signalId)]);
 
 export const authorMappings = pgTable("author_mappings", {
   id: id(),
@@ -124,7 +128,7 @@ export const authorMappings = pgTable("author_mappings", {
   accountId: uuid("account_id").notNull().references(() => accounts.id),
   confidence: text("confidence").notNull(), // explicit|profile|cross-platform|hint
   evidenceUrl: text("evidence_url"),
-});
+}, (t) => [uniqueIndex("author_mappings_uq").on(t.platform, t.handle, t.accountId)]);
 
 export const playsMatched = pgTable("plays_matched", {
   id: id(),
