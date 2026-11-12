@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { runScoring, istDay, type ScoreRunResult } from "@tell/pipeline";
+import { runScoring, istDay, contactsFor, type ScoreRunResult } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, eq, and, sql } from "@tell/db";
 import { renderDigest, type DigestHealth, type DigestEmail } from "./render.js";
 import type { Sender } from "./gmail.js";
@@ -53,7 +53,8 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
 
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
   const score = await runScoring({ pack, write: !opts.dryRun && !opts.test });
-  const email = renderDigest(score, pack, await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1)), day);
+  const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, { write: !opts.dryRun });
+  const email = renderDigest(score, pack, await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1)), day, contacts);
   const counts = { leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   // no sender configured yet: scores are written, nothing is sent, the day stays open

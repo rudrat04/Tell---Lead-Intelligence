@@ -183,7 +183,12 @@ export const people = pgTable("people", {
   role: text("role"),
   source: text("source").notNull(),
   confidence: real("confidence"),
-});
+  /** where the name came from (provenance, plan section 9) */
+  sourceUrl: text("source_url"),
+  /** public profile links: { linkedin, twitter } */
+  profileUrls: jsonb("profile_urls"),
+  fetchedAt: ts("fetched_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("people_account_name_source_uq").on(t.accountId, t.fullName, t.source)]);
 
 export const emails = pgTable("emails", {
   id: id(),

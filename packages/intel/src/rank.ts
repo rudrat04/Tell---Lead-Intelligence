@@ -86,7 +86,7 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
     else ageDays = Math.min(daysOpen, OPEN_ROLE_MAX_AGE_DAYS);
 
     keep(`role:${cls.family}:${normTitle(j.title)}`, {
-      type, class: specs[type]!.class, ageDays, current: open, openDays: Math.round(daysOpen), quote: j.title, url: j.url, ref: { kind: "job", id: j.id },
+      type, class: specs[type]!.class, ageDays, current: open, openDays: Math.round(daysOpen), quote: j.title.replace(/\s+/g, " ").trim(), url: j.url, ref: { kind: "job", id: j.id },
     });
   }
 
@@ -160,7 +160,7 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const perType = new Map<string, Evidence[]>();
   for (const e of [...usable].sort((a, b) => a.ageDays - b.ageDays)) {
     const list = perType.get(e.type) ?? [];
-    if (list.length < cap) list.push(e);
+    if (list.length < (specs[e.type]?.max_events ?? cap)) list.push(e);
     perType.set(e.type, list);
   }
   const counted = [...perType.values()].flat();

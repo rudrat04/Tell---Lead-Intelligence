@@ -4,3 +4,4 @@ export * from "./usage.js";
 export * from "./scheduled.js";
 export * from "./boards.js";
 export * from "./score.js";
+export * from "./contacts.js";

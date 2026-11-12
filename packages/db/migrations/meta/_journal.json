@@ -43,6 +43,13 @@
       "when": 1794492484636,
       "tag": "0005_plays_state",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794495721638,
+      "tag": "0006_people_profiles",
+      "breakpoints": true
     }
   ]
 }

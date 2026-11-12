@@ -76,6 +76,8 @@ export const SignalsSchema = z.object({
     half_life_days: z.number().gt(0),
     strength: z.number().int().min(1).max(5).default(3),
     fast_lane: z.boolean().default(false),
+    /** overrides max_events_per_type for this signal (e.g. 1: three founding roles are one "building GTM from zero" story) */
+    max_events: z.number().int().min(1).optional(),
   })),
   gate1: z.object({
     required_any: z.array(pattern).default([]),

@@ -115,6 +115,11 @@ describe("fixes from the first live ranking", () => {
     expect(score([job("RevOps Consultant", 60, { employmentType: "Contract" })]).lane).toBe("combined");
     expect(score([job("RevOps Consultant", 5, { employmentType: "Contract" })]).lane).toBe("fast");
   });
+  it("several founding roles are one 'building GTM from zero' story (first_role max_events: 1)", () => {
+    const three = score([job("Founding Sales", 5), job("Founding GTM Lead", 5), job("Founding Account Executive", 5)]);
+    const one = score([job("Founding Account Executive", 5)]);
+    expect(three.intent).toBeCloseTo(one.intent, 10);
+  });
   it("recruiter titles never count as GTM hires", () => {
     expect(buildEvidence([job("Founding GTM Recruiter", 5)], [], pack, roles, now)).toEqual([]);
   });

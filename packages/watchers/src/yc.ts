@@ -69,3 +69,41 @@ export async function fetchYcJobs(slug: string): Promise<JobPosting[]> {
   if (!(await robotsAllows(url))) throw new Error("robots.txt disallows YC jobs page");
   return parseYcJobsPage(await politeGet(url, 1000));
 }
+
+/** A founder as listed publicly on a YC company page. */
+export interface YcFounder {
+  name: string;
+  title: string | null;
+  linkedin: string | null;
+  twitter: string | null;
+  active: boolean;
+}
+
+export interface YcCompanyProfile {
+  url: string;
+  founders: YcFounder[];
+  /** recent news headlines YC links on the page (funding announcements etc.) */
+  news: { title: string; url: string; date?: string }[];
+}
+
+interface YcFounderJson { full_name?: string; title?: string | null; linkedin_url?: string | null; twitter_url?: string | null; is_active?: boolean }
+interface YcNewsJson { title?: string; url?: string; date?: string }
+
+/** Parse a YC company page (people come from sources that carry identity by design, plan section 9a). */
+export function parseYcCompanyPage(html: string, url: string): YcCompanyProfile {
+  const m = html.match(/data-page="([^"]+)"/);
+  if (!m) throw new Error("YC company page: no data-page payload");
+  const decoded = m[1]!.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+  const page = JSON.parse(decoded) as { props?: { company?: { founders?: YcFounderJson[] }; newsItems?: YcNewsJson[] } };
+  const founders = (page.props?.company?.founders ?? [])
+    .filter((f) => f.full_name)
+    .map((f) => ({ name: f.full_name!.trim(), title: f.title ?? null, linkedin: f.linkedin_url || null, twitter: f.twitter_url || null, active: f.is_active !== false }));
+  const news = (page.props?.newsItems ?? []).filter((n) => n.title && n.url).map((n) => ({ title: n.title!, url: n.url!, date: n.date }));
+  return { url, founders, news };
+}
+
+export async function fetchYcCompanyProfile(slug: string): Promise<YcCompanyProfile> {
+  const url = `https://www.ycombinator.com/companies/${encodeURIComponent(slug)}`;
+  if (!(await robotsAllows(url))) throw new Error("robots.txt disallows YC company page");
+  return parseYcCompanyPage(await politeGet(url, 1000), url);
+}

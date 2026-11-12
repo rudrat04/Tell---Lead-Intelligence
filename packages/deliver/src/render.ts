@@ -1,6 +1,7 @@
 import type { Pack } from "@tell/config";
 import type { Evidence } from "@tell/intel";
 import type { ScoreRunResult } from "@tell/pipeline";
+import { firstName, type Contact } from "@tell/people";
 
 /** Daily digest (plan section 10). "Why now" is written by code from cited evidence: free and deterministic. */
 
@@ -36,17 +37,47 @@ export function describe(e: Evidence): string {
 }
 
 type Lead = ScoreRunResult["ranking"]["leads"][number];
+export type Contacts = Map<string, Contact | null>;
 
-function leadHtml(l: Lead, i: number): string {
+/** The opening line, written by code from the strongest evidence: "Hi Riya, saw Bluejay has had a "GTM Engineer" role open for 4 months." */
+export function opener(c: Contact | null | undefined, company: string, e: Evidence | undefined): string | null {
+  if (!e) return null;
+  const t = `"${e.quote}"`;
+  const phrase = {
+    core_role_open_45d: `saw ${company} has had a ${t} role open for ${ago(e.openDays ?? 45)}`,
+    core_role_open: `saw ${company} is hiring a ${t}`,
+    first_role: `saw ${company} is making a founding GTM hire (${t})`,
+    contract_role: `saw ${company} is looking for a contract ${t}`,
+    adjacent_role_open: `saw ${company} is hiring ${t}`,
+    explicit_hire_request: `saw your post asking for help: ${t}`,
+    pain_post: `saw your post: ${t}`,
+  }[e.type] ?? `saw ${company}: ${t}`;
+  return c ? `Hi ${firstName(c.person.name)}, ${phrase}.` : `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}.`;
+}
+
+function contactLinks(c: Contact): string {
+  const links = [c.person.linkedin && `<a href="${esc(c.person.linkedin)}" style="color:#1a56db">LinkedIn</a>`, c.person.twitter && `<a href="${esc(c.person.twitter)}" style="color:#1a56db">X</a>`].filter(Boolean);
+  return links.join(" · ");
+}
+
+function leadHtml(l: Lead, i: number, contacts?: Contacts): string {
   const a = l.account, s = l.score;
   const play = s.plays[0];
+  const c = contacts?.get(a.id);
+  const company = a.name ?? a.domain;
+  const open = opener(c, company, s.drivers[0]);
   const facts = [a.sizeBand && `${a.sizeBand} people`, a.segment?.toUpperCase(), a.region].filter(Boolean).join(" · ");
+  const who = c
+    ? `<div style="font-size:16px;font-weight:600">${i + 1}. ${esc(c.person.name)}<span style="font-weight:400">, ${esc(c.person.role ?? "")} at</span> <a href="https://${esc(a.domain)}" style="color:#111827;text-decoration:none">${esc(company)}</a></div>
+  <div style="font-size:13px;color:#6b7280;margin-top:2px">${contactLinks(c)}${contactLinks(c) ? " · " : ""}${esc(c.persona ?? c.note)} · ${esc(a.domain)}${facts ? ` · ${esc(facts)}` : ""}</div>`
+    : `<div style="font-size:16px;font-weight:600">${i + 1}. <a href="https://${esc(a.domain)}" style="color:#111827;text-decoration:none">${esc(company)}</a>
+    <span style="font-weight:400;color:#6b7280;font-size:13px">${esc(a.domain)}${facts ? ` · ${esc(facts)}` : ""} · no contact found yet</span></div>`;
   const why = s.drivers.slice(0, 4).map((e) => `<li style="margin:2px 0"><a href="${esc(e.url)}" style="color:#1a56db;text-decoration:none">${esc(describe(e))}</a></li>`).join("");
   const plays = s.plays.map((p) => esc(p.title)).join(" + ");
   return `
 <tr><td style="padding:16px 0;border-top:1px solid #e5e7eb">
-  <div style="font-size:16px;font-weight:600">${i + 1}. <a href="https://${esc(a.domain)}" style="color:#111827;text-decoration:none">${esc(a.name ?? a.domain)}</a>
-    <span style="font-weight:400;color:#6b7280;font-size:13px">${esc(a.domain)}${facts ? ` · ${esc(facts)}` : ""}</span></div>
+  ${who}
+  ${open ? `<div style="margin-top:8px;padding:8px 12px;background:#f3f4f6;border-left:3px solid #6366f1;font-size:14px">${esc(open)}</div>` : ""}
   ${plays ? `<div style="margin-top:4px;font-size:13px"><span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px">${plays}</span>${s.lane === "fast" ? ` <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px">single-source</span>` : ""}</div>` : ""}
   <ul style="margin:8px 0 0 18px;padding:0;font-size:14px;color:#111827">${why}</ul>
   ${play ? `<div style="margin-top:8px;font-size:14px;color:#374151"><b>Angle:</b> ${esc(play.angle)}</div>` : ""}
@@ -54,10 +85,15 @@ function leadHtml(l: Lead, i: number): string {
 </td></tr>`;
 }
 
-function leadText(l: Lead, i: number): string {
+function leadText(l: Lead, i: number, contacts?: Contacts): string {
   const a = l.account, s = l.score;
+  const c = contacts?.get(a.id);
+  const open = opener(c, a.name ?? a.domain, s.drivers[0]);
   return [
-    `${i + 1}. ${a.name ?? a.domain} (${a.domain}) ${[a.sizeBand, a.segment, a.region].filter(Boolean).join(", ")}`,
+    c ? `${i + 1}. ${c.person.name}, ${c.person.role ?? ""} at ${a.name ?? a.domain} (${a.domain})` : `${i + 1}. ${a.name ?? a.domain} (${a.domain}), no contact found yet`,
+    c ? `   ${[c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}${c.persona ? "" : ` (${c.note})`}` : "",
+    `   ${[a.sizeBand && `${a.sizeBand} people`, a.segment, a.region].filter(Boolean).join(", ")}`,
+    open ? `   Opener: ${open}` : "",
     s.plays.length ? `   Plays: ${s.plays.map((p) => p.title).join(" + ")}${s.lane === "fast" ? " [single-source]" : ""}` : "",
     ...s.drivers.slice(0, 4).map((e) => `   - ${describe(e)}  ${e.url}`),
     s.plays[0] ? `   Angle: ${s.plays[0].angle}` : "",
@@ -65,10 +101,11 @@ function leadText(l: Lead, i: number): string {
   ].filter(Boolean).join("\n");
 }
 
-export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string): DigestEmail {
+export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts): DigestEmail {
   const leads = r.ranking.leads, watch = r.ranking.watchlist, people = r.personLeads;
+  const named = (l: Lead) => { const c = contacts?.get(l.account.id); const co = l.account.name ?? l.account.domain; return c ? `${firstName(c.person.name)} at ${co}` : co; };
   const subject = leads.length
-    ? `${leads.length} lead${leads.length === 1 ? "" : "s"} for ${date}: ${leads.slice(0, 3).map((l) => l.account.name ?? l.account.domain).join(", ")}`
+    ? `${leads.length} ${contacts ? (leads.length === 1 ? "person to contact" : "people to contact") : `lead${leads.length === 1 ? "" : "s"}`} for ${date}: ${leads.slice(0, 3).map(named).join(", ")}`
     : `No new leads for ${date}`;
 
   const healthLines = [
@@ -91,9 +128,9 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f9fafb">
 <div style="max-width:680px;margin:0 auto;padding:24px;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#111827;background:#ffffff">
   <div style="font-size:13px;color:#6b7280">${esc(pack.meta.name)} · ${esc(date)}</div>
-  <h2 style="font-size:20px;margin:4px 0 4px">${leads.length ? `Top ${leads.length} leads today` : "No leads today"}</h2>
+  <h2 style="font-size:20px;margin:4px 0 4px">${leads.length ? `${leads.length} ${leads.length === 1 ? "person" : "people"} to contact today` : "No leads today"}</h2>
   <div style="font-size:13px;color:#6b7280">Ranked by need now × ICP fit × timing. Month one: trust the order more than the percentages, and label what you see.</div>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px">${leads.map(leadHtml).join("")}</table>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px">${leads.map((l, i) => leadHtml(l, i, contacts)).join("")}</table>
   ${watchHtml}${peopleHtml}
   <h3 style="font-size:15px;margin:24px 0 4px">Health</h3>
   <ul style="margin:0 0 0 18px;padding:0;font-size:13px;color:#374151">${healthLines.map((h) => `<li style="margin:2px 0">${esc(h)}</li>`).join("")}</ul>
@@ -103,7 +140,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `${pack.meta.name} · ${date}`,
     leads.length ? `TOP ${leads.length} LEADS` : "NO LEADS TODAY",
     "",
-    ...leads.map((l, i) => leadText(l, i) + "\n"),
+    ...leads.map((l, i) => leadText(l, i, contacts) + "\n"),
     watch.length ? `WATCHLIST\n${watch.map((w) => `- ${w.account.name ?? w.account.domain} (${w.account.domain})`).join("\n")}\n` : "",
     people.length ? `PERSON LEADS\n${people.map((p) => `- ${p.platform}/${p.handle}: "${p.quote}" ${p.url}`).join("\n")}\n` : "",
     "HEALTH",

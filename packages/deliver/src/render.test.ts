@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import type { ScoreRunResult } from "@tell/pipeline";
 import type { AccountScore, Evidence } from "@tell/intel";
-import { renderDigest, describe as describeEvidence } from "./render.js";
+import { renderDigest, opener, describe as describeEvidence } from "./render.js";
 import { buildMime } from "./gmail.js";
 
 const pack = await loadFixturePack();
@@ -38,6 +38,24 @@ describe("digest render", () => {
     const e = renderDigest(result(0), pack, { ...health, ticks24h: 3 }, "2026-11-12");
     expect(e.subject).toBe("No new leads for 2026-11-12");
     expect(e.text).toContain("expected about 48: check the schedule");
+  });
+});
+
+describe("people-first digest", () => {
+  const contact = { person: { name: "Riya Sample", role: "Founder/CEO", linkedin: "https://linkedin.com/in/riya", source: "yc" }, persona: "Founder / CEO", note: "Founder / CEO" };
+  it("opener names the person and the evidence", () => {
+    expect(opener(contact, "Bluejay", ev({ openDays: 120 }))).toBe('Hi Riya, saw Bluejay has had a "GTM Engineer" role open for 4 months.');
+    expect(opener(null, "Bluejay", ev({ type: "first_role", quote: "Founding AE" }))).toBe('Saw Bluejay is making a founding GTM hire ("Founding AE").');
+  });
+  it("leads are headed by the person, with links; subject names people", () => {
+    const e = renderDigest(result(1), pack, health, "2026-11-12", new Map([["a0", contact]]));
+    expect(e.subject).toBe("1 person to contact for 2026-11-12: Riya at Acme 0");
+    expect(e.html).toContain("Riya Sample");
+    expect(e.html).toContain('href="https://linkedin.com/in/riya"');
+    expect(e.text).toContain("Opener: Hi Riya, saw Acme 0 has had");
+  });
+  it("says so when no contact is known", () => {
+    expect(renderDigest(result(1), pack, health, "2026-11-12", new Map()).text).toContain("no contact found yet");
   });
 });
 
