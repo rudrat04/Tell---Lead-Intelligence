@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { fetchYcCompanyProfile, exaPeopleSearch, parseProfileTitle, type YcCompanyProfile, type PeopleSearch } from "@tell/watchers";
+import { fetchYcCompanyProfile, exaPeopleSearch, type YcCompanyProfile, type PeopleSearch } from "@tell/watchers";
 import { toRegex } from "@tell/config";
 import { applyPackIdentity } from "./scheduled.js";
 import { pickContact, acceptPeopleHit, type Contact, type Person } from "@tell/people";
@@ -74,7 +74,7 @@ export async function contactsFor(
         let found: Person[] = [];
         try {
           const hits = await search.search(`${persona.search ?? persona.title.split("/")[0]!.trim()} at ${company}`, 5);
-          found = hits.map((h) => acceptPeopleHit(h, parseProfileTitle(h.title), company, acct.domain, rx)).filter((x): x is Person => !!x).slice(0, 2);
+          found = hits.map((h) => acceptPeopleHit(h, company, acct.domain, rx)).filter((x): x is Person => !!x).slice(0, 2);
         } catch { /* provider down or out of credit: try again next run */ continue; }
         const list = byAccount.get(acct.id) ?? [];
         for (const f of found) if (!list.some((p) => p.name === f.name)) list.push(f);
