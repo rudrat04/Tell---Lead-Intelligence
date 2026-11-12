@@ -9,7 +9,11 @@ const NOT_GTM = /\b(sales engineer|solutions engineer|engineering manager|softwa
 const CONTRACT = /\b(contract(or)?|freelance|part[- ]time|temporary|temp|fractional|consultant)\b/i;
 const FOUNDING = /\b(founding|first)\b/i;
 
+const INTERN = /\b(intern|internship|working student|apprentice)\b/i;
+
 export function classifyJob(title: string, employmentType?: string): JobClass | null {
+  // an internship isn't a funded GTM/ops need
+  if (INTERN.test(title) || /intern/i.test(employmentType ?? "")) return null;
   const ops = OPS.test(title);
   const gtm = !ops && GTM.test(title) && !NOT_GTM.test(title);
   if (!ops && !gtm) return null;

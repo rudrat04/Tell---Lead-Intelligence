@@ -18,8 +18,9 @@ describe("classifyJob", () => {
     ["Head of Growth", "gtm"],
     ["Product Marketing Manager", "gtm"],
   ])("%s -> %s", (title, family) => expect(classifyJob(title)?.family).toBe(family));
-  it.each(["Senior Software Engineer", "Sales Engineer", "Solutions Engineer", "Data Engineer", "Office Manager"])("%s -> not a GTM role", (t) =>
+  it.each(["Senior Software Engineer", "Sales Engineer", "Solutions Engineer", "Data Engineer", "Office Manager", "AI GTM Engineer Intern", "RevOps Internship"])("%s -> not a GTM role", (t) =>
     expect(classifyJob(t)).toBeNull());
+  it("intern employment type is excluded", () => expect(classifyJob("GTM Engineer", "Intern")).toBeNull());
   it("contract and founding flags", () => {
     expect(classifyJob("RevOps Consultant (Contract)")).toMatchObject({ contract: true });
     expect(classifyJob("Marketing Ops Manager", "Part-time")).toMatchObject({ contract: true });
