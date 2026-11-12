@@ -12,6 +12,8 @@ export interface Person {
 
 export interface Contact {
   person: Person;
+  /** other known people matching your personas at this account (shown under "Also reach") */
+  others?: { persona: string; person: Person }[];
   /** the pack persona this person matched, or null when we fell back to the best available person */
   persona: string | null;
   /** why this person (shown in the digest) */
@@ -51,11 +53,34 @@ export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;
  * Only personas meant for this company size, excluding the one the named contact already covers.
  */
 export function personaSearchLinks(personas: Pack["icp"]["personas"], sizeBand: string | null, company: string, contact: Contact | null): { persona: string; url: string }[] {
+  const named = new Set([contact?.persona, ...(contact?.others ?? []).map((o) => o.persona)].filter(Boolean));
   return personas
     .filter((p) => !(p.size_bands.length && sizeBand && !p.size_bands.includes(sizeBand)))
-    .filter((p) => p.title !== contact?.persona)
+    .filter((p) => !named.has(p.title))
     .map((p) => {
       const term = p.search ?? p.title.split("/")[0]!.trim();
       return { persona: p.title, url: `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(`${term} ${company}`)}` };
     });
+}
+
+const normCo = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]+/g, " ").replace(/\b(inc|llc|ltd|limited|gmbh|corp|co|hq|labs?|technologies|tech|ai|io|app)\b/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * Accept a people-search hit only if it is clearly this persona at this company (never guess):
+ * the headline matches the persona's title patterns, and the headline or snippet names the company.
+ */
+export function acceptPeopleHit(
+  hit: { title: string; url: string; text?: string | null },
+  parsed: { name: string; headline: string } | null,
+  company: string, domain: string, patterns: RegExp[],
+): Person | null {
+  if (!parsed) return null;
+  if (!patterns.some((r) => r.test(parsed.headline))) return null;
+  const co = normCo(company);
+  const label = domain.split(".")[0]!.toLowerCase();
+  const hay = normCo(`${parsed.headline} ${hit.text ?? ""}`);
+  const named = (co.length >= 3 && new RegExp(`\\b${co.replace(/ /g, "\\s+")}\\b`).test(hay)) || (label.length >= 4 && new RegExp(`\\b${label}\\b`).test(hay));
+  if (!named) return null;
+  const linkedin = /linkedin\.com\/in\//i.test(hit.url) ? hit.url : null;
+  return { name: parsed.name, role: parsed.headline.slice(0, 120), linkedin, twitter: null, source: "exa", sourceUrl: hit.url };
 }

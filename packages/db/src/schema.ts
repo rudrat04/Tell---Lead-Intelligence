@@ -353,3 +353,12 @@ export const gigs = pgTable("gigs", {
   uniqueIndex("gigs_source_external_uq").on(t.source, t.externalId),
   index("gigs_dedupe_idx").on(t.dedupeKey),
 ]);
+
+/** People searches already made (per account + persona), so the same search isn't repeated within the cache window. */
+export const peopleSearches = pgTable("people_searches", {
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  persona: text("persona").notNull(),
+  provider: text("provider").notNull(),
+  found: integer("found").notNull().default(0),
+  searchedAt: ts("searched_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.accountId, t.persona, t.provider] })]);

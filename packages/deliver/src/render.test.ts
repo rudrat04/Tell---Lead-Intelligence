@@ -93,6 +93,20 @@ describe("non-hiring signal wording", () => {
   ])("%#", (e, want) => expect(opener(c, "Acme", e)).toBe(want));
 });
 
+describe("people beyond founders", () => {
+  it("names people found for other personas and drops their search link", () => {
+    const contact = {
+      person: { name: "Riya S", role: "Founder/CEO", source: "yc" }, persona: "Founder / CEO", note: "",
+      others: [{ persona: "RevOps lead", person: { name: "Jane Doe", role: "Head of Revenue Operations at Acme 0", linkedin: "https://www.linkedin.com/in/jane", source: "exa" } }],
+    };
+    const e = renderDigest(result(1), pack, health, "2026-11-13", new Map([["a0", contact]]));
+    expect(e.html).toContain('<a href="https://www.linkedin.com/in/jane"');
+    expect(e.text).toContain("Also: Jane Doe, Head of Revenue Operations at Acme 0");
+    expect(e.text).not.toContain("Also reach RevOps lead");
+    expect(e.text).toContain("Also reach Head of GTM / Revenue");
+  });
+});
+
 describe("MIME", () => {
   it("builds a multipart message with encoded non-ASCII headers", () => {
     const m = buildMime({ from: "a@x.com", fromName: "Lead digest", to: "b@y.com", subject: "Leads — today", html: "<b>hi</b>", text: "hi" }, "BOUND");

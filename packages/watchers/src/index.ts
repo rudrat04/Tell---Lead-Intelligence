@@ -10,3 +10,4 @@ export * from "./board-links.js";
 export * from "./yc.js";
 export * from "./gigs.js";
 export * from "./site.js";
+export * from "./people-search.js";

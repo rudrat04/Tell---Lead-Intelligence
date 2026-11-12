@@ -91,6 +91,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
 
       # Dead-man's switch: healthchecks.io emails you if this ping doesn't arrive on time.
       # Success only when the digest step itself succeeded (other steps are continue-on-error).

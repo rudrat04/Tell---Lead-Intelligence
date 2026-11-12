@@ -1,8 +1,9 @@
 import type { Pack } from "@tell/config";
-import { fetchYcCompanyProfile, type YcCompanyProfile } from "@tell/watchers";
+import { fetchYcCompanyProfile, exaPeopleSearch, parseProfileTitle, type YcCompanyProfile, type PeopleSearch } from "@tell/watchers";
+import { toRegex } from "@tell/config";
 import { applyPackIdentity } from "./scheduled.js";
-import { pickContact, type Contact, type Person } from "@tell/people";
-import { getDb, people, jobBoards, accounts, and, eq, inArray, sql } from "@tell/db";
+import { pickContact, acceptPeopleHit, type Contact, type Person } from "@tell/people";
+import { getDb, people, peopleSearches, jobBoards, accounts, and, eq, inArray, sql } from "@tell/db";
 
 const DAY = 86_400_000;
 export const PEOPLE_REFRESH_DAYS = 30;
@@ -11,7 +12,10 @@ export const PEOPLE_REFRESH_DAYS = 30;
  * Contacts for the accounts going into the digest (plan section 9, people only; emails come later).
  * Source today: founders listed publicly on the company's YC page (fetched at most every 30 days, provenance stored).
  */
-export async function contactsFor(accountIds: string[], pack: Pack, opts: { write?: boolean } = {}): Promise<Map<string, Contact | null>> {
+export async function contactsFor(
+  accountIds: string[], pack: Pack,
+  opts: { write?: boolean; search?: PeopleSearch | null; searchFor?: string[]; maxSearches?: number } = {},
+): Promise<Map<string, Contact | null>> {
   applyPackIdentity(pack);
   const out = new Map<string, Contact | null>();
   if (accountIds.length === 0) return out;
@@ -31,7 +35,8 @@ export async function contactsFor(accountIds: string[], pack: Pack, opts: { writ
 
   const slugs = await db.select({ a: jobBoards.accountId, slug: jobBoards.slug }).from(jobBoards)
     .where(and(eq(jobBoards.source, "yc"), inArray(jobBoards.accountId, accountIds)));
-  const sizes = new Map((await db.select({ id: accounts.id, size: accounts.sizeBand }).from(accounts).where(inArray(accounts.id, accountIds))).map((r) => [r.id, r.size]));
+  const acctRows = await db.select({ id: accounts.id, size: accounts.sizeBand, name: accounts.name, domain: accounts.domain }).from(accounts).where(inArray(accounts.id, accountIds));
+  const sizes = new Map(acctRows.map((r) => [r.id, r.size]));
 
   for (const { a, slug } of slugs) {
     if (freshYc.has(a)) continue;
@@ -47,7 +52,62 @@ export async function contactsFor(accountIds: string[], pack: Pack, opts: { writ
     }
   }
 
-  for (const id of accountIds) out.set(id, pickContact(byAccount.get(id) ?? [], pack.icp.personas, sizes.get(id) ?? null));
+  // People search (Exa people index) for personas nobody is known for yet, on the accounts going out today.
+  // Cached per account + persona for PEOPLE_REFRESH_DAYS; capped per run to stay inside the free tier.
+  const search = opts.search === undefined ? (process.env.EXA_API_KEY ? exaPeopleSearch() : null) : opts.search;
+  if (search) {
+    let budget = opts.maxSearches ?? 25;
+    const targets = new Set(opts.searchFor ?? accountIds);
+    const memo = new Set((await db.select({ a: peopleSearches.accountId, p: peopleSearches.persona }).from(peopleSearches)
+      .where(and(inArray(peopleSearches.accountId, [...targets]), sql`${peopleSearches.searchedAt} > ${new Date(Date.now() - PEOPLE_REFRESH_DAYS * DAY)}`)))
+      .map((r) => `${r.a}:${r.p}`));
+    for (const acct of acctRows) {
+      if (!targets.has(acct.id)) continue;
+      const company = acct.name ?? acct.domain;
+      for (const persona of pack.icp.personas) {
+        if (budget <= 0) break;
+        if (persona.size_bands.length && acct.size && !persona.size_bands.includes(acct.size)) continue;
+        const rx = persona.patterns.map(toRegex);
+        const have = (byAccount.get(acct.id) ?? []).some((p) => p.role && rx.some((r) => r.test(p.role!)));
+        if (have || memo.has(`${acct.id}:${persona.title}`)) continue;
+        budget--;
+        let found: Person[] = [];
+        try {
+          const hits = await search.search(`${persona.search ?? persona.title.split("/")[0]!.trim()} at ${company}`, 5);
+          found = hits.map((h) => acceptPeopleHit(h, parseProfileTitle(h.title), company, acct.domain, rx)).filter((x): x is Person => !!x).slice(0, 2);
+        } catch { /* provider down or out of credit: try again next run */ continue; }
+        const list = byAccount.get(acct.id) ?? [];
+        for (const f of found) if (!list.some((p) => p.name === f.name)) list.push(f);
+        byAccount.set(acct.id, list);
+        if (write) {
+          if (found.length) {
+            await db.insert(people).values(found.map((f) => ({
+              accountId: acct.id, fullName: f.name, role: f.role, source: "exa", confidence: 0.7, sourceUrl: f.sourceUrl,
+              profileUrls: { linkedin: f.linkedin ?? undefined }, fetchedAt: new Date(),
+            }))).onConflictDoUpdate({ target: [people.accountId, people.fullName, people.source], set: { role: sql`excluded.role`, fetchedAt: sql`excluded.fetched_at` } });
+          }
+          await db.insert(peopleSearches).values({ accountId: acct.id, persona: persona.title, provider: "exa", found: found.length, searchedAt: new Date() })
+            .onConflictDoUpdate({ target: [peopleSearches.accountId, peopleSearches.persona, peopleSearches.provider], set: { found: found.length, searchedAt: new Date() } });
+        }
+      }
+    }
+  }
+
+  for (const id of accountIds) {
+    const list = byAccount.get(id) ?? [];
+    const contact = pickContact(list, pack.icp.personas, sizes.get(id) ?? null);
+    if (contact) {
+      // other named people matching your personas, for "Also reach"
+      contact.others = pack.icp.personas
+        .filter((p) => p.title !== contact.persona)
+        .flatMap((p) => {
+          const rx = p.patterns.map(toRegex);
+          const hit = list.find((x) => x !== contact.person && x.role && rx.some((r) => r.test(x.role!)));
+          return hit ? [{ persona: p.title, person: hit }] : [];
+        });
+    }
+    out.set(id, contact);
+  }
   return out;
 }
 

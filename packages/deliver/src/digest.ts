@@ -58,7 +58,10 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
 
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
   const score = await runScoring({ pack, write: !opts.dryRun && !opts.test });
-  const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, { write: !opts.dryRun });
+  // people search only for today's leads (not the watchlist) to stay inside the search API's free tier
+  const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {
+    write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id),
+  });
   const gigList = await gigsForDigest(pack);
   const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
   h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;

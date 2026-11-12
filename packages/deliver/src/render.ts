@@ -71,6 +71,12 @@ export function opener(c: Contact | null | undefined, company: string, e: Eviden
   return c ? `Hi ${firstName(c.person.name)}, ${phrase}.` : `${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}.`;
 }
 
+function othersHtml(c: Contact | null | undefined): string {
+  const others = c?.others ?? [];
+  if (!others.length) return "";
+  return `<div style="font-size:13px;margin-top:4px">Also: ${others.map((o) => `${o.person.linkedin ? `<a href="${esc(o.person.linkedin)}" style="color:#1a56db">${esc(o.person.name)}</a>` : esc(o.person.name)}, ${esc(o.person.role ?? o.persona)}`).join(" · ")}</div>`;
+}
+
 function alsoHtml(links: { persona: string; url: string }[]): string {
   if (!links.length) return "";
   return `<div style="font-size:12px;color:#6b7280;margin-top:4px">Also reach: ${links.map((x) => `<a href="${esc(x.url)}" style="color:#1a56db">${esc(x.persona)}</a>`).join(" · ")} <span style="color:#9ca3af">(LinkedIn search)</span></div>`;
@@ -98,7 +104,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   return `
 <tr><td style="padding:16px 0;border-top:1px solid #e5e7eb">
   ${who}
-  ${alsoHtml(personaSearchLinks(personas, a.sizeBand, company, c ?? null))}
+  ${othersHtml(c)}${alsoHtml(personaSearchLinks(personas, a.sizeBand, company, c ?? null))}
   ${open ? `<div style="margin-top:8px;padding:8px 12px;background:#f3f4f6;border-left:3px solid #6366f1;font-size:14px">${esc(open)}</div>` : ""}
   ${plays || !hasHiring(s) ? `<div style="margin-top:4px;font-size:13px">${plays ? `<span style="background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:10px">${plays}</span>` : ""}${!hasHiring(s) ? ` <span style="background:#ecfdf5;color:#065f46;padding:2px 8px;border-radius:10px">non-hiring signal</span>` : ""}${s.lane === "fast" ? ` <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px">single-source</span>` : ""}</div>` : ""}
   <ul style="margin:8px 0 0 18px;padding:0;font-size:14px;color:#111827">${why}</ul>
@@ -116,6 +122,7 @@ function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
     c ? `   ${[c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}${c.persona ? "" : ` (${c.note})`}` : "",
     `   ${[a.sizeBand && `${a.sizeBand} people`, a.segment, a.region].filter(Boolean).join(", ")}`,
     open ? `   Opener: ${open}` : "",
+    ...(c?.others ?? []).map((o) => `   Also: ${o.person.name}, ${o.person.role ?? o.persona}${o.person.linkedin ? ` ${o.person.linkedin}` : ""}`),
     ...personaSearchLinks(personas, a.sizeBand, a.name ?? a.domain, c ?? null).map((x) => `   Also reach ${x.persona}: ${x.url}`),
     !hasHiring(s) ? "   [non-hiring signal]" : "",
     s.plays.length ? `   Plays: ${s.plays.map((p) => p.title).join(" + ")}${s.lane === "fast" ? " [single-source]" : ""}` : "",
