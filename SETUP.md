@@ -7,7 +7,7 @@ Do these yourself (account creation and secrets are yours to enter). Put values 
    - Apply migrations: `psql "$DATABASE_URL" -f packages/db/migrations/0000_init.sql` then `0001_partitions.sql` (the `--> statement-breakpoint` lines are SQL comments, so psql accepts the files as they are).
 2. **Anthropic**: create an API key, set `ANTHROPIC_API_KEY`, and set a monthly spend limit in the console. Set `HAIKU_DAILY_CAP_USD` (default 1).
 3. **Trigger.dev Cloud**: create a project, put its ref in `TRIGGER_PROJECT_REF`, then `npx trigger.dev@latest login` and `npx trigger.dev deploy`. Add the env vars above in the dashboard.
-4. **Reddit**: create a "script" app at reddit.com/prefs/apps with a dedicated account. Set `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USERNAME`, `REDDIT_PASSWORD`. Check Reddit's current Data API terms and approval requirements first; they have changed over time.
+4. **Reddit: on hold.** Reddit's Responsible Builder Policy requires approval before any API access, and written approval for commercial use (lead generation likely counts). Request access honestly via the commercial contact link in that policy. Until approved, the Reddit watchers are disabled in `packages/watchers/src/policy.ts`; leave `REDDIT_*` blank. The same policy bans re-identifying users via off-platform identifiers, so Reddit authors are only ever linked to a company the post itself names or links.
 
 ## Later (not needed yet)
 - **Cloudflare R2**: bucket + 30-day lifecycle rule on `raw/`; set `R2_*` vars.

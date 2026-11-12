@@ -1,4 +1,6 @@
 version: 1
 sources:
+  reddit:       { cadence: 30m, enabled: false, note: "awaiting Reddit API approval" }
+  forhire-subs: { cadence: 30m, enabled: false, note: "awaiting Reddit API approval" }
   hn:         { cadence: 30m, fallback: algolia }
   ats-boards: { cadence: 1d }

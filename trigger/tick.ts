@@ -1,6 +1,6 @@
 import { schedules } from "@trigger.dev/sdk";
 import { runTick, neonStore } from "@tell/pipeline";
-import { hn, reddit, forhireSubs } from "@tell/watchers";
+import { hn, reddit, forhireSubs, isSourceEnabled } from "@tell/watchers";
 import { HaikuClient } from "@tell/extract";
 import { gate1, loadNeverPatterns } from "@tell/intel";
 
@@ -14,7 +14,8 @@ export const tick = schedules.task({
     const summaries = await runTick({
       store: neonStore(),
       gates: { llm: new HaikuClient({ dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) }), gate1: (t) => gate1(t, never) },
-      watchers: [reddit, forhireSubs, hn],
+      // Reddit watchers stay disabled by policy until API access is approved (see packages/watchers/src/policy.ts)
+      watchers: [reddit, forhireSubs, hn].filter((w) => isSourceEnabled(w.id)),
     });
     return summaries;
   },
