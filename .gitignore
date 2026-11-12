@@ -12,3 +12,6 @@ PLAN-next.md
 # your real config packs (private: push them to R2, never commit)
 packs/*
 !packs/example-gtm/
+
+# local digest previews contain lead details
+digest-preview.html

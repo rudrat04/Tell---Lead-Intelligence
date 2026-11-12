@@ -43,6 +43,8 @@ export interface Evidence {
   ageDays: number;
   /** still true today (open role) */
   current: boolean;
+  /** for roles: days since the board says it was posted (or we first saw it) */
+  openDays?: number;
   quote: string;
   url: string;
   /** what this came from, for citations */
@@ -84,7 +86,7 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
     else ageDays = Math.min(daysOpen, OPEN_ROLE_MAX_AGE_DAYS);
 
     keep(`role:${cls.family}:${normTitle(j.title)}`, {
-      type, class: specs[type]!.class, ageDays, current: open, quote: j.title, url: j.url, ref: { kind: "job", id: j.id },
+      type, class: specs[type]!.class, ageDays, current: open, openDays: Math.round(daysOpen), quote: j.title, url: j.url, ref: { kind: "job", id: j.id },
     });
   }
 

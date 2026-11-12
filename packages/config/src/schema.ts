@@ -132,6 +132,8 @@ export const DomainsSchema = z.object({
 export const DeliverySchema = z.object({
   digest: z.object({
     to: z.string().email().optional(),
+    /** the Gmail / Google Workspace address that sends (the authorised OAuth account) */
+    from: z.string().email().optional(),
     from_name: z.string().default("Lead digest"),
     max_leads: z.number().int().min(1).max(25).default(10),
     send_hour_local: z.number().int().min(0).max(23).default(9),

@@ -16,11 +16,14 @@
     "pack:push": "tsx scripts/pack.ts push",
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:generate": "pnpm --filter @tell/db generate",
-    "score": "tsx scripts/score.ts"
+    "score": "tsx scripts/score.ts",
+    "digest": "tsx scripts/digest.ts",
+    "gmail:auth": "tsx scripts/gmail-auth.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",
     "@tell/db": "workspace:*",
+    "@tell/deliver": "workspace:*",
     "@tell/extract": "workspace:*",
     "@tell/intel": "workspace:*",
     "@tell/people": "workspace:*",
