@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { fileURLToPath } from "node:url";
 import type { RawItem } from "@tell/watchers";
 import type { PostExtraction } from "@tell/extract";
-import { loadDomainLists, registrableDomain, rawCandidates, filterCandidates, chooseDomain, nameMatchesDomain } from "./domains.js";
+import { loadFixturePack } from "@tell/config";
+import { domainLists, registrableDomain, rawCandidates, filterCandidates, chooseDomain, nameMatchesDomain } from "./domains.js";
 import { resolveItem, type ResolverNet } from "./resolve.js";
-import { recordConfirmed, loadSignalSpecs, type LeadStore } from "./persist.js";
+import { recordConfirmed, type LeadStore } from "./persist.js";
 
-const cfg = (f: string) => fileURLToPath(new URL(`../../../config/${f}`, import.meta.url));
-const lists = loadDomainLists(cfg("domains.yaml"));
-const specs = loadSignalSpecs(cfg("signals.yaml"));
+const pack = await loadFixturePack();
+const lists = domainLists(pack.domains);
+const specs = pack.signals.signals;
 
 const x = (o: Partial<PostExtraction> = {}): PostExtraction => ({
   author_role: "founder", ask_type: "hire", problem_category: "crm", company_identifiable: true, company_name: null,

@@ -8,13 +8,17 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run",
-    "db:generate": "pnpm --filter @tell/db generate",
     "smoke": "tsx scripts/smoke-tick.ts",
     "tick": "tsx scripts/tick.ts",
     "boards:discover": "tsx scripts/discover-boards.ts",
-    "boards:check": "tsx scripts/check-boards.ts"
+    "boards:check": "tsx scripts/check-boards.ts",
+    "pack:check": "tsx scripts/pack.ts check",
+    "pack:push": "tsx scripts/pack.ts push",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:generate": "pnpm --filter @tell/db generate"
   },
   "devDependencies": {
+    "@tell/config": "workspace:*",
     "@tell/db": "workspace:*",
     "@tell/extract": "workspace:*",
     "@tell/intel": "workspace:*",

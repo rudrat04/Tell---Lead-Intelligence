@@ -1,0 +1,9 @@
+hn:
+  enabled: true
+  queries: ["seeking freelancer", "who is hiring", "RevOps", "HubSpot freelancer", "GTM engineer"]
+reddit:
+  enabled: false   # needs Reddit API approval (Responsible Builder Policy)
+  subs: [SaaS, startups, Entrepreneur, RevOps, sales, marketing, agency, hubspot, salesforce, coldemail]
+  hiring_subs: [forhire, hiring, freelance_forhire]
+yc:
+  enabled: true

@@ -1,15 +1,10 @@
-import { parse as parseYaml } from "yaml";
-import { readFileSync } from "node:fs";
+import type { Pack } from "@tell/config";
 import type { RawItem } from "@tell/watchers";
 import type { PostExtraction } from "@tell/extract";
 import { getDb, accounts, signals, authorMappings, personLeads, and, eq, sql } from "@tell/db";
 import { signalTypeFor, type Resolution } from "./resolve.js";
 
-export interface SignalSpec { class: string; half_life_days: number }
-
-export function loadSignalSpecs(path: string): Record<string, SignalSpec> {
-  return (parseYaml(readFileSync(path, "utf8")) as { signals: Record<string, SignalSpec> }).signals;
-}
+export type SignalSpec = Pack["signals"]["signals"][string];
 
 /** Writes for confirmed signals. Every write is idempotent (unique keys from migration 0002). */
 export interface LeadStore {
@@ -26,7 +21,7 @@ export type RecordOutcome = "account" | "person" | "unresolved";
 export async function recordConfirmed(item: RawItem, x: PostExtraction, res: Resolution, specs: Record<string, SignalSpec>, store: LeadStore): Promise<RecordOutcome> {
   const type = signalTypeFor(x);
   const spec = specs[type];
-  if (!spec) throw new Error(`signal type ${type} missing from signals.yaml`);
+  if (!spec) throw new Error(`signal type ${type} missing from the pack (signals.yaml)`);
 
   const accountId = res.kind === "account" ? await store.upsertAccount(res.domain, x.company_name) : null;
   const signalId = await store.insertSignal({

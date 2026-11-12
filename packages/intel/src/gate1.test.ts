@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { gate1, detectInjection, loadNeverPatterns, loadGate1Rules } from "./gate1.js";
-import { fileURLToPath } from "node:url";
+import { gate1, detectInjection, gate1Rules } from "./gate1.js";
+import { loadFixturePack } from "@tell/config";
 
-const never = loadNeverPatterns(fileURLToPath(new URL("../../../config/signals.yaml", import.meta.url)));
+const rules = gate1Rules(await loadFixturePack());
+const never = rules.never;
 
 describe("gate1", () => {
   it("loads never patterns from config", () => expect(never.length).toBeGreaterThan(0));
@@ -27,8 +28,8 @@ describe("gate1", () => {
     expect(gate1("We are seeking work from a freelancer to set up our HubSpot CRM", never).pass).toBe(true);
   });
   it("required keywords: off-topic text is dropped for free, GTM text passes", () => {
-    const { never: n, required } = loadGate1Rules(fileURLToPath(new URL("../../../config/signals.yaml", import.meta.url)));
-    expect(gate1("Should the CEO be fired over the board's decision about his affair?", n, required)).toMatchObject({ pass: false, reason: "no GTM keyword" });
+    const { never: n, required } = rules;
+    expect(gate1("Should the CEO be fired over the board's decision about his affair?", n, required)).toMatchObject({ pass: false, reason: "no required keyword" });
     expect(gate1("We need someone to fix our HubSpot lead routing and cold email setup", n, required).pass).toBe(true);
     expect(gate1("Hiring our first SDR, who should own the CRM?", n, required).pass).toBe(true);
     expect(gate1("Our CI pipeline is slow and the build keeps failing", n, required).pass).toBe(false);

@@ -1,19 +1,6 @@
-import { parse } from "yaml";
-import { readFileSync } from "node:fs";
+import type { Pack } from "@tell/config";
 
-export interface IcpConfig {
-  hard_filters: {
-    team_size: { min: number; max: number };
-    industries_any: string[];
-    statuses: string[];
-    exclude_domains: string[];
-  };
-  size_bands: { band: string; max: number }[];
-}
-
-export function loadIcp(path: string): IcpConfig {
-  return parse(readFileSync(path, "utf8")) as IcpConfig;
-}
+export type IcpConfig = Pack["icp"];
 
 export interface CompanyFacts {
   domain: string | null;

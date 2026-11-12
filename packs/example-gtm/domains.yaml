@@ -1,4 +1,3 @@
-version: 1
 # Registrable domains that are never a lead's own company domain.
 # A link to one of these in a post says what tool/platform they use, not who they are.
 never_company:
@@ -36,7 +35,7 @@ never_company:
   - airtable.com
   - dropbox.com
   - archive.org
-  # GTM vendors (the tools people ask about)
+  # vendors in your space (tools people ask about)
   - hubspot.com
   - salesforce.com
   - pipedrive.com

@@ -3,11 +3,11 @@
  * This repo is public, so Actions logs are public: print counts only, never post text or secrets.
  */
 import "dotenv/config";
-import { resolve } from "node:path";
+import { loadPack } from "@tell/config";
 import { runScheduledTick } from "@tell/pipeline";
 
 const res = await runScheduledTick({
-  configPath: resolve(process.cwd(), "config/signals.yaml"),
+  pack: await loadPack(),
   dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1),
   maxPerSource: process.env.TICK_MAX_PER_SOURCE ? Number(process.env.TICK_MAX_PER_SOURCE) : undefined,
 });

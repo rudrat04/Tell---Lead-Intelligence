@@ -1,0 +1,4 @@
+# Tells the classifier and verifier what a genuine need for your offer looks like.
+need_description: "a person or company that needs external GTM engineering help: setting up or fixing their CRM, outbound and cold email systems, data enrichment, lead routing, attribution or GTM automation"
+categories: [crm, outbound, enrichment, attribution, routing, reporting, tool_sprawl]
+strength_5: "explicitly hiring or paying someone now for GTM, CRM or outbound work"

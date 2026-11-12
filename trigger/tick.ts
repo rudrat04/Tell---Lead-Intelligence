@@ -1,5 +1,5 @@
 import { schedules } from "@trigger.dev/sdk";
-import { resolve } from "node:path";
+import { loadPack } from "@tell/config";
 import { runScheduledTick } from "@tell/pipeline";
 
 /**
@@ -10,10 +10,5 @@ export const tick = schedules.task({
   id: "tick-30min",
   cron: "*/30 * * * *",
   maxDuration: 240,
-  run: async () =>
-    runScheduledTick({
-      // cwd is the project root locally and in the deployed bundle (config/ is shipped via additionalFiles)
-      configPath: resolve(process.cwd(), "config/signals.yaml"),
-      dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1),
-    }),
+  run: async () => runScheduledTick({ pack: await loadPack(), dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) }),
 });

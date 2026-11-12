@@ -1,18 +1,16 @@
 import { parse as parseDomain } from "tldts";
-import { parse as parseYaml } from "yaml";
-import { readFileSync } from "node:fs";
+import type { Pack } from "@tell/config";
 
-/** Domain lists from config/domains.yaml (versioned, editable without code changes). */
+/** Domain lists from the pack's domains.yaml. */
 export interface DomainLists {
   neverCompany: Set<string>;
   freeMail: Set<string>;
   shorteners: Set<string>;
 }
 
-export function loadDomainLists(path: string): DomainLists {
-  const c = parseYaml(readFileSync(path, "utf8")) as { never_company?: string[]; free_mail?: string[]; shorteners?: string[] };
-  const set = (xs?: string[]) => new Set((xs ?? []).map((x) => x.toLowerCase()));
-  return { neverCompany: set(c.never_company), freeMail: set(c.free_mail), shorteners: set(c.shorteners) };
+export function domainLists(d: Pack["domains"]): DomainLists {
+  const set = (xs: string[]) => new Set(xs.map((x) => x.toLowerCase()));
+  return { neverCompany: set(d.never_company), freeMail: set(d.free_mail), shorteners: set(d.shorteners) };
 }
 
 /**

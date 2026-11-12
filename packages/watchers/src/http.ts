@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-const UA = "TellLeadIntelligence/0.1 (research bot; respects robots.txt)";
+import { userAgent } from "./identity.js";
 const lastHit = new Map<string, number>();
 
 /** Per-host rate limit: min gap between requests to the same host. */
@@ -9,7 +9,7 @@ export async function politeGet(url: string, minGapMs = 1000): Promise<string> {
   const wait = (lastHit.get(host) ?? 0) + minGapMs - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastHit.set(host, Date.now());
-  const res = await fetch(url, { headers: { "user-agent": UA, accept: "*/*" }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
+  const res = await fetch(url, { headers: { "user-agent": userAgent(), accept: "*/*" }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
   return res.text();
 }

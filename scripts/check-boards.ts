@@ -1,10 +1,10 @@
 /** Daily: diff every tracked job board into jobs + signals. Counts only (public logs). */
 import "dotenv/config";
-import { resolve } from "node:path";
+import { loadPack } from "@tell/config";
 import { runBoardCheck } from "@tell/pipeline";
 
 const r = await runBoardCheck({
-  configDir: resolve(process.cwd(), "config"),
+  pack: await loadPack(),
   maxBoards: process.env.MAX_BOARDS ? Number(process.env.MAX_BOARDS) : undefined,
 });
 const sig = Object.entries(r.signals).map(([k, v]) => `${k}=${v}`).join(" ") || "none";

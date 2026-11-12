@@ -23,22 +23,23 @@ function memStore() {
 }
 
 const llm: LlmClient = { complete: async ({ system }) => JSON.stringify(system.includes("skeptical") ? { genuine_need: true, disqualifier: "none", reason: "ok" } : g3) };
+const extractor = { need_description: "a company that needs external GTM engineering help", categories: ["crm"], strength_5: "explicitly hiring someone for CRM work now" };
 const gate1 = (t: string) => ({ pass: !t.includes("recruiting"), reason: "r", injectionFlag: false });
 
 describe("runTick", () => {
   it("processes new items once; repeat tick skips seen content without LLM", async () => {
     const { store, saved } = memStore();
     const w: Watcher = { id: "s", fetch: async () => [item("1", "Need a freelancer to set up HubSpot please"), item("2", "We are a recruiting firm with candidates")] };
-    const first = await runTick({ store, gates: { llm, gate1 }, watchers: [w] });
+    const first = await runTick({ store, gates: { llm, gate1, extractor }, watchers: [w] });
     expect(first[0]).toMatchObject({ fetched: 2, newItems: 2, confirmed: 1, rejected: 1 });
-    const second = await runTick({ store, gates: { llm, gate1 }, watchers: [w] });
+    const second = await runTick({ store, gates: { llm, gate1, extractor }, watchers: [w] });
     expect(second[0]).toMatchObject({ fetched: 2, newItems: 0 });
     expect(saved).toHaveLength(2);
   });
   it("records watcher failure without throwing, and does not advance lastRunAt", async () => {
     const { store, lastRun } = memStore();
     const w: Watcher = { id: "s", fetch: async () => { throw new Error("down"); } };
-    const r = await runTick({ store, gates: { llm, gate1 }, watchers: [w] });
+    const r = await runTick({ store, gates: { llm, gate1, extractor }, watchers: [w] });
     expect(r[0]!.error).toContain("down");
     expect(lastRun()).toBeNull();
   });
@@ -47,17 +48,17 @@ describe("runTick", () => {
     const w: Watcher = { id: "s", fetch: async () => [1, 2].map((n) => item(String(n), `Need a freelancer to set up HubSpot please #${n}`)) };
     let n = 0;
     const onConfirmed = async () => { if (n++ === 0) throw new Error("db down"); return "account" as const; };
-    const r = await runTick({ store, gates: { llm, gate1 }, watchers: [w], onConfirmed });
+    const r = await runTick({ store, gates: { llm, gate1, extractor }, watchers: [w], onConfirmed });
     expect(r[0]).toMatchObject({ confirmed: 2, account: 1, recordErrors: 1 });
   });
   it("items beyond the per-tick cap are not marked seen and get processed next tick", async () => {
     const { store, saved, lastRun } = memStore();
     const w: Watcher = { id: "s", fetch: async () => [1, 2, 3].map((n) => item(String(n), `Need a freelancer to set up HubSpot please #${n}`)) };
-    const first = await runTick({ store, gates: { llm, gate1 }, watchers: [w], maxPerSource: 2 });
+    const first = await runTick({ store, gates: { llm, gate1, extractor }, watchers: [w], maxPerSource: 2 });
     expect(first[0]).toMatchObject({ newItems: 3, confirmed: 2 });
     expect(saved[0]!.incomplete).toBe(true);
     expect(lastRun()).toBeNull();
-    const second = await runTick({ store, gates: { llm, gate1 }, watchers: [w], maxPerSource: 2 });
+    const second = await runTick({ store, gates: { llm, gate1, extractor }, watchers: [w], maxPerSource: 2 });
     expect(second[0]).toMatchObject({ newItems: 1, confirmed: 1 });
     expect(lastRun()).not.toBeNull();
   });
@@ -65,7 +66,7 @@ describe("runTick", () => {
     const { store } = memStore();
     const capped: LlmClient = { complete: async () => { throw new Error("cap"); } };
     const w: Watcher = { id: "s", fetch: async () => [item("1", "Need a freelancer to set up HubSpot please")] };
-    const r = await runTick({ store, gates: { llm: capped, gate1 }, watchers: [w] });
+    const r = await runTick({ store, gates: { llm: capped, gate1, extractor }, watchers: [w] });
     expect(r[0]!.error).toContain("cap");
     expect(r[0]!.confirmed).toBe(0);
   });

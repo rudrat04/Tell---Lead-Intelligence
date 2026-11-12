@@ -21,6 +21,13 @@ jobs:
   daily:
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    env:
+      # private config pack in R2; falls back to packs/example-gtm when TELL_PACK_R2_PREFIX is unset
+      TELL_PACK_R2_PREFIX: ${{ vars.TELL_PACK_R2_PREFIX }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -29,10 +36,18 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
 
+      - name: Database migrations
+        run: pnpm db:migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
       - name: Partitions (this month + 2 ahead)
         run: pnpm exec tsx scripts/ensure-partitions.ts
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Config pack
+        run: pnpm pack:check
 
       - name: Job boards diff
         id: boards

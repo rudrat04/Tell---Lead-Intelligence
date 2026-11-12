@@ -2,7 +2,6 @@ import { getJson } from "./http.js";
 import { RawItemSchema, type RawItem, type Watcher } from "./types.js";
 import * as cheerio from "cheerio";
 
-const QUERIES = ["seeking freelancer", "who is hiring", "RevOps", "HubSpot freelancer", "GTM engineer"];
 
 interface AlgoliaHit {
   objectID: string;
@@ -15,13 +14,13 @@ interface AlgoliaHit {
 
 const strip = (html?: string | null) => (html ? cheerio.load(html).text() : "");
 
-/** HN via Algolia search (also serves as the fallback path per plan 5d). */
-export const hn: Watcher = {
+/** HN via Algolia search (also serves as the fallback path per plan 5d). Queries come from the pack. */
+export const makeHn = (queries: string[]): Watcher => ({
   id: "hn",
   async fetch(since) {
     const ts = Math.floor(since.getTime() / 1000);
     const out: RawItem[] = [];
-    for (const q of QUERIES) {
+    for (const q of queries) {
       const url = `https://hn.algolia.com/api/v1/search_by_date?query=${encodeURIComponent(q)}&tags=(story,comment)&numericFilters=created_at_i>${ts}&hitsPerPage=50`;
       const data = await getJson<{ hits: AlgoliaHit[] }>(url);
       for (const h of data.hits) {
@@ -42,4 +41,4 @@ export const hn: Watcher = {
     }
     return [...new Map(out.map((i) => [i.externalId, i])).values()];
   },
-};
+});

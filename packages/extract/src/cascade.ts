@@ -1,4 +1,4 @@
-import { extractPost, type LlmClient, type PostExtraction } from "./post.js";
+import { extractPost, type LlmClient, type PostExtraction, type ExtractorConfig } from "./post.js";
 import { verifyPost } from "./verifier.js";
 
 export interface GateDeps {
@@ -7,9 +7,13 @@ export interface GateDeps {
   gate1: (text: string) => { pass: boolean; reason: string; injectionFlag: boolean };
   /** Gate 2 (exemplar similarity). Optional until embeddings land. */
   gate2?: (text: string) => Promise<{ pass: boolean; reason: string }>;
+  /** business-specific prompt parts (pack extractor.yaml) */
+  extractor: ExtractorConfig;
+  /** Gate 3 strengths below this are not signals (pack signals.min_post_strength) */
+  minStrength?: number;
 }
 
-/** Gate 3 strengths below this are not signals (1 = unrelated, 2 = barely related). */
+/** Default minimum Gate 3 strength (1 = unrelated, 2 = barely related). */
 export const MIN_SIGNAL_STRENGTH = 3;
 
 export type CascadeResult =
@@ -31,7 +35,7 @@ export async function runCascade(deps: GateDeps, text: string): Promise<CascadeR
     if (!g2.pass) return { status: "rejected", gate: 2, reason: g2.reason, log };
   }
 
-  const g3 = await extractPost(deps.llm, text);
+  const g3 = await extractPost(deps.llm, text, deps.extractor);
   if (!g3.ok) {
     log.push(`gate3: ${g3.reason}${g3.detail ? ` (${g3.detail})` : ""}`);
     return g3.reason === "ungrounded"
@@ -40,11 +44,11 @@ export async function runCascade(deps: GateDeps, text: string): Promise<CascadeR
   }
   log.push(`gate3: ${g3.extraction.ask_type} strength ${g3.extraction.strength}`);
   // Weak or self-promotional extractions are not signals: reject here and skip the Gate 4 call.
-  if (g3.extraction.strength < MIN_SIGNAL_STRENGTH || g3.extraction.self_promotion || g3.extraction.author_role === "vendor") {
-    return { status: "rejected", gate: 3, reason: g3.extraction.self_promotion || g3.extraction.author_role === "vendor" ? "self-promotion / vendor" : "no GTM need (low strength)", log };
+  if (g3.extraction.strength < (deps.minStrength ?? MIN_SIGNAL_STRENGTH) || g3.extraction.self_promotion || g3.extraction.author_role === "vendor") {
+    return { status: "rejected", gate: 3, reason: g3.extraction.self_promotion || g3.extraction.author_role === "vendor" ? "self-promotion / vendor" : "no need (low strength)", log };
   }
 
-  const g4 = await verifyPost(deps.llm, text, g3.extraction);
+  const g4 = await verifyPost(deps.llm, text, g3.extraction, deps.extractor.need_description);
   log.push(`gate4: ${g4.decision}`);
   if (g4.decision === "uncertain") return { status: "uncertain", gate: 4, reason: g4.reason, log };
   if (g4.decision === "reject") return { status: "rejected", gate: 4, reason: g4.verdict.reason, log };

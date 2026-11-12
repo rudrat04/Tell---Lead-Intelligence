@@ -1,0 +1,1 @@
+{"name":"@tell/config","version":"0.0.0","private":true,"type":"module","main":"src/index.ts","scripts":{"typecheck":"tsc -p ."},"dependencies":{"aws4fetch":"^1.0.20","yaml":"^2.9.1","zod":"^4.6.7"}}

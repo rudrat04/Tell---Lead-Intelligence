@@ -1,10 +1,10 @@
 /** Minimal robots.txt support (plan 5d: robots.txt respected). Longest-match Allow/Disallow, `*` and `$` wildcards. */
 
-export const BOT_TOKEN = "TellLeadIntelligence";
+import { botToken, userAgent } from "./identity.js";
 
 interface Rule { allow: boolean; pattern: string }
 
-export function parseRobots(txt: string, agentToken = BOT_TOKEN): Rule[] {
+export function parseRobots(txt: string, agentToken = botToken()): Rule[] {
   const groups: { agents: string[]; rules: Rule[] }[] = [];
   let cur: { agents: string[]; rules: Rule[] } | null = null;
   let lastWasAgent = false;
@@ -48,7 +48,7 @@ export async function robotsAllows(url: string, fetchImpl: typeof fetch = fetch)
   const u = new URL(url);
   let rules = cache.get(u.origin);
   if (!rules) {
-    rules = fetchImpl(`${u.origin}/robots.txt`, { headers: { "user-agent": `${BOT_TOKEN}/0.1` }, signal: AbortSignal.timeout(8_000) })
+    rules = fetchImpl(`${u.origin}/robots.txt`, { headers: { "user-agent": userAgent() }, signal: AbortSignal.timeout(8_000) })
       .then(async (r) => (r.ok ? parseRobots(await r.text()) : []))
       .catch(() => []);
     cache.set(u.origin, rules);

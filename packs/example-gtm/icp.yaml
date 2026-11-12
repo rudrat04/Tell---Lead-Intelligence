@@ -1,0 +1,22 @@
+# Hard filters are business decisions: self-tuning never changes them.
+hard_filters:
+  team_size: { min: 2, max: 150 }
+  industries_any: ["B2B"]        # YC dataset industry labels
+  statuses: ["Active"]
+  exclude_domains: []            # competitors, existing clients
+size_bands:
+  - { band: "2-10", max: 10 }
+  - { band: "11-50", max: 50 }
+  - { band: "51-150", max: 150 }
+soft_fit:
+  weights: { size_band: 0.5, region: 0.3, segment: 0.2 }
+  size_band: { "2-10": 0.9, "11-50": 1.0, "51-150": 0.6 }
+  region:
+    "United States of America": 1.0
+    "America / Canada": 1.0
+    "Canada": 0.9
+    "United Kingdom": 0.9
+    "Europe": 0.8
+    "India": 0.8
+    "Remote": 0.8
+  region_default: 0.5

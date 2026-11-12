@@ -6,6 +6,6 @@ export default defineConfig({
   project: process.env.TRIGGER_PROJECT_REF ?? "proj_rrjpslhcgzocozamwtcu",
   dirs: ["./trigger"],
   maxDuration: 300,
-  // Tasks read YAML config at runtime; ship it with the bundle at the same relative path.
-  build: { extensions: [additionalFiles({ files: ["./config/**"] })] },
+  // Production loads the private pack from R2 (TELL_PACK_R2_PREFIX); the example pack ships as a fallback for dev.
+  build: { extensions: [additionalFiles({ files: ["./packs/example-gtm/**"] })] },
 });

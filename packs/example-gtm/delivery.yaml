@@ -1,0 +1,6 @@
+digest:
+  # to: you@example.com   # set in your private pack
+  from_name: "Lead digest"
+  max_leads: 10
+  send_hour_local: 9
+redeliver_after_days: 90

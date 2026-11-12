@@ -1,16 +1,28 @@
-import { dirname, join } from "node:path";
-import { hn, reddit, forhireSubs, isSourceEnabled, type Watcher, type RawItem } from "@tell/watchers";
+import type { Pack } from "@tell/config";
+import { makeHn, makeReddit, makeForhire, isSourceEnabled, setBotIdentity, type Watcher, type RawItem } from "@tell/watchers";
 import { HaikuClient, type PostExtraction } from "@tell/extract";
-import { gate1, loadGate1Rules } from "@tell/intel";
+import { gate1, gate1Rules } from "@tell/intel";
 import {
-  resolveItem, recordConfirmed, loadDomainLists, loadSignalSpecs, neonLeadStore,
+  resolveItem, recordConfirmed, domainLists, neonLeadStore,
   checkHomepage, expandShortUrl, fetchHnAbout, type ResolverNet, type Resolution, type LeadStore,
 } from "@tell/people";
 import { runTick, type Store, type TickSummary } from "./ingest.js";
 import { neonStore } from "./neon-store.js";
 import { neonUsage, type UsageStore } from "./usage.js";
 
-export const TICK_WATCHERS: Watcher[] = [reddit, forhireSubs, hn];
+/** Call once at startup: every crawler request identifies as this copy's operator. */
+export function applyPackIdentity(pack: Pack): void {
+  setBotIdentity(pack.meta.operator.bot_name, pack.meta.operator.contact_url);
+}
+
+/** Watchers for the 30-minute tick: enabled in the pack AND allowed by source policy (terms of use). */
+export function tickWatchers(pack: Pack): Watcher[] {
+  const s = pack.sources;
+  const all: Watcher[] = [];
+  if (s.reddit.enabled) all.push(makeReddit(s.reddit.subs), makeForhire(s.reddit.hiring_subs));
+  if (s.hn.enabled) all.push(makeHn(s.hn.queries));
+  return all.filter((w) => isSourceEnabled(w.id));
+}
 
 export const liveNet: ResolverNet = {
   checkHomepage,
@@ -27,9 +39,9 @@ export interface ScheduledTickResult {
 }
 
 /** Resolve a confirmed item and write it. Network failures degrade to a person lead, never lose the item. */
-export function makeOnConfirmed(configDir: string, leads: LeadStore, net: ResolverNet) {
-  const lists = loadDomainLists(join(configDir, "domains.yaml"));
-  const specs = loadSignalSpecs(join(configDir, "signals.yaml"));
+export function makeOnConfirmed(pack: Pack, leads: LeadStore, net: ResolverNet) {
+  const lists = domainLists(pack.domains);
+  const specs = pack.signals.signals;
   return async (item: RawItem, x: PostExtraction) => {
     let res: Resolution;
     try {
@@ -47,14 +59,17 @@ export function makeOnConfirmed(configDir: string, leads: LeadStore, net: Resolv
  * Enforces a real daily Haiku cap by persisting spend per IST day.
  */
 export async function runScheduledTick(opts: {
-  configPath: string;
+  pack: Pack;
   dailyCapUsd: number;
   maxPerSource?: number;
   store?: Store;
   usage?: UsageStore;
   leads?: LeadStore;
   net?: ResolverNet;
+  watchers?: Watcher[];
 }): Promise<ScheduledTickResult> {
+  const { pack } = opts;
+  applyPackIdentity(pack);
   const usage = opts.usage ?? neonUsage();
   const spentBefore = await usage.spentToday("haiku");
   const remaining = opts.dailyCapUsd - spentBefore;
@@ -62,15 +77,15 @@ export async function runScheduledTick(opts: {
     return { skipped: "daily Haiku cap reached", summaries: [], spentThisRunUsd: 0, spentTodayUsd: spentBefore, dailyCapUsd: opts.dailyCapUsd };
   }
 
-  const rules = loadGate1Rules(opts.configPath);
+  const rules = gate1Rules(pack);
   const llm = new HaikuClient({ capUsd: remaining });
   try {
     const summaries = await runTick({
       store: opts.store ?? neonStore(),
-      gates: { llm, gate1: (t) => gate1(t, rules.never, rules.required) },
-      watchers: TICK_WATCHERS.filter((w) => isSourceEnabled(w.id)),
+      gates: { llm, gate1: (t) => gate1(t, rules.never, rules.required), extractor: pack.extractor, minStrength: pack.signals.min_post_strength },
+      watchers: opts.watchers ?? tickWatchers(pack),
       maxPerSource: opts.maxPerSource ?? 50,
-      onConfirmed: makeOnConfirmed(dirname(opts.configPath), opts.leads ?? neonLeadStore(), opts.net ?? liveNet),
+      onConfirmed: makeOnConfirmed(pack, opts.leads ?? neonLeadStore(), opts.net ?? liveNet),
     });
     return { summaries, spentThisRunUsd: llm.spent, spentTodayUsd: spentBefore + llm.spent, dailyCapUsd: opts.dailyCapUsd };
   } finally {

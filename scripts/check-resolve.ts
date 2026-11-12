@@ -5,9 +5,9 @@
  * Prints domains to your terminal only; never run this in CI (public logs).
  */
 import * as cheerio from "cheerio";
-import { resolve } from "node:path";
+import { loadPack } from "@tell/config";
 import type { RawItem } from "@tell/watchers";
-import { resolveItem, loadDomainLists } from "@tell/people";
+import { resolveItem, domainLists } from "@tell/people";
 import { liveNet } from "@tell/pipeline";
 
 type HnItem = { id: number; by?: string; text?: string; kids?: number[]; title?: string; time: number };
@@ -21,7 +21,8 @@ if (ids.length === 0) {
   ids = (story.kids ?? []).slice(0, 8);
 }
 
-const lists = loadDomainLists(resolve(process.cwd(), "config/domains.yaml"));
+const pack = await loadPack();
+const lists = domainLists(pack.domains);
 for (const id of ids) {
   const it = await get(id);
   if (!it?.text) continue;

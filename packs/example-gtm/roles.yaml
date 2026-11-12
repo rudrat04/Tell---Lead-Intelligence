@@ -1,0 +1,13 @@
+# Job-title families. "core" = the role you substitute for or bridge; "adjacent" = signs the need is forming.
+core:
+  - "(?i)\\b(rev ?ops|revenue operations|sales op(eration)?s|marketing op(eration)?s|growth op(eration)?s|business systems|marketing automation|sales systems|deal desk)\\b"
+  - "(?i)\\b(gtm (engineer|operations|ops)|go[- ]to[- ]market (engineer|operations))\\b"
+  - "(?i)\\b(crm (admin|administrator|manager|specialist|engineer|lead)|hubspot|salesforce (admin|administrator|developer|engineer))\\b"
+adjacent:
+  - "(?i)\\b(account executive|ae|sdr|bdr|sales development|business development (rep|representative))\\b"
+  - "(?i)\\b(head of (sales|growth|marketing|revenue|gtm)|vp,? (of )?(sales|marketing|growth|revenue)|director of (sales|marketing|growth)|sales (lead|manager|director))\\b"
+  - "(?i)\\b(founding (sales|seller|marketer|marketing|growth|gtm|account executive|ae))\\b"
+  - "(?i)\\b(growth market(er|ing)|demand gen(eration)?|performance market(er|ing)|marketing (manager|lead|generalist)|product market(er|ing)|lifecycle market(er|ing)|partnerships (manager|lead))\\b"
+exclude:
+  - "(?i)\\b(sales engineer|solutions engineer|engineering manager|software engineer|data engineer)\\b"
+  - "(?i)\\b(intern|internship|working student|apprentice)\\b"

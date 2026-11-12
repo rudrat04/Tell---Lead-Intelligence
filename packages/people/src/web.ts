@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import { registrableDomain } from "./domains.js";
 
-const UA = "TellLeadIntelligence/0.1 (research bot; respects robots.txt)";
+import { userAgent } from "@tell/watchers";
 
 const PARKED = /(domain (is )?for sale|buy this domain|this domain (may be|is) for sale|parked (free|domain)|domain parking|sedo|dan\.com|afternic|hugedomains)/i;
 
@@ -19,7 +19,7 @@ export interface HomepageCheck {
  */
 export async function checkHomepage(domain: string, timeoutMs = 10_000): Promise<HomepageCheck> {
   try {
-    const res = await fetch(`https://${domain}/`, { redirect: "follow", headers: { "user-agent": UA }, signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(`https://${domain}/`, { redirect: "follow", headers: { "user-agent": userAgent() }, signal: AbortSignal.timeout(timeoutMs) });
     const finalDomain = registrableDomain(res.url) ?? domain;
     const html = res.ok ? (await res.text()).slice(0, 200_000) : "";
     const $ = cheerio.load(html);
@@ -40,7 +40,7 @@ export async function checkHomepage(domain: string, timeoutMs = 10_000): Promise
 export async function expandShortUrl(url: string, timeoutMs = 8_000): Promise<string | null> {
   for (const method of ["HEAD", "GET"] as const) {
     try {
-      const res = await fetch(url, { method, redirect: "follow", headers: { "user-agent": UA }, signal: AbortSignal.timeout(timeoutMs) });
+      const res = await fetch(url, { method, redirect: "follow", headers: { "user-agent": userAgent() }, signal: AbortSignal.timeout(timeoutMs) });
       if (res.url && res.url !== url) return res.url;
     } catch { /* try next */ }
   }

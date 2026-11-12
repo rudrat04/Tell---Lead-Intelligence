@@ -1,0 +1,10 @@
+# Example pack: a freelance GTM engineer looking for companies that need one now.
+# Copy this folder, edit it for your business, check it with `pnpm pack:check`,
+# and upload it privately with `pnpm pack:push` (never commit your real pack to a public repo).
+version: 1
+name: example-gtm
+offer: "Freelance GTM engineering: CRM setup, outbound systems, enrichment, lead routing and attribution for early-stage B2B companies."
+operator:
+  bot_name: TellLeadIntelligence
+  contact_url: https://github.com/rudrat04/Tell---Lead-Intelligence
+timezone: Asia/Kolkata

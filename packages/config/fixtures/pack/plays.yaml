@@ -1,0 +1,27 @@
+# A play = a combination of signals that explains why someone needs you now, with the opening angle.
+plays:
+  struggling_to_hire:
+    title: Struggling to hire ops
+    requires: [core_role_open_45d]
+    window_days: 60
+    angle: "Freelance bridge while they keep hiring: get the GTM system running now, hand it over when the hire lands."
+  explicit_ask:
+    title: Explicit ask
+    requires: [explicit_hire_request]
+    window_days: 14
+    angle: "Direct reply to their request with a concrete first step."
+  contract_role:
+    title: Contract GTM role
+    requires: [contract_role]
+    window_days: 30
+    angle: "They already want a contractor: apply with a short scoped proposal."
+  first_gtm_hire:
+    title: First GTM hire
+    requires: [first_role]
+    window_days: 45
+    angle: "Build the CRM, routing and outbound system before their first GTM hire starts."
+  gtm_from_zero:
+    title: GTM from zero
+    requires: [funding_raise, first_role]
+    window_days: 60
+    angle: "Fresh funding plus a first GTM hire: build the system before the hire starts."

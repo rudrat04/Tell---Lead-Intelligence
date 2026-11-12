@@ -1,23 +1,24 @@
 import { describe, it, expect } from "vitest";
-import { fileURLToPath } from "node:url";
-import { runScheduledTick, TICK_WATCHERS } from "./scheduled.js";
+import { loadFixturePack } from "@tell/config";
+import { runScheduledTick, tickWatchers } from "./scheduled.js";
 import { istDay, type UsageStore } from "./usage.js";
-import { isSourceEnabled } from "@tell/watchers";
 import { costUsd } from "@tell/extract";
 
-const configPath = fileURLToPath(new URL("../../../config/signals.yaml", import.meta.url));
+const pack = await loadFixturePack();
 
 describe("runScheduledTick", () => {
   it("skips without touching the store or LLM once the daily cap is spent", async () => {
     let added = 0;
     const usage: UsageStore = { spentToday: async () => 1.0, addSpend: async (_s, usd) => { added += usd; } };
     const store = { filterUnseen: async () => { throw new Error("should not run"); }, saveBatch: async () => {}, lastRunAt: async () => null };
-    const r = await runScheduledTick({ configPath, dailyCapUsd: 1, usage, store });
+    const r = await runScheduledTick({ pack, dailyCapUsd: 1, usage, store });
     expect(r.skipped).toBe("daily Haiku cap reached");
     expect(added).toBe(0);
   });
-  it("only enabled sources run (Reddit off by policy)", () => {
-    expect(TICK_WATCHERS.filter((w) => isSourceEnabled(w.id)).map((w) => w.id)).toEqual(["hn"]);
+  it("only enabled sources run (Reddit off by policy even if a pack enables it)", () => {
+    expect(tickWatchers(pack).map((w) => w.id)).toEqual(["hn"]);
+    const redditOn = { ...pack, sources: { ...pack.sources, reddit: { ...pack.sources.reddit, enabled: true } } };
+    expect(tickWatchers(redditOn).map((w) => w.id)).toEqual(["hn"]);
   });
 });
 

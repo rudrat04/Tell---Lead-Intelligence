@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { extractPost, isGrounded, type LlmClient } from "./post.js";
+import { extractPost as extract, isGrounded, type LlmClient } from "./post.js";
+
+const extractor = { need_description: "a company that needs external GTM engineering help with CRM and outbound", categories: ["crm", "outbound"], strength_5: "explicitly hiring someone for CRM work now" };
+const extractPost = (llm: LlmClient, text: string) => extract(llm, text, extractor);
 
 const text = "Our CRM is a mess. Looking for a freelancer to set up HubSpot and outbound ASAP.";
 const good = {
@@ -28,6 +31,15 @@ describe("extractPost", () => {
   it("caps venting at 3", async () => {
     const r = await extractPost(llm({ ...good, ask_type: "venting", strength: 5 }), text);
     expect(r.ok && r.extraction.strength).toBe(3);
+  });
+  it("rejects a category the pack doesn't define", async () => {
+    expect(await extractPost(llm({ ...good, problem_category: "taxes" }), text)).toMatchObject({ ok: false, reason: "schema", detail: expect.stringContaining("taxes") });
+  });
+  it("prompt is built from the pack", async () => {
+    let sys = "";
+    await extract({ complete: async ({ system }) => { sys = system; return JSON.stringify(good); } }, text, extractor);
+    expect(sys).toContain("needs external GTM engineering help");
+    expect(sys).toContain('"crm" | "outbound" | "other"');
   });
   it("grounding ignores whitespace and case", () => expect(isGrounded("OUR  crm is\na mess", text)).toBe(true));
 });

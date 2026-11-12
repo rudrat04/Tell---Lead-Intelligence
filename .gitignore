@@ -5,3 +5,10 @@ dist
 !.env.example
 *.log
 .DS_Store
+
+# local planning notes (repo is public)
+PLAN-next.md
+
+# your real config packs (private: push them to R2, never commit)
+packs/*
+!packs/example-gtm/

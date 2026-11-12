@@ -1,7 +1,6 @@
-import { parse } from "yaml";
-import { readFileSync } from "node:fs";
+import { toRegex, type Pack } from "@tell/config";
 
-/** Gate 1: free rules. Never-patterns from signals.yaml + prompt-injection flagging. */
+/** Gate 1: free rules. Required keywords + never-patterns from the pack, plus prompt-injection flagging. */
 
 export interface Gate1Result {
   pass: boolean;
@@ -23,24 +22,15 @@ export function detectInjection(text: string): boolean {
   return INJECTION.some((r) => r.test(text));
 }
 
-const toRegex = (p: string) => {
-  const m = p.match(/^\(\?([a-z]+)\)(.*)$/s); // YAML patterns use inline flags like (?i)
-  return m ? new RegExp(m[2]!, m[1]) : new RegExp(p);
-};
-
 export interface Gate1Rules {
   never: RegExp[];
   /** at least one must match; empty = no requirement */
   required: RegExp[];
 }
 
-export function loadGate1Rules(path: string): Gate1Rules {
-  const cfg = parse(readFileSync(path, "utf8")) as { never_patterns?: string[]; required_any?: string[] };
-  return { never: (cfg.never_patterns ?? []).map(toRegex), required: (cfg.required_any ?? []).map(toRegex) };
-}
-
-export function loadNeverPatterns(path: string): RegExp[] {
-  return loadGate1Rules(path).never;
+/** Gate 1 rules from the pack's signals.gate1 section. */
+export function gate1Rules(pack: Pick<Pack, "signals">): Gate1Rules {
+  return { never: pack.signals.gate1.never.map(toRegex), required: pack.signals.gate1.required_any.map(toRegex) };
 }
 
 export function gate1(text: string, never: RegExp[], required: RegExp[] = []): Gate1Result {
@@ -48,6 +38,6 @@ export function gate1(text: string, never: RegExp[], required: RegExp[] = []): G
   const hit = never.find((r) => r.test(text));
   if (hit) return { pass: false, reason: `never-pattern: ${hit.source}`, injectionFlag };
   if (text.trim().length < 20) return { pass: false, reason: "too short", injectionFlag };
-  if (required.length && !required.some((r) => r.test(text))) return { pass: false, reason: "no GTM keyword", injectionFlag };
+  if (required.length && !required.some((r) => r.test(text))) return { pass: false, reason: "no required keyword", injectionFlag };
   return { pass: true, reason: injectionFlag ? "passed, injection flagged -> uncertain queue" : "passed", injectionFlag };
 }

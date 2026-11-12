@@ -1,0 +1,127 @@
+# Registrable domains that are never a lead's own company domain.
+# A link to one of these in a post says what tool/platform they use, not who they are.
+never_company:
+  # social, communities, publishing
+  - ycombinator.com
+  - reddit.com
+  - redd.it
+  - twitter.com
+  - x.com
+  - linkedin.com
+  - facebook.com
+  - instagram.com
+  - youtube.com
+  - youtu.be
+  - tiktok.com
+  - bsky.app
+  - medium.com
+  - substack.com
+  - wikipedia.org
+  - producthunt.com
+  - indiehackers.com
+  - news.google.com
+  # dev and docs platforms
+  - github.com
+  - gitlab.com
+  - stackoverflow.com
+  - google.com
+  - notion.so
+  - notion.site
+  - calendly.com
+  - cal.com
+  - typeform.com
+  - loom.com
+  - figma.com
+  - airtable.com
+  - dropbox.com
+  - archive.org
+  # vendors in your space (tools people ask about)
+  - hubspot.com
+  - salesforce.com
+  - pipedrive.com
+  - attio.com
+  - apollo.io
+  - clay.com
+  - instantly.ai
+  - lemlist.com
+  - smartlead.ai
+  - zapier.com
+  - make.com
+  - n8n.io
+  - outreach.io
+  - salesloft.com
+  - zoominfo.com
+  - clearbit.com
+  - hunter.io
+  - segment.com
+  - mailchimp.com
+  # ATS hosts and job boards
+  - greenhouse.io
+  - lever.co
+  - ashbyhq.com
+  - workable.com
+  - recruitee.com
+  - smartrecruiters.com
+  - wellfound.com
+  - remoteok.com
+  - weworkremotely.com
+  - himalayas.app
+  - loxo.co
+  - bamboohr.com
+  - breezy.hr
+  - jobvite.com
+  - icims.com
+  - teamtailor.com
+  - personio.de
+  - personio.com
+  - myworkdayjobs.com
+  - workday.com
+  - jazzhr.com
+  - applytojob.com
+  - rippling.com
+  - gem.com
+  - dover.com
+  - welcometothejungle.com
+  - otta.com
+  - builtin.com
+  - indeed.com
+  - glassdoor.com
+  - angel.co
+  # app/website builders' root domains (customer subdomains are kept separate via the private suffix list)
+  - webflow.com
+  - wix.com
+  - squarespace.com
+  - shopify.com
+  - framer.com
+
+# Personal mailbox providers: an address here says nothing about the company
+free_mail:
+  - gmail.com
+  - googlemail.com
+  - outlook.com
+  - hotmail.com
+  - live.com
+  - yahoo.com
+  - icloud.com
+  - me.com
+  - proton.me
+  - protonmail.com
+  - aol.com
+  - gmx.com
+  - zoho.com
+  - fastmail.com
+  - hey.com
+  - yandex.com
+  - rediffmail.com
+
+# Link shorteners: expanded before use, never treated as a company domain
+shorteners:
+  - bit.ly
+  - t.co
+  - tinyurl.com
+  - lnkd.in
+  - buff.ly
+  - ow.ly
+  - rebrand.ly
+  - cutt.ly
+  - shorturl.at

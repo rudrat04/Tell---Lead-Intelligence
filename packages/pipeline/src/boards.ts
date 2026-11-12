@@ -1,19 +1,15 @@
-import { join } from "node:path";
+import type { Pack } from "@tell/config";
 import {
   fetchYcCompanies, fetchYcJobs, fetchBoardPostings, findBoardLinks, robotsAllows,
-  type YcCompany, type JobPosting, type Ats,
+  userAgent, type YcCompany, type JobPosting, type Ats,
 } from "@tell/watchers";
-import { classifyJob, diffBoard, loadIcp, passesHardFilters, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
-import { registrableDomain, loadSignalSpecs } from "@tell/people";
+import { classifyJob, compileRoles, diffBoard, passesHardFilters, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
+import { registrableDomain } from "@tell/people";
+import { applyPackIdentity } from "./scheduled.js";
 import { getDb, accounts, jobBoards, jobs, signals, companySeeds, eq, and, inArray, sql } from "@tell/db";
 
-const UA = "TellLeadIntelligence/0.1 (research bot; respects robots.txt)";
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
-/** Strength per job signal type (5 = fast lane). */
-const JOB_STRENGTH: Record<string, number> = {
-  contract_gtm_role: 5, first_gtm_role: 4, ops_role_open: 4, ops_role_open_45d: 4, gtm_role_open: 3, ops_role_filled: 3,
-};
 
 // ---------------------------------------------------------------- discovery (weekly)
 
@@ -34,7 +30,7 @@ async function ownPages(website: string): Promise<{ html: string; url: string }[
     const url = base + path;
     if (!(await robotsAllows(url))) continue;
     try {
-      const r = await fetch(url, { headers: { "user-agent": UA }, redirect: "follow", signal: AbortSignal.timeout(12_000) });
+      const r = await fetch(url, { headers: { "user-agent": userAgent() }, redirect: "follow", signal: AbortSignal.timeout(12_000) });
       if (!r.ok) continue;
       // a board link only proves ownership if the page is on the company's own domain
       if (registrableDomain(r.url) !== own) continue;
@@ -45,9 +41,10 @@ async function ownPages(website: string): Promise<{ html: string; url: string }[
 }
 
 /** Seed accounts from YC through the ICP hard filters, track their YC jobs page, and find ATS boards they link. */
-export async function runDiscovery(opts: { configDir: string; maxSiteChecks?: number; companies?: YcCompany[] }): Promise<DiscoveryResult> {
+export async function runDiscovery(opts: { pack: Pack; maxSiteChecks?: number; companies?: YcCompany[] }): Promise<DiscoveryResult> {
+  applyPackIdentity(opts.pack);
   const db = getDb();
-  const icp = loadIcp(join(opts.configDir, "icp.yaml"));
+  const icp = opts.pack.icp;
   const companies = opts.companies ?? (await fetchYcCompanies());
   const now = new Date();
 
@@ -154,9 +151,11 @@ async function fetchPostings(b: BoardRow): Promise<JobPosting[]> {
 }
 
 /** Daily diff of every tracked board's GTM/ops roles into jobs + signals. Dead boards (7 straight failures) stop being checked. */
-export async function runBoardCheck(opts: { configDir: string; maxBoards?: number }): Promise<BoardCheckResult> {
+export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): Promise<BoardCheckResult> {
+  applyPackIdentity(opts.pack);
   const db = getDb();
-  const specs = loadSignalSpecs(join(opts.configDir, "signals.yaml"));
+  const specs = opts.pack.signals.signals;
+  const roles = compileRoles(opts.pack.roles);
   const now = new Date();
 
   const boards: BoardRow[] = await db.select({
@@ -187,7 +186,7 @@ export async function runBoardCheck(opts: { configDir: string; maxBoards?: numbe
       return;
     }
     const fetched: FetchedJob[] = postings.flatMap((p) => {
-      const cls = classifyJob(p.title, p.employmentType);
+      const cls = classifyJob(p.title, p.employmentType, roles);
       return cls ? [{ externalId: p.externalId, title: p.title, url: p.url, employmentType: p.employmentType, postedAt: p.postedAt, cls }] : [];
     });
     const d = diffBoard(openByBoard.get(b.id) ?? [], fetched, now, b.baselineDone);
@@ -203,7 +202,7 @@ export async function runBoardCheck(opts: { configDir: string; maxBoards?: numbe
     const signalStmt = stmts.length;
     if (d.signals.length) {
       stmts.push(db.insert(signals).values(d.signals.map((s) => ({
-        accountId: b.accountId, class: specs[s.type]!.class, type: s.type, strength: JOB_STRENGTH[s.type] ?? 3,
+        accountId: b.accountId, class: specs[s.type]!.class, type: s.type, strength: specs[s.type]!.strength,
         evidenceQuote: s.quote, evidenceUrl: s.url, observedAt: s.observedAt, halfLifeDays: specs[s.type]!.half_life_days,
       }))).onConflictDoNothing({ target: [signals.evidenceUrl, signals.type] }).returning({ type: signals.type }));
     }

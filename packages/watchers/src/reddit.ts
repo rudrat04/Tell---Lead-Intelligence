@@ -1,10 +1,8 @@
 import { request } from "undici";
 import { RawItemSchema, type RawItem, type Watcher } from "./types.js";
 
-const UA = "TellLeadIntelligence/0.1 (personal research script)";
+import { userAgent } from "./identity.js";
 
-export const REDDIT_SUBS = ["SaaS", "startups", "Entrepreneur", "RevOps", "sales", "marketing", "agency", "hubspot", "salesforce", "coldemail"];
-export const FORHIRE_SUBS = ["forhire", "hiring", "freelance_forhire"];
 
 export interface RedditPost {
   id: string;
@@ -44,7 +42,7 @@ async function token(): Promise<string> {
   if (!id || !secret || !u || !pw) throw new Error("Reddit credentials missing (REDDIT_CLIENT_ID/SECRET/USERNAME/PASSWORD)");
   const res = await request("https://www.reddit.com/api/v1/access_token", {
     method: "POST",
-    headers: { "user-agent": UA, authorization: "Basic " + Buffer.from(`${id}:${secret}`).toString("base64"), "content-type": "application/x-www-form-urlencoded" },
+    headers: { "user-agent": userAgent(), authorization: "Basic " + Buffer.from(`${id}:${secret}`).toString("base64"), "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "password", username: u, password: pw }).toString(),
   });
   const j = (await res.body.json()) as { access_token?: string };
@@ -53,7 +51,7 @@ async function token(): Promise<string> {
 }
 
 async function listing(sub: string, tok: string): Promise<RedditPost[]> {
-  const res = await request(`https://oauth.reddit.com/r/${sub}/new?limit=100&raw_json=1`, { headers: { "user-agent": UA, authorization: `bearer ${tok}` } });
+  const res = await request(`https://oauth.reddit.com/r/${sub}/new?limit=100&raw_json=1`, { headers: { "user-agent": userAgent(), authorization: `bearer ${tok}` } });
   if (res.statusCode >= 400) throw new Error(`r/${sub} -> ${res.statusCode}`);
   const j = (await res.body.json()) as { data: { children: { data: RedditPost }[] } };
   return j.data.children.map((c) => c.data);
@@ -75,5 +73,6 @@ function make(id: string, subs: string[], forhire: boolean): Watcher {
   };
 }
 
-export const reddit = make("reddit", REDDIT_SUBS, false);
-export const forhireSubs = make("forhire-subs", FORHIRE_SUBS, true);
+/** Subreddits come from the pack (sources.reddit). Disabled by policy until Reddit API access is approved. */
+export const makeReddit = (subs: string[]) => make("reddit", subs, false);
+export const makeForhire = (subs: string[]) => make("forhire-subs", subs, true);
