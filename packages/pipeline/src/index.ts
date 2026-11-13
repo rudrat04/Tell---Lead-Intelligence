@@ -10,3 +10,4 @@ export * from "./watch.js";
 export * from "./discover-cc.js";
 export * from "./emails.js";
 export * from "./analyst.js";
+export * from "./discover-workable.js";

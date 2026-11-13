@@ -7,3 +7,10 @@ reddit:
   hiring_subs: [forhire, hiring, freelance_forhire]
 yc:
   enabled: true
+# Workable job search, weekly: companies hiring these roles in `location` (India coverage).
+# The company's site comes from Workable; its board is accepted only when Workable's account id matches.
+workable:
+  enabled: true
+  location: India
+  queries: ["sales", "business development", "marketing", "revenue operations", "account executive", "growth", "customer success"]
+  day_range: 30

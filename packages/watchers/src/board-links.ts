@@ -13,6 +13,9 @@ const PATTERNS: [Ats, RegExp][] = [
   // tenant subdomains: the slug is the tenant (Keka's stored slug adds its GUID after discovery)
   ["keka", /\/\/([a-z0-9][a-z0-9-]*)\.keka\.com\/careers/gi],
   ["freshteam", /\/\/([a-z0-9][a-z0-9-]*)\.freshteam\.com\/jobs/gi],
+  // apply.workable.com/<subdomain> (not /j/<shortcode> job links or /api/), and <subdomain>.workable.com
+  ["workable", /apply\.workable\.com\/(?!j\/|api\/)([a-z0-9][a-z0-9-]*)/gi],
+  ["workable", /\/\/(?!apply\.|jobs\.|www\.)([a-z0-9][a-z0-9-]*)\.workable\.com/gi],
 ];
 
 const JUNK = new Set(["embed", "api", "v1", "jobs", "js", "static", "assets", "careers"]);

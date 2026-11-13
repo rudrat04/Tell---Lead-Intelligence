@@ -142,6 +142,16 @@ export const SourcesSchema = z.object({
     hiring_subs: z.array(z.string()).default([]),
   }).default({ enabled: false, subs: [], hiring_subs: [] }),
   yc: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  /** Workable job search (weekly discovery): companies hiring these roles in `location` become accounts + boards */
+  workable: z.object({
+    enabled: z.boolean().default(false),
+    location: z.string().default("India"),
+    queries: z.array(z.string()).default([]),
+    day_range: z.number().int().min(1).max(90).default(30),
+    max_pages: z.number().int().min(1).max(10).default(5),
+    /** companies checked per run (each costs a few requests) */
+    max_companies: z.number().int().min(1).default(150),
+  }).default({ enabled: false, location: "India", queries: [], day_range: 30, max_pages: 5, max_companies: 150 }),
 });
 
 export const DomainsSchema = z.object({
