@@ -51,3 +51,23 @@ describe("analyst: invented numbers", () => {
     expect(validateAnalysis(JSON.stringify({ ...good, opener: "your AE role has been open 52 days." }), input)).not.toBeNull();
   });
 });
+
+describe("analyst: opening email", () => {
+  const email = { email_subject: "your founding AE role", email_body: "Saw the \"Founding Account Executive\" role is still open.\n\nI can set up your CRM stages and routing now, so the hire sells from day one.\n\nOpen to a free 30-minute diagnostic call?" };
+  const opts = { allowedText: "a free 30-minute diagnostic call", maxWords: 110 };
+  it("keeps a checked email", () => {
+    expect(validateAnalysis(JSON.stringify({ ...good, ...email }), input, opts)!.email).toMatchObject({ subject: "your founding AE role" });
+  });
+  it("drops only the email when it invents a number, uses placeholders, hype or runs long", () => {
+    for (const bad of [
+      { email_body: email.email_body.replace("day one", "day one, like the 40 teams I helped") },
+      { email_body: "Hi [First name], saw your role.\n\nI help.\n\nCall?" },
+      { email_body: email.email_body + " Let's go!" },
+      { email_body: Array(150).fill("word").join(" ") },
+    ]) {
+      const a = validateAnalysis(JSON.stringify({ ...good, ...email, ...bad }), input, opts);
+      expect(a).not.toBeNull();
+      expect(a!.email).toBeNull();
+    }
+  });
+});

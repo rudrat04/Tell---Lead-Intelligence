@@ -210,6 +210,14 @@ export const DeliverySchema = z.object({
   redeliver_after_days: z.number().int().min(1).default(90),
   /** Google Sheet for leads + your labels (created by `pnpm sheet:setup`; private: it holds lead names) */
   sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),
+  /** opening email drafted per lead (Sheet "Email draft" column): your next step and sign-off */
+  email: z.object({
+    /** the one next step every email ends on, e.g. "a free 30-minute GTM diagnostic call" */
+    next_step: z.string().default("a short call"),
+    /** appended under the body as written (name, site) */
+    signature: z.string().default(""),
+    max_words: z.number().int().min(40).max(200).default(110),
+  }).default({ next_step: "a short call", signature: "", max_words: 110 }),
 });
 
 /** Code critic (plan 8f): drops leads that should never reach you. Every field optional so older packs still load. */

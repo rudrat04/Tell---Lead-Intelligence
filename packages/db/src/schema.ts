@@ -171,6 +171,9 @@ export const analyses = pgTable("analyses", {
   /** cited evidence as [{ kind: job|signal, id, url }] (citations uuid[] can't say which table) */
   cited: jsonb("cited"),
   model: text("model"),
+  /** opening email drafted with the analysis (subject + body without greeting/signature) */
+  emailSubject: text("email_subject"),
+  emailBody: text("email_body"),
   createdAt: ts("created_at").defaultNow(),
 }, (t) => [uniqueIndex("analyses_account_evidence_uq").on(t.accountId, t.evidenceKey)]);
 

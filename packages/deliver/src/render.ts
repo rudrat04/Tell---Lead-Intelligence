@@ -76,7 +76,14 @@ export function opener(c: Contact | null | undefined, company: string, e: Eviden
 }
 
 /** Analyst output for a lead (cited, validated in code); absent when Haiku was unavailable or failed validation. */
-export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number }
+export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number; email?: { subject: string; body: string } | null }
+
+/** The opening email as it goes in the Sheet: subject, greeting written by code, body, your signature. Empty without a draft. */
+export function emailDraft(c: Contact | null | undefined, n: LeadNote | undefined, signature = ""): string {
+  if (!n?.email) return "";
+  const hi = c ? `Hi ${firstName(c.person.name)},` : "Hi,";
+  return [`Subject: ${n.email.subject}`, "", hi, "", n.email.body.trim(), ...(signature.trim() ? ["", signature.trim()] : [])].join("\n");
+}
 export type Notes = Map<string, LeadNote>;
 
 /** The analyst's opener when there is one, else the code-written one. The greeting is always written by code. */
@@ -231,7 +238,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 }
 
 /** The Sheet row for a delivered lead, in LEAD_COLUMNS order minus ID (appended when the delivery id exists). */
-export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote): string[] {
+export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = ""): string[] {
   const a = l.account, s = l.score;
   const company = a.name ?? a.domain;
   return [
@@ -250,6 +257,8 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     note?.angle ?? s.plays[0]?.angle ?? "",
     s.priority.toFixed(3),
     "", "", "", "", // Label, Reason, Outcome, Notes: yours
+    // (the hidden ID column is inserted here when the row is appended)
+    emailDraft(contact, note, signature),
   ];
 }
 

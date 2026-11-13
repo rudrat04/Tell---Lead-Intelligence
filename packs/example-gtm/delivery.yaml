@@ -4,3 +4,8 @@ digest:
   max_leads: 10
   send_hour_local: 9
 redeliver_after_days: 90
+# Opening email drafted for each lead (Sheet "Email draft" column)
+email:
+  next_step: "a free 30-minute GTM diagnostic call"
+  signature: "Your name\nyoursite.com"
+  max_words: 110

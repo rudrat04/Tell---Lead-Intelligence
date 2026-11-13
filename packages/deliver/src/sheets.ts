@@ -12,8 +12,10 @@ const API = "https://sheets.googleapis.com/v4/spreadsheets";
 export const LEAD_COLUMNS = [
   "Date", "Person", "Role", "Profile", "Company", "Website", "Size", "Segment", "Region",
   "Plays", "Why now", "Opener", "Angle", "Priority",
-  "Label", "Reason", "Outcome", "Notes", "ID",
+  "Label", "Reason", "Outcome", "Notes", "ID", "Email draft",
 ] as const;
+/** Lead row cells before the hidden ID (the row stored per delivery has these, then anything after ID). */
+export const LEAD_CELLS_BEFORE_ID = LEAD_COLUMNS.indexOf("ID");
 export const GIG_COLUMNS = ["Date", "Gig", "Company", "Type", "Location", "Apply", "Source", "Status", "Notes", "ID"] as const;
 
 export const LABEL_VALUES = ["good", "bad"];
@@ -100,4 +102,34 @@ export function parseLabels(values: string[][]): SheetLabel[] {
 export async function readLabels(spreadsheetId: string): Promise<SheetLabel[]> {
   const j = await call<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!A:Z")}`);
   return parseLabels(j.values ?? []);
+}
+
+const a1Col = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26)));
+
+/** Add any lead header missing from row 1 (a Sheet created before a column existed), at the end. Returns headers added. */
+export async function ensureLeadHeaders(spreadsheetId: string): Promise<string[]> {
+  const j = await call<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!1:1")}`);
+  const header = (j.values?.[0] ?? []).map((h) => h.trim().toLowerCase());
+  const missing = LEAD_COLUMNS.filter((c) => !header.includes(c.toLowerCase()));
+  if (!missing.length) return [];
+  const start = header.length;
+  await call(`/${spreadsheetId}/values/${encodeURIComponent(`Leads!${a1Col(start)}1:${a1Col(start + missing.length - 1)}1`)}?valueInputOption=RAW`, {
+    method: "PUT", body: JSON.stringify({ values: [missing] }),
+  });
+  return [...missing];
+}
+
+/** Fill one column (found by header name) for rows matched by hidden ID; only empty cells are written. Returns cells written. */
+export async function fillColumnById(spreadsheetId: string, column: string, values: Map<string, string>): Promise<number> {
+  const j = await call<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!A:AZ")}`);
+  const [header, ...rows] = j.values ?? [];
+  const idCol = header?.findIndex((h) => h.trim() === "ID") ?? -1;
+  const col = header?.findIndex((h) => h.trim().toLowerCase() === column.toLowerCase()) ?? -1;
+  if (idCol < 0 || col < 0) throw new Error(`Leads tab needs "ID" and "${column}" columns`);
+  const data = rows.flatMap((r, i) => {
+    const v = values.get((r[idCol] ?? "").trim());
+    return v && !(r[col] ?? "").trim() ? [{ range: `Leads!${a1Col(col)}${i + 2}`, values: [[v]] }] : [];
+  });
+  if (data.length) await call(`/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) });
+  return data.length;
 }

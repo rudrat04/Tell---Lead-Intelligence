@@ -111,7 +111,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (score.ranking.leads.length) {
     batch.push(db.insert(deliveries).values(score.ranking.leads.map((l) => ({
       accountId: l.account.id, deliveredAt: now, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
-      sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id)),
+      sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature),
     }))));
   }
   await db.batch(batch as unknown as Parameters<typeof db.batch>[0]);

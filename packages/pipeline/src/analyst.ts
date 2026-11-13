@@ -57,6 +57,7 @@ export async function analyzeLeads(
       const urls = ((hit.cited ?? []) as { url: string }[]).map((c) => c.url);
       out.set(p.l.account.id, {
         hypothesis: hit.hypothesis, angle: hit.angle, opener: hit.opener, counterEvidence: hit.counterEvidence, confidence: hit.confidence ?? 0,
+        email: hit.emailSubject && hit.emailBody ? { subject: hit.emailSubject, body: hit.emailBody } : null,
         citations: urls.map((u) => p.refs.findIndex((r) => r.url === u)).filter((i) => i >= 0), cachedFrom: hit.createdAt,
       });
       res.cached++;
@@ -85,7 +86,7 @@ export async function analyzeLeads(
         await db.insert(analyses).values({
           accountId: p.l.account.id, hypothesis: a.hypothesis, angle: a.angle, opener: a.opener, citations: [],
           cited: a.citations.map((i) => p.refs[i]!), counterEvidence: a.counterEvidence, confidence: a.confidence,
-          evidenceKey: p.key, model: HAIKU_MODEL,
+          evidenceKey: p.key, model: HAIKU_MODEL, emailSubject: a.email?.subject ?? null, emailBody: a.email?.body ?? null,
         }).onConflictDoNothing({ target: [analyses.accountId, analyses.evidenceKey] });
       }
     }

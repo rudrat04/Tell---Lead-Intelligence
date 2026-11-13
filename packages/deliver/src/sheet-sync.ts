@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { getDb, deliveries, labels, inArray, sql } from "@tell/db";
-import { appendRows, readLabels } from "./sheets.js";
+import { appendRows, readLabels, ensureLeadHeaders, LEAD_CELLS_BEFORE_ID } from "./sheets.js";
 
 export interface SheetSyncResult { appended: number; labelsSynced: number; skipped?: string }
 
@@ -12,7 +12,9 @@ export async function appendPendingLeads(pack: Pack): Promise<number> {
   const pending = await db.select({ id: deliveries.id, row: deliveries.sheetRow }).from(deliveries)
     .where(sql`${deliveries.sheetRow} is not null and ${deliveries.sheetAppendedAt} is null`).orderBy(deliveries.deliveredAt).limit(500);
   if (!pending.length) return 0;
-  await appendRows(id, "Leads", pending.map((p) => [...(p.row as string[]), p.id]));
+  await ensureLeadHeaders(id); // e.g. "Email draft" on a Sheet made before it existed
+  // stored rows are the cells before ID, then any cells after it (older rows end before ID)
+  await appendRows(id, "Leads", pending.map((p) => { const r = p.row as string[]; return [...r.slice(0, LEAD_CELLS_BEFORE_ID), p.id, ...r.slice(LEAD_CELLS_BEFORE_ID)]; }));
   await db.update(deliveries).set({ sheetAppendedAt: new Date() }).where(inArray(deliveries.id, pending.map((p) => p.id)));
   return pending.length;
 }

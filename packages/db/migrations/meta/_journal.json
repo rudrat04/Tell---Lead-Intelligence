@@ -85,6 +85,13 @@
       "when": 1794559572709,
       "tag": "0011_analyst",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1794580200977,
+      "tag": "0012_email_draft",
+      "breakpoints": true
     }
   ]
 }

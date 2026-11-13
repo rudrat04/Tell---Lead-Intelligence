@@ -75,7 +75,8 @@ describe("sheet row", () => {
   it("has one value per column except the hidden ID, leaves your columns empty, names the person", () => {
     const contact = { person: { name: "Riya Sample", role: "Founder/CEO", linkedin: "https://linkedin.com/in/riya", source: "yc" }, persona: "Founder / CEO", note: "" };
     const row = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13");
-    expect(row).toHaveLength(LEAD_COLUMNS.length - 1);
+    expect(row).toHaveLength(LEAD_COLUMNS.length - 1); // everything but the hidden ID
+    expect(row.at(-1)).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
     const col = (c: (typeof LEAD_COLUMNS)[number]) => row[LEAD_COLUMNS.indexOf(c)];
     expect(col("Person")).toBe("Riya Sample");
     expect(col("Opener")).toContain("Hi Riya");
@@ -126,5 +127,15 @@ describe("analyst notes in the digest", () => {
     expect(leadOpener(c, "Tanmark", undefined, undefined)).toBeNull();
     expect(leadOpener(c, "Tanmark", undefined, { ...n, opener: "I saw Tanmark is hiring." })).toBe("Hi Ravi, I saw Tanmark is hiring.");
     expect(leadOpener(c, "Tanmark", undefined, { ...n, opener: "Tanmark's AE role caught my eye." })).toBe("Hi Ravi, Tanmark's AE role caught my eye.");
+  });
+});
+
+describe("email draft", () => {
+  it("builds subject, code-written greeting, body and signature", async () => {
+    const { emailDraft } = await import("./render.js");
+    const c = { person: { name: "Ravi Tannery", role: "CEO", source: "yc" }, persona: "Founder", note: "" };
+    const n = { hypothesis: "h", angle: "a", opener: "o", counterEvidence: null, confidence: 0.6, email: { subject: "your founding AE role", body: "Saw the role.\n\nI set up the system.\n\nWorth a call?" } };
+    expect(emailDraft(c, n, "Sam\nexample.test")).toBe("Subject: your founding AE role\n\nHi Ravi,\n\nSaw the role.\n\nI set up the system.\n\nWorth a call?\n\nSam\nexample.test");
+    expect(emailDraft(c, { ...n, email: null })).toBe("");
   });
 });
