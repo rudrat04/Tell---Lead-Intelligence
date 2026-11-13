@@ -32,7 +32,8 @@ Runtime jobs (need `.env`; see `.env.example`):
 | `pnpm gigs` | fetch freelance/contract gigs |
 | `pnpm score [--dry] [--show]` | score + rank accounts |
 | `pnpm digest [--dry\|--test]` | score, render, send the digest (`--dry` writes `digest-preview.html`; `--test` sends with `[TEST]` and records nothing) |
-| `pnpm google:auth` | one-time OAuth (gmail.send + drive.file) to get `GMAIL_REFRESH_TOKEN` into `.env` |
+| `pnpm google:auth` | one-time OAuth (gmail.send + drive.file + gmail.readonly for bounces) to get `GMAIL_REFRESH_TOKEN` into `.env` |
+| `pnpm bounces [days]` | read hard bounces from the sending mailbox and mark those addresses invalid (skips without gmail.readonly) |
 | `pnpm watch` | weekly account watch: YC pages (founders, funding, launches), homepage + DNS changes, GTM tools |
 | `pnpm sheet:setup <pack-dir>` / `pnpm sheet:sync` | create the leads Sheet / append pending rows + read labels back |
 | `pnpm ops` | nightly upkeep: usage guard → janitor (retention) → eval metrics → verified backup to R2 |
@@ -84,7 +85,7 @@ Key invariants (each was a real bug or a deliberate design decision):
 
 ## Operations
 
-- Jobs run on **GitHub Actions** (`.github/workflows`) but are **triggered by a Cloudflare Worker** (`infra/scheduler`, free plan) via `workflow_dispatch`, because GitHub's own cron was unreliable; the workflows have no `schedule:`. `tick.yml` every 30 min, `daily.yml` 07:30 IST (migrate → pack check → partitions → boards → gigs → fallback tick → sheet sync → digest → healthchecks ping → upkeep), `boards.yml` Sundays (discovery + account watch). healthchecks.io alerts if the daily ping is missing. Trigger.dev code exists (`trigger/`) but deploys are blocked for the org.
+- Jobs run on **GitHub Actions** (`.github/workflows`) but are **triggered by a Cloudflare Worker** (`infra/scheduler`, free plan) via `workflow_dispatch`, because GitHub's own cron was unreliable; the workflows have no `schedule:`. `tick.yml` every 30 min, `daily.yml` 07:30 IST (migrate → pack check → partitions → boards → gigs → fallback tick → sheet sync → bounces → digest → healthchecks ping → upkeep), `boards.yml` Sundays (discovery + account watch). healthchecks.io alerts if the daily ping is missing. Trigger.dev code exists (`trigger/`) but deploys are blocked for the org.
 - Secrets live in GitHub repo secrets and `.env`; the pack location is the repo variable `TELL_PACK_R2_PREFIX`.
 - Migrations are applied by `pnpm db:migrate` (also the first step of `daily.yml`). Never edit an applied migration.
 - External sources: respect robots.txt and each source's terms (recorded in code comments: Remote OK link-back, Himalayas section 113, Reddit off pending approval). Don't bypass access controls (e.g. CSRF-protected APIs).
@@ -100,11 +101,11 @@ Built: Gates 1, 3, 4, 5; entity resolution; scoring, plays, fast lane, watchlist
 Deliberate deviations: Trigger.dev → GitHub Actions + Cloudflare Worker; single-business config → config packs; Haiku job-description extractor → title rules (`roles.yaml`); Haiku analyst → code-written "why now"; funding/launches from YC pages, not news feeds; raw text not stored in R2 (evidence = quote + URL); Exa people search is a paid API (~$0.007/search, capped 25/run), an exception to the plan's "no paid data vendors". Darwinbox skipped (JS app, no plain API). Reddit off until API approval.
 
 Not built yet, in suggested order:
-1. **Email engine** (plan 9b), mostly built: `people/email.ts` (pure: patterns, `learnPattern`, `emailFor` → `observed/likely/guessed/invalid`), `watchers/mail.ts` (MX via DoH, own-site pages, GitHub org commits only when the org's `blog` is the domain), `pipeline/emails.ts` `attachEmails` (cached 30 days in `domain_mail`, stored in `emails`, suppression respected), shown in digest + Sheet. No SMTP probing. Left: bounce reading (needs gmail.readonly; `markBounced` is ready), press-release addresses.
+1. **Email engine** (plan 9b), mostly built: `people/email.ts` (pure: patterns, `learnPattern`, `emailFor` → `observed/likely/guessed/invalid`), `watchers/mail.ts` (MX via DoH, own-site pages, GitHub org commits only when the org's `blog` is the domain), `pipeline/emails.ts` `attachEmails` (cached 30 days in `domain_mail`, stored in `emails`, suppression respected), shown in digest + Sheet. No SMTP probing. Bounce reading: `deliver/bounces.ts` (DSN report → X-Failed-Recipients → Gmail wording; 5.x.x only), `pnpm bounces` step before the digest. Left: press-release addresses.
 2. **Haiku analyst + code critic**, built: `intel/critic.ts` (vendor, solved tool, solved signal; optional `critic.yaml`; runs before the ranking cut, `criticDropped` counts) and `extract/analyst.ts` + `pipeline/analyst.ts` (today's leads only, cited hypothesis/angle/opener validated in code: citations in range, quotes verbatim, greeting written by code; cached in `analyses` by evidence key; shares the daily Haiku cap; falls back to the code opener). Left: the Sunday critic audit.
 3. **Gate 2** (pgvector exemplar bank, ~100 seed examples, labels from the Sheet) and the uncertain queue.
 4. **Maturity stages** (8b, incl. agency model) and **event dedupe** clusters (8a).
-5. **Sources**: Indian funding news (Inc42, Entrackr, YourStory RSS), Product Hunt/BetaList, SEC Form D, Bluesky, Indie Hackers, tool forums, VC portfolios, newsletter inbox, CT subdomains, lookalike domains, Wayback backfill, Workable/Recruitee/SmartRecruiters.
+5. **Sources**: Indian funding news (blocked: Inc42 and Entrackr terms forbid automated collection without written consent; YourStory robots.txt blocks AI/RSS bots), Product Hunt/BetaList, SEC Form D, Bluesky, Indie Hackers, tool forums, VC portfolios, newsletter inbox, CT subdomains, lookalike domains, Wayback backfill, Workable/Recruitee/SmartRecruiters.
 6. **Self-tuning** (11, after ~150 labels): weekly refit with guardrails, champion/challenger with blind interleaving, exploration picks, trend snapshots, Sunday/monthly reviews.
 7. Smaller: source drift alarm, archive cold accounts to R2, Haiku Batch API.
 

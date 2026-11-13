@@ -25,6 +25,7 @@
     "google:auth": "tsx scripts/gmail-auth.ts",
     "watch": "tsx scripts/watch.ts",
     "ops": "tsx scripts/ops.ts",
+    "bounces": "tsx scripts/bounces.ts",
     "forget": "tsx scripts/forget.ts"
   },
   "devDependencies": {

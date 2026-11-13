@@ -1,6 +1,6 @@
 /**
  * One-time: authorise the sending account and store its refresh token in .env.
- * Scopes: gmail.send (digest) + drive.file (only the leads Sheet this app creates).
+ * Scopes: gmail.send (digest), drive.file (only the leads Sheet this app creates), gmail.readonly (bounce reading only).
  * Needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env (a "Desktop app" OAuth client).
  * The token is written to .env and never printed.
  *   pnpm gmail:auth

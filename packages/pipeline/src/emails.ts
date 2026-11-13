@@ -113,7 +113,7 @@ export async function attachEmails(
   return { domains, byStatus };
 }
 
-/** Mark an address invalid after a bounce (called by whatever reads bounces; Gmail bounce reading needs gmail.readonly). */
+/** Mark an address invalid after a hard bounce (from `pnpm bounces`). Returns how many stored rows matched. */
 export async function markBounced(address: string): Promise<number> {
   const db = getDb();
   return (await db.update(emails).set({ status: "invalid", source: "bounce", checkedAt: new Date() })

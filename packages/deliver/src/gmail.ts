@@ -1,5 +1,5 @@
 /**
- * Gmail API sender (send-only scope). Credentials: an OAuth client (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) and a
+ * Gmail API sender (gmail.send; gmail.readonly only for reading bounces). Credentials: an OAuth client (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) and a
  * refresh token for the sending account (GMAIL_REFRESH_TOKEN), created once with `pnpm gmail:auth`.
  * Behind a small interface so another delivery method can be added later.
  */
@@ -11,7 +11,9 @@ export interface Sender {
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 /** Only files this app creates (the leads Sheet): no access to anything else in Drive. */
 export const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
-export const GOOGLE_SCOPES = [GMAIL_SEND_SCOPE, DRIVE_FILE_SCOPE];
+/** Read-only, used for one thing: finding bounce messages so bounced addresses are marked invalid. */
+export const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+export const GOOGLE_SCOPES = [GMAIL_SEND_SCOPE, DRIVE_FILE_SCOPE, GMAIL_READ_SCOPE];
 
 export async function googleAccessToken(env = process.env): Promise<string> {
   const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GMAIL_REFRESH_TOKEN } = env;
