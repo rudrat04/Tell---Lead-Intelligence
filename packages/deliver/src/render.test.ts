@@ -76,7 +76,8 @@ describe("sheet row", () => {
     const contact = { person: { name: "Riya Sample", role: "Founder/CEO", linkedin: "https://linkedin.com/in/riya", source: "yc" }, persona: "Founder / CEO", note: "" };
     const row = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13");
     expect(row).toHaveLength(LEAD_COLUMNS.length - 1); // everything but the hidden ID
-    expect(row.at(-1)).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
+    expect(row.at(-2)).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
+    expect(row.at(-1)).not.toBe(""); // Signals: every lead has at least one
     const col = (c: (typeof LEAD_COLUMNS)[number]) => row[LEAD_COLUMNS.indexOf(c)];
     expect(col("Person")).toBe("Riya Sample");
     expect(col("Opener")).toContain("Hi Riya");
@@ -157,5 +158,13 @@ describe("one-tap label buttons", () => {
     const links = new Map([["a0", { good: "https://w.test/l?v=good", bad: "https://w.test/l?v=bad" }]]);
     expect(renderDigest(result(1), pack, health, "2026-11-14", undefined, [], undefined, links).html).toContain("👍&nbsp; Good");
     expect(renderDigest(result(1), pack, health, "2026-11-14").html).not.toContain("👍&nbsp; Good");
+  });
+});
+
+describe("Signals column", () => {
+  it("lists each signal type once with a count, in a fixed order", async () => {
+    const { signalSummary } = await import("./render.js");
+    const e = (type: string) => ({ type, class: "x", ageDays: 1, current: false, quote: "q", url: "https://x.test", ref: { kind: "signal" as const, id: "1" } });
+    expect(signalSummary([e("funding_raise"), e("adjacent_role_open"), e("adjacent_role_open"), e("core_role_open_45d")])).toBe("Core role open 45+ days, Sales/marketing hiring ×2, Recently raised");
   });
 });

@@ -290,7 +290,24 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     "", "", "", "", // Label, Reason, Outcome, Notes: yours
     // (the hidden ID column is inserted here when the row is appended)
     emailDraft(contact, note, signature),
+    signalSummary(s.evidence),
   ];
+}
+
+const SIGNAL_LABEL: Record<string, string> = {
+  core_role_open_45d: "Core role open 45+ days", core_role_open: "Core role open", first_role: "Founding GTM hire",
+  contract_role: "Contract/fractional role", adjacent_role_open: "Sales/marketing hiring", core_role_filled: "Core role filled (against)",
+  explicit_hire_request: "Asked for help", pain_post: "Pain in public", funding_raise: "Recently raised", product_launch: "Product launch",
+  cta_sales_led: "Site went sales-led", pricing_page_added: "Pricing page added", gtm_tool_added: "New GTM tool", stack_sprawl: "Tool sprawl",
+};
+
+/** "Core role open 45+ days, Founding GTM hire, Recently raised ×2": every signal type behind a lead, strongest kinds first. */
+export function signalSummary(evidence: Evidence[]): string {
+  const counts = new Map<string, number>();
+  for (const e of evidence) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
+  const order = Object.keys(SIGNAL_LABEL);
+  return [...counts].sort((a, b) => (order.indexOf(a[0]) + 1 || 99) - (order.indexOf(b[0]) + 1 || 99))
+    .map(([t, n]) => `${SIGNAL_LABEL[t] ?? t.replace(/_/g, " ")}${n > 1 ? ` ×${n}` : ""}`).join(", ");
 }
 
 export function gigSheetRow(g: DigestGig, date: string): string[] {

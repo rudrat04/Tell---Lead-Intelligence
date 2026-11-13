@@ -12,7 +12,7 @@ const API = "https://sheets.googleapis.com/v4/spreadsheets";
 export const LEAD_COLUMNS = [
   "Date", "Person", "Role", "Profile", "Company", "Website", "Size", "Segment", "Region",
   "Plays", "Why now", "Opener", "Angle", "Priority",
-  "Label", "Reason", "Outcome", "Notes", "ID", "Email draft",
+  "Label", "Reason", "Outcome", "Notes", "ID", "Email draft", "Signals",
 ] as const;
 /** Lead row cells before the hidden ID (the row stored per delivery has these, then anything after ID). */
 export const LEAD_CELLS_BEFORE_ID = LEAD_COLUMNS.indexOf("ID");
