@@ -29,6 +29,8 @@ export interface ScoreRunResult {
   playsMatched: number;
   /** eligible accounts the code critic dropped before ranking, by check */
   criticDropped: Record<string, number>;
+  /** every scored account (for tuning and evals; not rendered) */
+  all?: { account: ScoredAccount; score: AccountScore }[];
 }
 
 /** Pack name + content hash: every score row says which config produced it (calibration, champion/challenger later). */
@@ -153,6 +155,6 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   return {
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
-    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped,
+    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, all: results.map((r) => ({ account: r.account, score: r.score })),
   };
 }

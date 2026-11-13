@@ -1,0 +1,2 @@
+ALTER TABLE "tuning_actions" ADD COLUMN "status" text DEFAULT 'proposed' NOT NULL;--> statement-breakpoint
+ALTER TABLE "tuning_actions" ADD COLUMN "created_at" timestamp with time zone DEFAULT now() NOT NULL;

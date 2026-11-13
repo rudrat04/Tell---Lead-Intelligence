@@ -37,6 +37,7 @@ Runtime jobs (need `.env`; see `.env.example`):
 | `pnpm watch` | weekly account watch: YC pages (founders, funding, launches), homepage + DNS changes, GTM tools |
 | `pnpm sheet:setup <pack-dir>` / `pnpm sheet:sync` | create the leads Sheet / append pending rows + read labels back |
 | `pnpm ops` | nightly upkeep: usage guard → janitor (retention) → eval metrics → verified backup to R2 |
+| `pnpm tune [--show] [--dry]` | weekly self-tuning proposals from labels (never applied; `--show` local only) |
 | `pnpm forget --name "X" --domain d` / `--email e` | delete a person everywhere (Neon, Sheet, R2 backups) and suppress them |
 
 Which pack loads: `TELL_PACK_R2_PREFIX` (private R2, production) > `TELL_PACK_DIR` > `packs/example-gtm`. To run locally against the operator's real pack: `TELL_PACK_R2_PREFIX=packs/main pnpm score --dry --show`.

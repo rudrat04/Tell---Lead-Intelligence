@@ -284,6 +284,9 @@ export const tuningActions = pgTable("tuning_actions", {
   after: jsonb("after"),
   outcomeCheckedAt: ts("outcome_checked_at"),
   helped: boolean("helped"),
+  /** proposed | applied | rejected (proposals are never applied automatically) */
+  status: text("status").notNull().default("proposed"),
+  createdAt: ts("created_at").notNull().defaultNow(),
 });
 
 export const evalResults = pgTable("eval_results", {

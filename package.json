@@ -26,6 +26,7 @@
     "watch": "tsx scripts/watch.ts",
     "ops": "tsx scripts/ops.ts",
     "bounces": "tsx scripts/bounces.ts",
+    "tune": "tsx scripts/tune.ts",
     "forget": "tsx scripts/forget.ts"
   },
   "devDependencies": {

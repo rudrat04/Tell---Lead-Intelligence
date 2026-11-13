@@ -57,3 +57,10 @@ jobs:
       - run: pnpm watch
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      # Weekly self-tuning proposals from your labels (never applied automatically; counts only in this log)
+      - name: Tuning proposals
+        if: always()
+        continue-on-error: true
+        run: pnpm tune
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

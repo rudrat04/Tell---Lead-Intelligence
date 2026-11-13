@@ -19,6 +19,8 @@ export interface DigestHealth {
   indiaInLeads?: number;
   /** free-tier usage from the nightly usage guard: service -> share of limit */
   usage?: { service: string; pct: number }[];
+  /** self-tuning proposals waiting for you (weekly; never applied automatically) */
+  tuningPending?: number;
   /** latest nightly eval metrics: metric -> value */
   metrics?: Record<string, number>;
 }
@@ -201,6 +203,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
       const m = health.metrics!; const p = (k: string) => `${Math.round((m[k] ?? 0) * 100)}%`;
       return `Last 30 days: named contacts ${p("named_contact_rate_30d")}, non-founder ${p("non_founder_contact_rate_30d")}, non-hiring leads ${p("non_hiring_lead_share_30d")}, India ${p("india_share_delivered_30d")} of leads (${p("india_share_tracked")} of tracked), labelled ${m.label_count_30d ?? 0}${(m.label_count_30d ?? 0) > 0 ? `, precision ${p("precision_30d")}` : ""}`;
     })() : "",
+    health.tuningPending ? `Tuning: ${health.tuningPending} proposed weight change${health.tuningPending === 1 ? "" : "s"} from your labels (run pnpm tune --show --dry to review)` : "",
     `Config: ${r.configVersion}`,
   ].filter(Boolean);
 
