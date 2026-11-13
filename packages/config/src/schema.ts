@@ -76,6 +76,8 @@ export const SignalsSchema = z.object({
   min_post_strength: z.number().int().min(1).max(5).default(3),
   /** at most this many events of one type count toward intent (a hiring spree is one story) */
   max_events_per_type: z.number().int().min(1).default(3),
+  /** each further event of the same type counts this much of the one before (a hiring spree is one story, not five) */
+  repeat_dampening: z.number().gt(0).max(1).default(0.5),
   signals: z.record(z.string(), z.object({
     class: z.enum(["explicit", "implicit", "trigger", "pain", "negative"]),
     lr: z.number().gt(0),
@@ -99,7 +101,10 @@ export const SignalsSchema = z.object({
     triggers_needed: z.number().int().min(1).default(2),
     corroborate: z.array(z.enum(["trigger", "pain"])).default(["trigger", "pain"]),
     fresh_days: z.number().int().min(1).default(30),
-  }).default({ alone: ["explicit", "implicit"], triggers_needed: 2, corroborate: ["trigger", "pain"], fresh_days: 30 }),
+    /** a class in `alone` qualifies on its own only at this strength or above; weaker ones count like triggers
+     *  (need `triggers_needed` independent fresh signals). 1 = every listed class qualifies alone. */
+    alone_min_strength: z.number().int().min(1).max(5).default(1),
+  }).default({ alone: ["explicit", "implicit"], triggers_needed: 2, corroborate: ["trigger", "pain"], fresh_days: 30, alone_min_strength: 1 }),
 });
 
 export const PlaysSchema = z.object({

@@ -126,7 +126,7 @@ describe("fixes from the first live ranking", () => {
 });
 
 describe("non-hiring signals: eligibility and absent conditions", () => {
-  const lenient = { ...pack, signals: { ...pack.signals, eligibility: { alone: ["explicit", "implicit", "pain"] as ("explicit" | "implicit" | "pain" | "trigger")[], triggers_needed: 2, corroborate: ["trigger"] as ("trigger" | "pain")[], fresh_days: 30 } } };
+  const lenient = { ...pack, signals: { ...pack.signals, eligibility: { alone: ["explicit", "implicit", "pain"] as ("explicit" | "implicit" | "pain" | "trigger")[], triggers_needed: 2, corroborate: ["trigger"] as ("trigger" | "pain")[], fresh_days: 30, alone_min_strength: 1 } } };
   const scoreWith = (p: typeof pack, jobs: JobRow[], signals: SignalRow[] = []) => scoreAccount(buildEvidence(jobs, signals, p, roles, now), facts, p);
   it("one trigger alone is not enough; two independent fresh triggers are", () => {
     expect(score([], [sig("funding_raise", 5)]).eligible).toBe(false);
@@ -171,3 +171,38 @@ describe("reserved slots for non-hiring leads", () => {
   });
 });
 
+
+describe("eligibility: alone_min_strength (weak signals need a second one)", () => {
+  const strict = { ...pack, signals: { ...pack.signals, eligibility: { ...pack.signals.eligibility, alone: ["explicit", "implicit", "pain"] as ("explicit" | "implicit" | "pain" | "trigger")[], alone_min_strength: 4 } } };
+  const s = (jobs: JobRow[], signals: SignalRow[] = []) => scoreAccount(buildEvidence(jobs, signals, strict, roles, now), facts, strict);
+  it("a weak implicit signal (tool stack, strength 3) no longer qualifies alone", () => {
+    expect(s([], [sig("stack_sprawl", 3)]).eligible).toBe(false);
+    expect(s([], [sig("gtm_tool_added", 3)]).eligible).toBe(false);
+  });
+  it("two different weak signals, or one weak plus a trigger, qualify", () => {
+    expect(s([], [sig("stack_sprawl", 3), sig("gtm_tool_added", 3)]).eligible).toBe(true);
+    expect(s([], [sig("stack_sprawl", 3), sig("funding_raise", 5)]).eligible).toBe(true);
+  });
+  it("a strong signal (open core role, strength 4) still qualifies alone", () => {
+    expect(s([job("RevOps Manager", 10)]).eligible).toBe(true);
+  });
+});
+
+describe("ranking bias: tiny team matching two plays vs big company with many sales roles", () => {
+  const small = { sizeBand: "2-10", region: "United States of America", segment: "b2b" };
+  const big = { sizeBand: "51-150", region: "United States of America", segment: "b2b" };
+  it("the small team's lead (founding GTM hire + fresh raise) outranks a large sales hiring spree", () => {
+    const tiny = score([job("Founding Account Executive", 6)], [sig("funding_raise", 4)], small);
+    const spree = score([
+      job("Account Executive", 3), job("Account Executive, Enterprise", 5), job("Sales Development Representative", 2),
+      job("SDR, EMEA", 7), job("Business Development Representative", 4), job("Sales Manager", 9),
+    ], [], big);
+    expect(tiny.plays.length).toBeGreaterThanOrEqual(2);
+    console.log(`bias eval: tiny=${tiny.priority.toFixed(3)} (plays ${tiny.plays.length}) spree=${spree.priority.toFixed(3)} (plays ${spree.plays.length})`);
+    expect(tiny.priority).toBeGreaterThan(spree.priority);
+  });
+  it("but a big company with an open core role (the role you substitute for) may still rank above it", () => {
+    const withCore = score([job("RevOps Manager", 12), job("Account Executive", 3), job("SDR, EMEA", 7)], [], big);
+    expect(withCore.eligible).toBe(true); // documented, not forced: an open core role is a real need at any size
+  });
+});

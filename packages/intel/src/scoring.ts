@@ -5,6 +5,8 @@ export interface ScoredSignal {
   lr: number;
   ageDays: number;
   halfLifeDays: number;
+  /** extra multiplier (repeats of one type count less); default 1 */
+  weight?: number;
 }
 
 export const DAMPENING = 0.7;
@@ -13,7 +15,7 @@ export const logit = (p: number) => Math.log(p / (1 - p));
 export const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
 export function decayed(s: ScoredSignal): number {
-  return Math.log(s.lr) * Math.pow(0.5, s.ageDays / s.halfLifeDays);
+  return Math.log(s.lr) * Math.pow(0.5, s.ageDays / s.halfLifeDays) * (s.weight ?? 1);
 }
 
 /**

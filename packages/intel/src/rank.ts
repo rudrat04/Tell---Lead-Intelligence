@@ -178,7 +178,13 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   }
   const counted = [...perType.values()].flat();
 
-  const scored: ScoredSignal[] = counted.map((e) => ({ lr: specs[e.type]!.lr, ageDays: e.ageDays, halfLifeDays: specs[e.type]!.half_life_days }));
+  // within one type, the freshest event counts in full and each further one at repeat_dampening of the one before
+  const rank = new Map<string, number>();
+  const scored: ScoredSignal[] = [...counted].sort((a, b) => a.ageDays - b.ageDays).map((e) => {
+    const k = rank.get(e.type) ?? 0;
+    rank.set(e.type, k + 1);
+    return { lr: specs[e.type]!.lr, ageDays: e.ageDays, halfLifeDays: specs[e.type]!.half_life_days, weight: pack.signals.repeat_dampening ** k };
+  });
   const intent = intentProbability(pack.signals.base_rate, scored);
   const positives = counted.filter((e) => e.class !== "negative");
   const newestAge = positives.length ? Math.min(...positives.map((e) => e.ageDays)) : Infinity;
@@ -190,7 +196,10 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const fast = counted.some((e) => (specs[e.type]?.fast_lane || specs[e.type]?.strength === 5) && e.ageDays <= FAST_LANE_MAX_AGE_DAYS);
   // eligible: one fresh signal of a class the pack trusts alone, or enough independent fresh triggers
   const fresh = counted.filter((e) => e.class !== "negative" && (e.current || e.ageDays <= elig.fresh_days));
-  const eligible = fresh.some((e) => (elig.alone as string[]).includes(e.class)) || fresh.filter((e) => e.class === "trigger").length >= elig.triggers_needed;
+  // strong enough to stand alone, or enough independent weaker ones (triggers + below-strength "alone" classes)
+  const strong = (e: Evidence) => (elig.alone as string[]).includes(e.class) && (specs[e.type]?.strength ?? 3) >= (elig.alone_min_strength ?? 1);
+  const weakTypes = new Set(fresh.filter((e) => !strong(e) && (e.class === "trigger" || (elig.alone as string[]).includes(e.class))).map((e) => e.type));
+  const eligible = fresh.some(strong) || weakTypes.size >= elig.triggers_needed;
   const drivers = [...positives].sort((a, b) => Math.log(specs[b.type]!.lr) * 0.5 ** (b.ageDays / specs[b.type]!.half_life_days) - Math.log(specs[a.type]!.lr) * 0.5 ** (a.ageDays / specs[a.type]!.half_life_days));
 
   return { intent, fit, timing, priority: intent * fit * timing, lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers };
