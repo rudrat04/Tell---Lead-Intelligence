@@ -14,7 +14,7 @@ export const PEOPLE_REFRESH_DAYS = 30;
  */
 export async function contactsFor(
   accountIds: string[], pack: Pack,
-  opts: { write?: boolean; search?: PeopleSearch | null; searchFor?: string[]; maxSearches?: number } = {},
+  opts: { write?: boolean; search?: PeopleSearch | null; searchFor?: string[]; maxSearches?: number; preferred?: Map<string, string[]> } = {},
 ): Promise<Map<string, Contact | null>> {
   applyPackIdentity(pack);
   const out = new Map<string, Contact | null>();
@@ -64,9 +64,11 @@ export async function contactsFor(
     for (const acct of acctRows) {
       if (!targets.has(acct.id)) continue;
       const company = acct.name ?? acct.domain;
-      for (const persona of pack.icp.personas) {
+      const pref = opts.preferred?.get(acct.id) ?? [];
+      const order = [...pref.map((t) => pack.icp.personas.find((p) => p.title === t)).filter((p): p is (typeof pack.icp.personas)[number] => !!p), ...pack.icp.personas.filter((p) => !pref.includes(p.title))];
+      for (const persona of order) {
         if (budget <= 0) break;
-        if (persona.size_bands.length && acct.size && !persona.size_bands.includes(acct.size)) continue;
+        if (!pref.includes(persona.title) && persona.size_bands.length && acct.size && !persona.size_bands.includes(acct.size)) continue;
         const rx = persona.patterns.map(toRegex);
         const have = (byAccount.get(acct.id) ?? []).some((p) => p.role && rx.some((r) => r.test(p.role!)));
         if (have || memo.has(`${acct.id}:${persona.title}`)) continue;
@@ -95,7 +97,7 @@ export async function contactsFor(
 
   for (const id of accountIds) {
     const list = byAccount.get(id) ?? [];
-    const contact = pickContact(list, pack.icp.personas, sizes.get(id) ?? null);
+    const contact = pickContact(list, pack.icp.personas, sizes.get(id) ?? null, opts.preferred?.get(id) ?? []);
     if (contact) {
       // other named people matching your personas, for "Also reach"
       contact.others = pack.icp.personas

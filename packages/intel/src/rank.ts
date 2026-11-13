@@ -120,7 +120,7 @@ export function softFit(a: AccountFacts, icp: Pack["icp"]): number {
   return Object.entries(f.weights).reduce((sum, [k, w]) => sum + w * (parts[k] ?? 0.5), 0);
 }
 
-export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[] }
+export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[]; personas?: string[]; qualifies?: boolean }
 
 /**
  * A play fires when every required signal type is present within its window (current evidence always is) and none
@@ -133,11 +133,12 @@ export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayM
     if ((p.absent ?? []).some((t) => ev.some((e) => e.type === t && inWindow(e)))) continue;
     const used: Evidence[] = [];
     const ok = p.requires.every((t) => {
-      const hit = ev.filter((e) => e.type === t && (e.current || e.ageDays <= p.window_days)).sort((a, b) => a.ageDays - b.ageDays)[0];
-      if (hit) used.push(hit);
-      return !!hit;
+      const hits = ev.filter((e) => e.type === t && (e.current || e.ageDays <= p.window_days)).sort((a, b) => a.ageDays - b.ageDays);
+      const need = p.min_count?.[t] ?? 1;
+      if (hits.length >= need) used.push(...hits.slice(0, need));
+      return hits.length >= need;
     });
-    if (ok) out.push({ id, title: p.title, angle: p.angle, evidence: used });
+    if (ok) out.push({ id, title: p.title, angle: p.angle, evidence: used, personas: p.personas ?? [], qualifies: p.qualifies ?? false });
   }
   return out;
 }
@@ -199,10 +200,13 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   // strong enough to stand alone, or enough independent weaker ones (triggers + below-strength "alone" classes)
   const strong = (e: Evidence) => (elig.alone as string[]).includes(e.class) && (specs[e.type]?.strength ?? 3) >= (elig.alone_min_strength ?? 1);
   const weakTypes = new Set(fresh.filter((e) => !strong(e) && (e.class === "trigger" || (elig.alone as string[]).includes(e.class))).map((e) => e.type));
-  const eligible = fresh.some(strong) || weakTypes.size >= elig.triggers_needed;
+  // a play marked `qualifies` is a need on its own (e.g. 3+ sales roles open and no ops role or owner)
+  const eligible = fresh.some(strong) || weakTypes.size >= elig.triggers_needed || plays.some((p) => p.qualifies && p.evidence.some((e) => e.current || e.ageDays <= elig.fresh_days));
   const drivers = [...positives].sort((a, b) => Math.log(specs[b.type]!.lr) * 0.5 ** (b.ageDays / specs[b.type]!.half_life_days) - Math.log(specs[a.type]!.lr) * 0.5 ** (a.ageDays / specs[a.type]!.half_life_days));
 
-  return { intent, fit, timing, priority: intent * fit * timing, lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers };
+  // fit's weight on priority is the pack's call: 1 = multiplies (default), 0.3 = tie-break, 0 = ignored
+  const influence = pack.icp.soft_fit.influence ?? 1;
+  return { intent, fit, timing, priority: intent * timing * (1 - influence + influence * fit), lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers };
 }
 
 export interface RankInput<A> { account: A; score: AccountScore; incomplete: boolean; recentlyDelivered: boolean; newPlaySinceDelivery: boolean }

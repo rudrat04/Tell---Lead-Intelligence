@@ -38,10 +38,12 @@ function seniority(role: string | null): number {
  * Pick who to reach out to at an account, following the pack's personas in order of preference,
  * restricted to personas meant for the account's size band. Falls back to the most senior known person.
  */
-export function pickContact(people: Person[], personas: Pack["icp"]["personas"], sizeBand: string | null): Contact | null {
+export function pickContact(people: Person[], personas: Pack["icp"]["personas"], sizeBand: string | null, preferred: string[] = []): Contact | null {
   if (people.length === 0) return null;
-  for (const p of personas) {
-    if (p.size_bands.length && sizeBand && !p.size_bands.includes(sizeBand)) continue;
+  // the personas who own this lead's problem (from its play) come first, whatever the company size
+  const ordered = [...preferred.map((t) => personas.find((p) => p.title === t)).filter((p): p is Pack["icp"]["personas"][number] => !!p), ...personas.filter((p) => !preferred.includes(p.title))];
+  for (const p of ordered) {
+    if (!preferred.includes(p.title) && p.size_bands.length && sizeBand && !p.size_bands.includes(sizeBand)) continue;
     const rx = p.patterns.map(toRegex);
     const matches = people.filter((x) => x.role && rx.some((r) => r.test(x.role!))).sort((a, b) => seniority(b.role) - seniority(a.role));
     if (matches[0]) return { person: matches[0], persona: p.title, note: `${p.title}` };

@@ -34,3 +34,16 @@ describe("personaSearchLinks", () => {
   });
 });
 
+
+describe("pickContact: the play's problem owner first", () => {
+  it("prefers the play's persona over the default order and ignores its size bands", async () => {
+    const { pickContact } = await import("./contacts.js");
+    const personas = [
+      { title: "Founder / CEO", patterns: ["(?i)\\bfounder\\b"], size_bands: ["2-10", "11-50"] },
+      { title: "RevOps lead", patterns: ["(?i)\\brev ?ops\\b"], size_bands: ["51-150"] },
+    ];
+    const people = [{ name: "Ravi T", role: "Founder", source: "yc" }, { name: "Mila O", role: "RevOps Manager", source: "exa" }];
+    expect(pickContact(people, personas, "11-50")!.person.name).toBe("Ravi T");
+    expect(pickContact(people, personas, "11-50", ["RevOps lead"])!.person.name).toBe("Mila O");
+  });
+});

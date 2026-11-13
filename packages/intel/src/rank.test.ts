@@ -206,3 +206,20 @@ describe("ranking bias: tiny team matching two plays vs big company with many sa
     expect(withCore.eligible).toBe(true); // documented, not forced: an open core role is a real need at any size
   });
 });
+
+describe("plays: min_count, qualifies, and fit influence", () => {
+  it("a qualifying play (3+ sales roles, no ops) makes an account eligible even under a strict floor", () => {
+    const strict = { ...pack, signals: { ...pack.signals, eligibility: { ...pack.signals.eligibility, alone_min_strength: 5 } },
+      plays: { plays: { ...pack.plays.plays, sales_without_ops: { title: "Sales without ops", requires: ["adjacent_role_open"], min_count: { adjacent_role_open: 3 }, absent: ["core_role_open", "core_role_open_45d"], window_days: 60, angle: "a", qualifies: true, personas: [] } } } };
+    const s = (jobs: JobRow[]) => scoreAccount(buildEvidence(jobs, [], strict, roles, now), facts, strict);
+    expect(s([job("Account Executive", 3), job("SDR", 4)]).eligible).toBe(false);
+    const three = s([job("Account Executive", 3), job("SDR", 4), job("BDR", 5)]);
+    expect(three.plays.map((p) => p.id)).toContain("sales_without_ops");
+    expect(three.eligible).toBe(true);
+  });
+  it("influence 0 makes size irrelevant to priority", () => {
+    const flat = { ...pack, icp: { ...pack.icp, soft_fit: { ...pack.icp.soft_fit, influence: 0 } } };
+    const p = (sizeBand: string) => scoreAccount(buildEvidence([job("RevOps Manager", 10)], [], flat, roles, now), { ...facts, sizeBand }, flat).priority;
+    expect(p("2-10")).toBe(p("51-150"));
+  });
+});

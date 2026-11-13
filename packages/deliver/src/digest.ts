@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { runScoring, istDay, contactsFor, attachEmails, analyzeLeads, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
+import { runScoring, istDay, contactsFor, attachEmails, analyzeLeads, reachEnabled, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
 import { appendPendingLeads } from "./sheet-sync.js";
@@ -67,14 +67,23 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   }
 
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
-  const score = await runScoring({ pack, write: !opts.dryRun && !opts.test });
-  // people search only for today's leads (not the watchlist) to stay inside the search API's free tier
+  const max = pack.delivery.digest.max_leads;
+  const reach = reachEnabled(pack);
+  // with reach on, score a pool of 2x the leads, find who to contact there, then re-rank by who you can reach
+  const score = await runScoring({ pack, write: !opts.dryRun && !opts.test, maxLeads: reach ? max * 2 : max });
+  const preferred = preferredPersonas([...score.ranking.leads, ...score.ranking.watchlist]);
+  // people search only for the leads (not the watchlist) to stay inside the search API's free tier
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {
-    write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id),
+    write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id), preferred,
   });
   const enrich: string[] = [];
   try { const e = await attachEmails(contacts, { write: !opts.dryRun }); enrich.push(`emails ${JSON.stringify(e.byStatus)} (${e.domains} domains checked)`); }
   catch { enrich.push("emails failed"); /* leads still go out with LinkedIn */ }
+  if (reach) {
+    const r = rerankByReach(score.ranking, contacts, pack, max);
+    score.ranking = r.ranking;
+    enrich.push(`reach: ${[...r.factors.values()].filter((f) => f < 1).length} of ${r.factors.size} pool leads down-weighted`);
+  }
   // analyst only for today's leads; cached by evidence, so test sends and re-runs don't pay again
   let notes: Awaited<ReturnType<typeof analyzeLeads>>["analyses"] | undefined;
   try {

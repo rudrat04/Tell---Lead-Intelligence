@@ -49,7 +49,18 @@ export const IcpSchema = z.object({
     region_default: z.number().min(0).max(1).default(0.5),
     segment: z.record(z.string(), z.number().min(0).max(1)).default({}),
     segment_default: z.number().min(0).max(1).default(0.5),
+    /** how much fit moves priority: 1 = multiplies it fully (default), 0 = ignored, 0.3 = a tie-break */
+    influence: z.number().min(0).max(1).default(1),
   }),
+  /** ranking by whether you can actually reach the problem owner: multiplier on priority, applied to a pool of
+   *  2x max_leads after contacts and emails are known. All 1 = off (default). */
+  reach: z.object({
+    no_contact: z.number().min(0).max(1).default(1),
+    no_email: z.number().min(0).max(1).default(1),
+    guessed_email: z.number().min(0).max(1).default(1),
+    /** the contact isn't one of the personas the matched play names */
+    off_persona: z.number().min(0).max(1).default(1),
+  }).default({ no_contact: 1, no_email: 1, guessed_email: 1, off_persona: 1 }),
   /** who to contact at a matching company, in order of preference, by company size */
   personas: z.array(z.object({
     title: z.string(),
@@ -124,6 +135,12 @@ export const PlaysSchema = z.object({
     absent: z.array(z.string()).default([]),
     window_days: z.number().int().min(1),
     angle: z.string(),
+    /** at least this many events of a type (e.g. 3 sales roles open), checked with requires */
+    min_count: z.record(z.string(), z.number().int().min(1)).default({}),
+    /** a match makes the account eligible on its own (the combination is the need, e.g. sales hiring with no ops) */
+    qualifies: z.boolean().default(false),
+    /** persona titles (icp.personas) who own this problem, most fitting first; they're contacted before the default order */
+    personas: z.array(z.string()).default([]),
   })),
 });
 
