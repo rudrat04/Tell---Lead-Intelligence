@@ -99,14 +99,14 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   // Code critic (plan 8f) before the cut, so a dropped account frees its slot for the next one
   const criticDropped: Record<string, number> = {};
   const eligibleIds = results.filter((r) => r.score.eligible).map((r) => r.account.id);
-  const site = new Map<string, { title?: string; tools?: string[] }>();
+  const site = new Map<string, { title?: string; tools?: string[]; partnerBadge?: boolean }>();
   const dnsTools = new Map<string, string[]>();
   for (const part of chunk(eligibleIds, 500)) {
     const snaps = await db.execute(sql`
       select distinct on (account_id, kind) account_id, kind, extracted from ${snapshots}
       where ${inArray(snapshots.accountId, part)} and kind in ('site', 'dns')
       order by account_id, kind, taken_at desc`);
-    for (const r of snaps.rows as { account_id: string; kind: string; extracted: { title?: string; tools?: string[] } | null }[]) {
+    for (const r of snaps.rows as { account_id: string; kind: string; extracted: { title?: string; tools?: string[]; partnerBadge?: boolean } | null }[]) {
       if (r.kind === "site") site.set(r.account_id, r.extracted ?? {});
       else dnsTools.set(r.account_id, r.extracted?.tools ?? []);
     }
@@ -115,7 +115,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   for (const r of results) {
     if (!r.score.eligible) continue;
     const sf = site.get(r.account.id);
-    const v = critic({ name: r.account.name, domain: r.account.domain, siteTitle: sf?.title, tools: [...(sf?.tools ?? []), ...(dnsTools.get(r.account.id) ?? [])], evidence: r.score.evidence }, pack);
+    const v = critic({ name: r.account.name, domain: r.account.domain, siteTitle: sf?.title, partnerBadge: sf?.partnerBadge, tools: [...(sf?.tools ?? []), ...(dnsTools.get(r.account.id) ?? [])], evidence: r.score.evidence }, pack);
     verdicts.set(r.account.id, v);
     if (!v.pass) for (const f of v.failed) criticDropped[f.check] = (criticDropped[f.check] ?? 0) + 1;
   }

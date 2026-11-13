@@ -76,17 +76,42 @@ const normCo = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-
  * one of the person's current roles (no end date) is at this company and its title matches the persona.
  * People who have left the company are rejected even if their old title matches.
  */
+/** The same company by name (normalised) or by the domain's label: never a fuzzy match. */
+export function isSameCompany(name: string, company: string, domain: string): boolean {
+  const co = normCo(company), n = normCo(name);
+  const label = domain.split(".")[0]!.toLowerCase();
+  return (co.length >= 3 && n === co) || (label.length >= 4 && n.replace(/ /g, "") === label);
+}
+
+const GTM_LEADER = /\b(head of (sales|growth|marketing|revenue|gtm|go[- ]to[- ]market)|vp,? (of )?(sales|marketing|growth|revenue)|chief (revenue|marketing|growth) officer|cro|cmo|(director|head) of (demand gen|partnerships)|director of (sales|marketing|growth))\b/i;
+type HitRole = { title: string; company: string; current: boolean; from?: string | null; to?: string | null };
+
+/**
+ * People-search facts about this company (#6, #7): a GTM leader who started in the last 90 days (they buy in their
+ * first months), and someone in an ops role who left in the last 180 days (a gap). Exported for tests.
+ */
+export function peopleEvents(hit: { url: string; roles: HitRole[] }, company: string, domain: string, opsPatterns: RegExp[], now: Date): { type: "new_gtm_leader" | "ops_person_left"; quote: string; url: string; observedAt: Date }[] {
+  const out: { type: "new_gtm_leader" | "ops_person_left"; quote: string; url: string; observedAt: Date }[] = [];
+  const days = (d: Date) => (now.getTime() - d.getTime()) / 86_400_000;
+  const when = (d: Date) => d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  for (const r of hit.roles.filter((x) => isSameCompany(x.company, company, domain))) {
+    const from = r.from ? new Date(r.from) : null, to = r.to ? new Date(r.to) : null;
+    if (r.current && from && !Number.isNaN(from.getTime()) && days(from) >= 0 && days(from) <= 90 && GTM_LEADER.test(r.title)) {
+      out.push({ type: "new_gtm_leader", quote: `New ${r.title} since ${when(from)}`, url: hit.url, observedAt: from });
+    }
+    if (!r.current && to && !Number.isNaN(to.getTime()) && days(to) >= 0 && days(to) <= 180 && opsPatterns.some((p) => p.test(r.title))) {
+      out.push({ type: "ops_person_left", quote: `${r.title} left in ${when(to)}`, url: hit.url, observedAt: to });
+    }
+  }
+  return out;
+}
+
 export function acceptPeopleHit(
-  hit: { name: string | null; url: string; roles: { title: string; company: string; current: boolean }[] },
+  hit: { name: string | null; url: string; roles: HitRole[] },
   company: string, domain: string, patterns: RegExp[],
 ): Person | null {
   if (!hit.name || !/^[\p{L}][\p{L}'.() -]{1,60}$/u.test(hit.name)) return null;
-  const co = normCo(company);
-  const label = domain.split(".")[0]!.toLowerCase();
-  const sameCompany = (name: string) => {
-    const n = normCo(name);
-    return (co.length >= 3 && n === co) || (label.length >= 4 && n.replace(/ /g, "") === label);
-  };
+  const sameCompany = (name: string) => isSameCompany(name, company, domain);
   const role = hit.roles.find((r) => r.current && sameCompany(r.company) && patterns.some((p) => p.test(r.title)));
   if (!role) return null;
   const linkedin = /linkedin\.com\/in\//i.test(hit.url) ? hit.url : null;

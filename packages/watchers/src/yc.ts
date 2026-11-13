@@ -13,7 +13,7 @@ export interface JobPosting {
   location?: string;
   /** ISO country codes, when the source gives them (Keka) */
   countryCodes?: string[];
-  /** short description / excerpt, when the source gives it */
+  /** description or excerpt as plain text, when the source gives it (kept in memory only, never stored) */
   text?: string;
 }
 

@@ -17,6 +17,8 @@ export interface CriticInput {
   siteTitle?: string | null;
   /** tool keys detected on the site or in DNS */
   tools?: string[];
+  /** the site shows a HubSpot/Salesforce/... partner badge: they sell GTM services */
+  partnerBadge?: boolean;
   evidence: Evidence[];
 }
 
@@ -29,6 +31,7 @@ export function critic(i: CriticInput, pack: Pack): CriticVerdict {
   const text = [i.name, i.domain, i.siteTitle].filter(Boolean).join(" | ");
   const vendor = c.vendor_patterns.map(toRegex).find((r) => r.test(text));
   if (vendor) failed.push({ check: "vendor", reason: `looks like a vendor of the same service (${text.match(vendor)?.[0] ?? "pattern"})` });
+  else if (i.partnerBadge) failed.push({ check: "vendor", reason: "shows a CRM/GTM partner badge: sells the same service" });
 
   const tool = (i.tools ?? []).find((t) => c.solved_tools.includes(t));
   if (tool) failed.push({ check: "solved_tool", reason: `already uses ${pack.tools.tools[tool]?.label ?? tool}` });

@@ -4,7 +4,7 @@
  * Free tier: $10 credit/month (~$0.007 per search); callers cache results and cap searches per run.
  */
 
-export interface PeopleRole { title: string; company: string; current: boolean }
+export interface PeopleRole { title: string; company: string; current: boolean; from?: string | null; to?: string | null }
 export interface PeopleHit { name: string | null; url: string; roles: PeopleRole[] }
 export interface PeopleSearch { search(query: string, num?: number): Promise<PeopleHit[]> }
 
@@ -18,7 +18,7 @@ export function parseExaPerson(r: ExaResult): PeopleHit | null {
   if (!person) return null;
   const roles = (person.workHistory ?? [])
     .filter((w) => w.title && w.company?.name)
-    .map((w) => ({ title: w.title!.trim(), company: w.company!.name!.trim(), current: !w.dates?.to }));
+    .map((w) => ({ title: w.title!.trim(), company: w.company!.name!.trim(), current: !w.dates?.to, from: w.dates?.from ?? null, to: w.dates?.to ?? null }));
   return { name: (person.name ?? r.title ?? "").trim() || null, url: r.url, roles };
 }
 

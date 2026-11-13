@@ -15,7 +15,23 @@ export interface SiteFacts {
   pricing: boolean;
   /** tool keys detected in scripts/links (filled by the caller's tool rules) */
   tools: string[];
+  /** where the page's lead forms send data when it isn't a CRM: "formspree", "mailto", "typeform"... (empty = no such form) */
+  leakyForms: string[];
+  /** a page form exists at all (any <form> with an input, or a form-builder embed) */
+  hasForm: boolean;
+  /** shows a HubSpot / Salesforce / other partner badge: the company sells GTM services itself */
+  partnerBadge: boolean;
+  /** "marketing by Acme", "growth partner: Acme": an outside GTM agency is credited */
+  agencyCredit: string | null;
 }
+
+const FORM_SINKS: [string, RegExp][] = [
+  ["formspree", /formspree\.io/i], ["getform", /getform\.io/i], ["formsubmit", /formsubmit\.co/i], ["basin", /usebasin\.com/i],
+  ["google forms", /docs\.google\.com\/forms|forms\.gle\//i], ["typeform", /typeform\.com|embed\.typeform/i], ["tally", /tally\.so/i],
+  ["jotform", /jotform\.(com|me)/i], ["web3forms", /web3forms\.com/i], ["netlify forms", /data-netlify="true"|netlify-honeypot/i],
+];
+const PARTNER = /\b(hubspot (solutions|platinum|gold|diamond|elite) partner|salesforce (consulting|crm) partner|pipedrive (certified )?partner|zoho (authori[sz]ed )?partner|clay (expert|partner)|certified (hubspot|salesforce) (agency|partner))\b/i;
+const AGENCY_CREDIT = /\b(?:[Mm]arketing|[Gg]rowth|[Dd]emand [Gg]en(?:eration)?|SEO|[Pp]erformance [Mm]arketing|RevOps|GTM) (?:[Bb]y|[Pp]artner:?)\s+([A-Z][\w&.' -]{1,40})/;
 
 const SALES_LED = /\b((book|schedule|request|get|see) (a |your |an? )?(free )?(demo|call|consultation)|contact sales|talk to (sales|an expert|our team|us)|speak (to|with) (sales|an expert))\b/i;
 const SELF_SERVE = /\b((start|try) (it )?(for )?free|free trial|sign ?up( free)?|get started( free| for free)?|create (a |an )?(free )?account)\b/i;
@@ -38,6 +54,12 @@ export function extractSiteFacts(html: string, tools: ToolRule[]): SiteFacts {
     ...$("script:not([src])").map((_, el) => ($(el).html() ?? "").slice(0, 4000)).get(),
   ].join("\n");
   const found = tools.filter((t) => t.site.some((r) => r.test(assets))).map((t) => t.key);
+  const formsHtml = [...$("form").map((_, el) => `${$(el).attr("action") ?? ""} ${$.html(el).slice(0, 600)}`).get(), ...$("iframe[src], script[src]").map((_, el) => $(el).attr("src") ?? "").get()].join("\n");
+  const formActions = $("form").map((_, el) => ($(el).attr("action") ?? "").trim()).get();
+  const leaky = FORM_SINKS.filter(([, r]) => r.test(formsHtml)).map(([k]) => k);
+  if (formActions.some((a) => /^mailto:/i.test(a))) leaky.push("mailto");
+  const hasForm = $("form input, form textarea").length > 0 || leaky.length > 0;
+  const bodyText = $("body").text().replace(/\s+/g, " ");
   return {
     title: $("title").first().text().trim().slice(0, 150),
     ctas,
@@ -45,6 +67,10 @@ export function extractSiteFacts(html: string, tools: ToolRule[]): SiteFacts {
     selfServe: ctas.some((t) => SELF_SERVE.test(t)),
     pricing,
     tools: found.sort(),
+    leakyForms: [...new Set(leaky)],
+    hasForm,
+    partnerBadge: PARTNER.test(bodyText) || $("img[alt]").get().some((el) => PARTNER.test($(el).attr("alt") ?? "")),
+    agencyCredit: bodyText.slice(-3000).match(AGENCY_CREDIT)?.[1]?.trim() ?? null,
   };
 }
 

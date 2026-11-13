@@ -1,9 +1,9 @@
-import type { Pack } from "@tell/config";
+import { toRegex, type Pack } from "@tell/config";
 import {
   fetchYcCompanies, fetchYcJobs, fetchBoardPostings, findBoardLinks, robotsAllows,
   userAgent, type YcCompany, type JobPosting, type Ats,
 } from "@tell/watchers";
-import { classifyJob, compileRoles, diffBoard, repostedRoles, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
+import { classifyJob, compileRoles, diffBoard, repostedRoles, jdMentions, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
 import { registrableDomain } from "@tell/people";
 import { applyPackIdentity } from "./scheduled.js";
 import { getDb, accounts, jobBoards, jobs, signals, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -156,6 +156,7 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
   const db = getDb();
   const specs = opts.pack.signals.signals;
   const roles = compileRoles(opts.pack.roles);
+  const jdPatterns = (opts.pack.roles.jd_patterns ?? []).map(toRegex);
   const now = new Date();
 
   const boards: BoardRow[] = await db.select({
@@ -195,10 +196,11 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
     }
     const fetched: FetchedJob[] = postings.flatMap((p) => {
       const cls = classifyJob(p.title, p.employmentType, roles);
-      return cls ? [{ externalId: p.externalId, title: p.title, url: p.url, employmentType: p.employmentType, postedAt: p.postedAt, cls }] : [];
+      return cls ? [{ externalId: p.externalId, title: p.title, url: p.url, employmentType: p.employmentType, postedAt: p.postedAt, cls, text: p.text }] : [];
     });
     const d = diffBoard(openByBoard.get(b.id) ?? [], fetched, now, b.baselineDone);
     if (b.baselineDone && specs.role_reposted) d.signals.push(...(repostedRoles(d.insert, closedByBoard.get(b.id) ?? [], now) as unknown as typeof d.signals));
+    if (b.baselineDone && specs.jd_mentions) d.signals.push(...(jdMentions(d.insert, jdPatterns, now) as unknown as typeof d.signals));
     d.signals = d.signals.filter((s) => specs[s.type]);
 
     const stmts: unknown[] = [];

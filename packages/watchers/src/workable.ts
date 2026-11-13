@@ -67,6 +67,7 @@ export async function fetchWorkableAccount(subdomain: string): Promise<WorkableA
 }
 
 interface WidgetJob {
+  description?: string;
   shortcode: string; title: string; url?: string; employment_type?: string; published_on?: string; created_at?: string;
   country?: string; city?: string; locations?: { country?: string; countryCode?: string; city?: string; hidden?: boolean }[];
 }
@@ -84,13 +85,14 @@ export function workablePostings(subdomain: string, jobs: WidgetJob[]): JobPosti
       postedAt: date ? new Date(`${date}T00:00:00Z`) : undefined,
       location: (locs.length ? locs.map((l) => [l.city, l.country].filter(Boolean).join(", ")) : [[j.city, j.country].filter(Boolean).join(", ")]).filter(Boolean).join(" / ") || undefined,
       countryCodes: locs.map((l) => l.countryCode).filter((c): c is string => !!c),
+      text: j.description ? j.description.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim().slice(0, 20000) : undefined,
     };
   });
 }
 
 /** All open roles on a company's Workable board. Throws if the board can't be read. */
 export async function fetchWorkablePostings(subdomain: string): Promise<JobPosting[]> {
-  const d = await getJson<{ jobs: WidgetJob[] }>(`https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(subdomain)}`, 500);
+  const d = await getJson<{ jobs: WidgetJob[] }>(`https://apply.workable.com/api/v1/widget/accounts/${encodeURIComponent(subdomain)}?details=true`, 500);
   return workablePostings(subdomain, d.jobs ?? []);
 }
 

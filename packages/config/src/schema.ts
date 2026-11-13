@@ -153,6 +153,8 @@ export const RolesSchema = z.object({
   exclude: z.array(pattern).default([]),
   contract: z.array(pattern).default(["(?i)\\b(contract(or)?|freelance|part[- ]time|temporary|temp|fractional|consultant)\\b"]),
   founding: z.array(pattern).default(["(?i)\\b(founding|first)\\b"]),
+  /** phrases in a new GTM job ad that describe your offer's pain (jd_mentions, if the pack defines it) */
+  jd_patterns: z.array(pattern).default([]),
 });
 
 export const ExtractorSchema = z.object({

@@ -80,3 +80,13 @@ describe("tool overlap and sprawl exclusions", () => {
     expect(stackSprawl("acme.test", ["hubspot", "google_ads", "linkedin_ads", "intercom"], rules, now)).toBeNull(); // 2 real tools, not 4
   });
 });
+
+describe("leaky capture", () => {
+  it("fires only when a form leaks and no CRM shows on the site or in DNS", async () => {
+    const { leakyCapture } = await import("./watch.js");
+    const rules = { sprawlMin: 4, tools: [["hubspot", "crm"], ["intercom", "chat"]].map(([key, category]) => ({ key: key!, label: key!, category: category!, site: [], dns: [] })) };
+    expect(leakyCapture("acme.test", ["typeform"], ["intercom"], rules, new Date())!.quote).toBe("Site form sends leads to typeform; no CRM detected");
+    expect(leakyCapture("acme.test", ["typeform"], ["hubspot"], rules, new Date())).toBeNull();
+    expect(leakyCapture("acme.test", [], [], rules, new Date())).toBeNull();
+  });
+});

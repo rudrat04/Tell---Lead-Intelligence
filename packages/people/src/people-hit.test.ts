@@ -16,7 +16,7 @@ describe("people search hits", () => {
   it("parses Exa's structured person: current roles have no end date", () => {
     expect(parseExaPerson(exa("Mina Example", [{ title: "CMO", company: "Deepgram" }, { title: "VP Marketing", company: "Old Co", to: "2026-05-01" }]))).toEqual({
       name: "Mina Example", url: "https://linkedin.com/in/mina-example",
-      roles: [{ title: "CMO", company: "Deepgram", current: true }, { title: "VP Marketing", company: "Old Co", current: false }],
+      roles: [{ title: "CMO", company: "Deepgram", current: true, from: "2025-01-01", to: null }, { title: "VP Marketing", company: "Old Co", current: false, from: "2025-01-01", to: "2026-05-01" }],
     });
     expect(parseExaPerson({ title: "x", url: "u" })).toBeNull();
   });

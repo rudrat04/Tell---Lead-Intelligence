@@ -19,15 +19,22 @@ export async function fetchBoardPostings(ats: Ats, slug: string): Promise<JobPos
   if (ats === "freshteam") return fetchFreshteamPostings(slug);
   if (ats === "workable") return fetchWorkablePostings(slug);
   if (ats === "greenhouse") {
-    const d = await getJson<{ jobs: (GhJob & { first_published?: string })[] }>(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`);
-    return d.jobs.map((j) => ({ externalId: String(j.id), title: j.title, url: j.absolute_url, postedAt: j.first_published ? new Date(j.first_published) : undefined }));
+    const d = await getJson<{ jobs: (GhJob & { first_published?: string })[] }>(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=true`);
+    return d.jobs.map((j) => ({ externalId: String(j.id), title: j.title, url: j.absolute_url, postedAt: j.first_published ? new Date(j.first_published) : undefined, text: htmlText(j.content) }));
   }
   if (ats === "lever") {
     const d = await getJson<LeverJob[]>(`https://api.lever.co/v0/postings/${slug}?mode=json`);
-    return d.map((j) => ({ externalId: j.id, title: j.text, url: j.hostedUrl, employmentType: j.categories?.commitment, postedAt: new Date(j.createdAt) }));
+    return d.map((j) => ({ externalId: j.id, title: j.text, url: j.hostedUrl, employmentType: j.categories?.commitment, postedAt: new Date(j.createdAt), text: j.descriptionPlain }));
   }
   const d = await getJson<AshbyResp>(`https://api.ashbyhq.com/posting-api/job-board/${slug}`);
-  return d.jobs.map((j) => ({ externalId: j.id, title: j.title, url: j.jobUrl, employmentType: j.employmentType, postedAt: j.publishedAt ? new Date(j.publishedAt) : undefined }));
+  return d.jobs.map((j) => ({ externalId: j.id, title: j.title, url: j.jobUrl, employmentType: j.employmentType, postedAt: j.publishedAt ? new Date(j.publishedAt) : undefined, text: j.descriptionPlain }));
+}
+
+/** Greenhouse returns escaped HTML: unescape, drop tags, collapse spaces. */
+function htmlText(s?: string): string | undefined {
+  if (!s) return undefined;
+  const un = s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+  return un.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 20000);
 }
 
 /** Fetch GTM-relevant open roles from one company's public ATS board. */

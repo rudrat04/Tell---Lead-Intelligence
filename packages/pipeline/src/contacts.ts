@@ -2,8 +2,8 @@ import type { Pack } from "@tell/config";
 import { fetchYcCompanyProfile, exaPeopleSearch, type YcCompanyProfile, type PeopleSearch } from "@tell/watchers";
 import { toRegex } from "@tell/config";
 import { applyPackIdentity } from "./scheduled.js";
-import { pickContact, acceptPeopleHit, type Contact, type Person } from "@tell/people";
-import { getDb, people, peopleSearches, jobBoards, accounts, and, eq, inArray, sql } from "@tell/db";
+import { pickContact, acceptPeopleHit, peopleEvents, type Contact, type Person } from "@tell/people";
+import { getDb, people, peopleSearches, jobBoards, accounts, signals, and, eq, inArray, sql } from "@tell/db";
 
 const DAY = 86_400_000;
 export const PEOPLE_REFRESH_DAYS = 30;
@@ -57,6 +57,7 @@ export async function contactsFor(
   const search = opts.search === undefined ? (process.env.EXA_API_KEY ? exaPeopleSearch() : null) : opts.search;
   if (search) {
     let budget = opts.maxSearches ?? 25;
+    const opsRx = pack.roles.core.map(toRegex);
     const targets = new Set(opts.searchFor ?? accountIds);
     const memo = new Set((await db.select({ a: peopleSearches.accountId, p: peopleSearches.persona }).from(peopleSearches)
       .where(and(inArray(peopleSearches.accountId, [...targets]), sql`${peopleSearches.searchedAt} > ${new Date(Date.now() - PEOPLE_REFRESH_DAYS * DAY)}`)))
@@ -77,6 +78,14 @@ export async function contactsFor(
         try {
           const hits = await search.search(`${persona.search ?? persona.title.split("/")[0]!.trim()} at ${company}`, 5);
           found = hits.map((h) => acceptPeopleHit(h, company, acct.domain, rx)).filter((x): x is Person => !!x).slice(0, 2);
+          // dated roles in the same results: a new GTM leader, or an ops person who left (only types the pack defines)
+          const evs = hits.flatMap((h) => peopleEvents(h, company, acct.domain, opsRx, new Date())).filter((e) => pack.signals.signals[e.type]);
+          if (write && evs.length) {
+            const sp = pack.signals.signals;
+            await db.insert(signals).values(evs.map((e) => ({ accountId: acct.id, class: sp[e.type]!.class, type: e.type, strength: sp[e.type]!.strength,
+              evidenceQuote: e.quote.slice(0, 500), evidenceUrl: `${e.url}#${e.type}`, observedAt: e.observedAt, halfLifeDays: sp[e.type]!.half_life_days })))
+              .onConflictDoNothing({ target: [signals.evidenceUrl, signals.type] });
+          }
         } catch { /* provider down or out of credit: try again next run */ continue; }
         const list = byAccount.get(acct.id) ?? [];
         for (const f of found) if (!list.some((p) => p.name === f.name)) list.push(f);

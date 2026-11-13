@@ -21,10 +21,10 @@ export function toolsFromTxt(txt: string[], rules: ToolRules): string[] {
   return rules.tools.filter((t) => t.dns.some((r) => r.test(all))).map((t) => t.key).sort();
 }
 
-export interface SiteState { salesLed: boolean; selfServe: boolean; pricing: boolean; tools: string[]; ctas?: string[] }
+export interface SiteState { salesLed: boolean; selfServe: boolean; pricing: boolean; tools: string[]; ctas?: string[]; leakyForms?: string[]; partnerBadge?: boolean; agencyCredit?: string | null }
 
 export interface WatchEvent {
-  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "tool_overlap" | "funding_raise" | "product_launch";
+  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "tool_overlap" | "leaky_capture" | "has_gtm_agency" | "funding_raise" | "product_launch";
   quote: string;
   url: string;
   observedAt: Date;
@@ -76,6 +76,22 @@ export function toolOverlap(domain: string, tools: string[], rules: ToolRules, n
   if (!dup.length) return null;
   const quote = dup.map(([c, ks]) => `${ks.length} ${c.replace(/_/g, " ")} tools: ${ks.map((k) => toolLabel(k, rules)).join(", ")}`).join("; ");
   return { type: "tool_overlap", quote, url: `https://${domain}/#overlap`, observedAt: now };
+}
+
+/**
+ * Leaky lead capture: the site's form sends leads to email or a form tool, and no CRM or marketing automation shows on
+ * the site or in DNS. (A CRM loaded some other way can hide; the form-sink check keeps false positives down.)
+ */
+export function leakyCapture(domain: string, leakyForms: string[], tools: string[], rules: ToolRules, now: Date, crmCategories = ["crm", "marketing_automation"]): WatchEvent | null {
+  if (!leakyForms.length) return null;
+  if (tools.some((k) => crmCategories.includes(rules.tools.find((t) => t.key === k)?.category ?? ""))) return null;
+  const sink = leakyForms.map((f) => (f === "mailto" ? "an email address" : f)).join(", ");
+  return { type: "leaky_capture", quote: `Site form sends leads to ${sink}; no CRM detected`, url: `https://${domain}/#capture`, observedAt: now };
+}
+
+/** An outside GTM agency credited on the site ("marketing by Acme"): they may already have help. Weak: credits are often old. */
+export function agencyCredited(domain: string, credit: string | null | undefined, now: Date): WatchEvent | null {
+  return credit ? { type: "has_gtm_agency", quote: `Credits ${credit} for marketing/growth`, url: `https://${domain}/#agency`, observedAt: now } : null;
 }
 
 /** Funding headlines need a round word or an amount; "raises the bar" doesn't count. */

@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { fetchYcCompanyProfile, fetchHomepage, fetchTxtRecords, extractSiteFacts } from "@tell/watchers";
-import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, eventsFromYcProfile, type SiteState, type WatchEvent } from "@tell/intel";
+import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, leakyCapture, agencyCredited, eventsFromYcProfile, type SiteState, type WatchEvent } from "@tell/intel";
 import { getDb, accounts, jobBoards, snapshots, signals, and, eq, inArray, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
 import { saveYcFounders } from "./contacts.js";
@@ -96,12 +96,14 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
         const events: WatchEvent[] = [];
         let siteTools: string[] = [];
         let dnsTools: string[] = [];
+        let site: SiteState | null = null;
 
         const page = await fetchHomepage(a.domain);
         if (page) {
           res.sites++;
           const f = extractSiteFacts(page.html, rules.tools);
-          const cur: SiteState = { salesLed: f.salesLed, selfServe: f.selfServe, pricing: f.pricing, tools: f.tools, ctas: f.ctas };
+          const cur: SiteState = { salesLed: f.salesLed, selfServe: f.selfServe, pricing: f.pricing, tools: f.tools, ctas: f.ctas, leakyForms: f.leakyForms, partnerBadge: f.partnerBadge, agencyCredit: f.agencyCredit };
+          site = cur;
           const prev = latest.get(`${a.id}:site`) as SiteState | undefined;
           if (!prev) res.baselines.site++;
           events.push(...diffSite(a.domain, prev ?? null, cur, rules, now));
@@ -126,6 +128,12 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
         if (sprawl) events.push(sprawl);
         const overlap = toolOverlap(a.domain, [...siteTools, ...dnsTools], rules, now);
         if (overlap) events.push(overlap);
+        if (site) {
+          const leak = leakyCapture(a.domain, site.leakyForms ?? [], [...siteTools, ...dnsTools], rules, now);
+          if (leak) events.push(leak);
+          const agency = agencyCredited(a.domain, site.agencyCredit, now);
+          if (agency) events.push(agency);
+        }
         await emit(a.id, events);
       }
     }));

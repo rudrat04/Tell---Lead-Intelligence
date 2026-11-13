@@ -50,6 +50,8 @@ export interface FetchedJob {
   employmentType?: string;
   postedAt?: Date;
   cls: JobClass;
+  /** job description (memory only) */
+  text?: string;
 }
 
 export interface JobSignalDraft {
@@ -127,5 +129,19 @@ export function repostedRoles(inserted: FetchedJob[], recentlyClosed: { title: s
   return inserted.filter((f) => f.cls.family === "core" || f.cls.founding).flatMap((f) => {
     const hit = closed.find((c) => normRole(c.title) === normRole(f.title));
     return hit ? [{ type: "role_reposted" as const, quote: `${f.title} (reposted; closed ${Math.round((now.getTime() - hit.closedAt.getTime()) / DAY)} days ago)`, url: f.url, observedAt: now }] : [];
+  });
+}
+
+/**
+ * Job ads that describe your offer's pain in their own words ("messy CRM", "build our HubSpot from scratch",
+ * "no processes yet"). Only new roles (after the board's baseline) in the GTM families; the quote is the matching
+ * sentence, cut to 200 characters (descriptions are never stored).
+ */
+export function jdMentions(inserted: FetchedJob[], patterns: RegExp[], now: Date): { type: "jd_mentions"; quote: string; url: string; observedAt: Date }[] {
+  if (!patterns.length) return [];
+  return inserted.filter((f) => f.text).flatMap((f) => {
+    const sentences = f.text!.split(/(?<=[.!?])\s+|\s*[•·\n]\s*/);
+    const hit = sentences.find((s) => patterns.some((p) => p.test(s)));
+    return hit ? [{ type: "jd_mentions" as const, quote: `${f.title}: "${hit.trim().slice(0, 200)}"`, url: f.url, observedAt: f.postedAt && f.postedAt < now ? f.postedAt : now }] : [];
   });
 }

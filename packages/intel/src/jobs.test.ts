@@ -117,3 +117,14 @@ describe("reposted roles", () => {
     expect(r.map((x) => x.quote)).toEqual(["RevOps Manager (Remote) (reposted; closed 55 days ago)"]);
   });
 });
+
+describe("job ads naming the pain", () => {
+  it("quotes the first matching sentence of a new GTM role, cut to 200 chars", async () => {
+    const { jdMentions } = await import("./jobs.js");
+    const now = new Date("2026-11-14T00:00:00Z");
+    const f = (title: string, text: string) => ({ externalId: title, title, url: `https://x.test/${title}`, cls: { family: "core" as const, contract: false, founding: false }, text });
+    const pats = [/\b(messy|clean up|from scratch)\b.*\b(crm|hubspot|salesforce)\b/i];
+    const r = jdMentions([f("RevOps Manager", "We sell to banks. You will rebuild our messy HubSpot setup from scratch. Great team."), f("AE", "Close deals.")], pats, now);
+    expect(r).toEqual([{ type: "jd_mentions", quote: 'RevOps Manager: "You will rebuild our messy HubSpot setup from scratch."', url: "https://x.test/RevOps Manager", observedAt: now }]);
+  });
+});
