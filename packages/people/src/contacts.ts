@@ -8,6 +8,8 @@ export interface Person {
   twitter?: string | null;
   source: string;
   sourceUrl?: string | null;
+  /** best address from the email engine (plan 9b), with how sure we are */
+  email?: { address: string; status: "observed" | "likely" | "guessed" | "invalid"; note: string } | null;
 }
 
 export interface Contact {
@@ -18,6 +20,8 @@ export interface Contact {
   persona: string | null;
   /** why this person (shown in the digest) */
   note: string;
+  /** a shared mailbox on the company's site (founders@, hello@), when one was seen */
+  generic?: string | null;
 }
 
 /** Within a persona, prefer the commercial lead: CEO > founder > technical founder. */

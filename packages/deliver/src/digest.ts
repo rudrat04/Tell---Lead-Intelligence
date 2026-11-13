@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { runScoring, istDay, contactsFor, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
+import { runScoring, istDay, contactsFor, attachEmails, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
 import { appendPendingLeads } from "./sheet-sync.js";
@@ -68,6 +68,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id),
   });
+  try { await attachEmails(contacts, { write: !opts.dryRun }); } catch { /* email engine down: leads still go out with LinkedIn */ }
   const gigList = await gigsForDigest(pack);
   const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
   h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;

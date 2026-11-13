@@ -197,13 +197,17 @@ export const emails = pgTable("emails", {
   status: text("status").notNull(), // observed|likely|guessed|invalid
   source: text("source"),
   checkedAt: ts("checked_at"),
-});
+}, (t) => [uniqueIndex("emails_person_address_uq").on(t.personId, t.address)]);
 
 export const domainMail = pgTable("domain_mail", {
   domain: text("domain").primaryKey(),
   mxProvider: text("mx_provider"),
   pattern: text("pattern"),
   patternConfidence: real("pattern_confidence"),
+  /** how many name-matched public addresses the pattern was learned from */
+  patternSupport: integer("pattern_support"),
+  /** best shared mailbox seen on the site (founders@, hello@), a fallback channel */
+  genericAddress: text("generic_address"),
   checkedAt: ts("checked_at"),
 });
 

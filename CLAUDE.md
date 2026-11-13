@@ -100,7 +100,7 @@ Built: Gates 1, 3, 4, 5; entity resolution; scoring, plays, fast lane, watchlist
 Deliberate deviations: Trigger.dev → GitHub Actions + Cloudflare Worker; single-business config → config packs; Haiku job-description extractor → title rules (`roles.yaml`); Haiku analyst → code-written "why now"; funding/launches from YC pages, not news feeds; raw text not stored in R2 (evidence = quote + URL); Exa people search is a paid API (~$0.007/search, capped 25/run), an exception to the plan's "no paid data vendors". Darwinbox skipped (JS app, no plain API). Reddit off until API approval.
 
 Not built yet, in suggested order:
-1. **Email engine** (plan 9b): mail profile via DoH, pattern learning from observed addresses (GitHub commits, press), `observed/likely/guessed/invalid`, bounce reading, channel field. Leads currently give a LinkedIn link only.
+1. **Email engine** (plan 9b), mostly built: `people/email.ts` (pure: patterns, `learnPattern`, `emailFor` → `observed/likely/guessed/invalid`), `watchers/mail.ts` (MX via DoH, own-site pages, GitHub org commits only when the org's `blog` is the domain), `pipeline/emails.ts` `attachEmails` (cached 30 days in `domain_mail`, stored in `emails`, suppression respected), shown in digest + Sheet. No SMTP probing. Left: bounce reading (needs gmail.readonly; `markBounced` is ready), press-release addresses.
 2. **Haiku analyst + code critic** (8e, 8f): cited hypothesis/angle; vendor, already-solved and stale checks; Sunday critic audit.
 3. **Gate 2** (pgvector exemplar bank, ~100 seed examples, labels from the Sheet) and the uncertain queue.
 4. **Maturity stages** (8b, incl. agency model) and **event dedupe** clusters (8a).

@@ -86,8 +86,17 @@ function alsoHtml(links: { persona: string; url: string }[]): string {
   return `<div style="font-size:12px;color:#6b7280;margin-top:4px">Also reach: ${links.map((x) => `<a href="${esc(x.url)}" style="color:#1a56db">${esc(x.persona)}</a>`).join(" · ")} <span style="color:#9ca3af">(LinkedIn search)</span></div>`;
 }
 
+const EMAIL_LABEL = { observed: "seen in public", likely: "likely", guessed: "guessed, unverified", invalid: "" } as const;
+/** "jo@acme.com (likely)" for usable addresses; nothing for invalid ones. */
+export function emailText(p: Contact["person"]): string | null {
+  const e = p.email;
+  return e && e.status !== "invalid" ? `${e.address} (${EMAIL_LABEL[e.status]})` : null;
+}
+
 function contactLinks(c: Contact): string {
-  const links = [c.person.linkedin && `<a href="${esc(c.person.linkedin)}" style="color:#1a56db">LinkedIn</a>`, c.person.twitter && `<a href="${esc(c.person.twitter)}" style="color:#1a56db">X</a>`].filter(Boolean);
+  const e = c.person.email && c.person.email.status !== "invalid" ? c.person.email : null;
+  const links = [e && `<a href="mailto:${esc(e.address)}" style="color:#1a56db">${esc(e.address)}</a> <span style="color:#9ca3af">(${EMAIL_LABEL[e.status]})</span>`,
+    !e && c.generic && `<a href="mailto:${esc(c.generic)}" style="color:#1a56db">${esc(c.generic)}</a> <span style="color:#9ca3af">(shared inbox)</span>`, c.person.linkedin && `<a href="${esc(c.person.linkedin)}" style="color:#1a56db">LinkedIn</a>`, c.person.twitter && `<a href="${esc(c.person.twitter)}" style="color:#1a56db">X</a>`].filter(Boolean);
   return links.join(" · ");
 }
 
@@ -123,7 +132,7 @@ function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   const open = opener(c, a.name ?? a.domain, s.drivers[0]);
   return [
     c ? `${i + 1}. ${c.person.name}, ${c.person.role ?? ""} at ${a.name ?? a.domain} (${a.domain})` : `${i + 1}. ${a.name ?? a.domain} (${a.domain}), no contact found yet`,
-    c ? `   ${[c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}${c.persona ? "" : ` (${c.note})`}` : "",
+    c ? `   ${[emailText(c.person) ?? (c.generic ? `${c.generic} (shared inbox)` : null), c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}${c.persona ? "" : ` (${c.note})`}` : "",
     `   ${[a.sizeBand && `${a.sizeBand} people`, a.segment, a.region].filter(Boolean).join(", ")}`,
     open ? `   Opener: ${open}` : "",
     ...(c?.others ?? []).map((o) => `   Also: ${o.person.name}, ${o.person.role ?? o.persona}${o.person.linkedin ? ` ${o.person.linkedin}` : ""}`),
@@ -210,7 +219,7 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     date,
     contact?.person.name ?? "",
     contact?.person.role ?? "",
-    contact?.person.linkedin ?? contact?.person.twitter ?? "",
+    [contact && emailText(contact.person), contact?.person.linkedin ?? contact?.person.twitter].filter(Boolean).join("\n"),
     company,
     `https://${a.domain}`,
     a.sizeBand ?? "",
