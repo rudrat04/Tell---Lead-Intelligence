@@ -91,6 +91,9 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # public GitHub org commits for email patterns (5000 req/h instead of 60)
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Dead-man's switch: healthchecks.io emails you if this ping doesn't arrive on time.
       # Success only when the digest step itself succeeded (other steps are continue-on-error).

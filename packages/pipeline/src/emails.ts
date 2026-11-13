@@ -37,7 +37,7 @@ export async function gatherDomainEvidence(domain: string, companyName: string |
  */
 export async function attachEmails(
   contacts: Map<string, Contact | null>,
-  opts: { write?: boolean; gather?: typeof gatherDomainEvidence; maxDomains?: number } = {},
+  opts: { write?: boolean; gather?: typeof gatherDomainEvidence; maxDomains?: number; deadlineMs?: number } = {},
 ): Promise<{ domains: number; byStatus: Record<string, number> }> {
   const write = opts.write !== false;
   const gather = opts.gather ?? gatherDomainEvidence;
@@ -53,7 +53,9 @@ export async function attachEmails(
   const suppressed = { has: (addr: string) => hashes.has(createHash("sha256").update(addr.trim().toLowerCase()).digest("hex")) || supDomains.has(addr.split("@")[1] ?? "") };
   const personRows = await db.select({ id: people.id, a: people.accountId, n: people.fullName }).from(people).where(inArray(people.accountId, ids));
   const stored = personRows.length ? await db.select().from(emails).where(inArray(emails.personId, personRows.map((p) => p.id))) : [];
-  let budget = opts.maxDomains ?? 40, domains = 0;
+  let budget = opts.maxDomains ?? 25, domains = 0;
+  // wall-clock cap so a slow site never delays the digest: past it, only cached domains get addresses
+  const deadline = Date.now() + (opts.deadlineMs ?? 6 * 60_000);
 
   for (const a of accts) {
     const c = contacts.get(a.id)!;
@@ -75,10 +77,11 @@ export async function attachEmails(
         seen: generic ? [...seen, { address: generic, sourceUrl: `https://${a.domain}/` }] : seen,
       };
     } else {
-      if (budget-- <= 0) continue;
+      if (budget-- <= 0 || Date.now() > deadline) continue;
       domains++;
       try { ev = await gather(a.domain, a.name, rows.map((r) => r.n)); } catch { continue; }
-      if (write) {
+      // a failed DNS lookup is not an answer: don't cache it for 30 days
+      if (write && ev.mail.acceptsMail !== null) {
         const set = {
           mxProvider: ev.mail.acceptsMail === false ? "none" : ev.mail.provider,
           pattern: ev.mail.pattern?.pattern ?? null, patternConfidence: ev.mail.pattern?.confidence ?? null,

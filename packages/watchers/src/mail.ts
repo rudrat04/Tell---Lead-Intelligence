@@ -25,9 +25,9 @@ export async function fetchMxHosts(domain: string, timeoutMs = 10_000): Promise<
 }
 
 /** Pages where companies list people and mailboxes. Robots.txt respected; missing pages are skipped. */
-export const SITE_MAIL_PATHS = ["/", "/contact", "/contact-us", "/about", "/about-us", "/team", "/company", "/press", "/imprint", "/legal", "/privacy"];
+export const SITE_MAIL_PATHS = ["/", "/contact", "/about", "/team", "/press"];
 
-export async function fetchSitePages(domain: string, paths = SITE_MAIL_PATHS, timeoutMs = 10_000): Promise<{ url: string; text: string }[]> {
+export async function fetchSitePages(domain: string, paths = SITE_MAIL_PATHS, timeoutMs = 8_000): Promise<{ url: string; text: string }[]> {
   const out: { url: string; text: string }[] = [];
   for (const p of paths) {
     const url = `https://${domain}${p}`;
