@@ -35,7 +35,7 @@ Runtime jobs (need `.env`; see `.env.example`):
 | `pnpm google:auth` | one-time OAuth (gmail.send + drive.file) to get `GMAIL_REFRESH_TOKEN` into `.env` |
 | `pnpm watch` | weekly account watch: YC pages (founders, funding, launches), homepage + DNS changes, GTM tools |
 | `pnpm sheet:setup <pack-dir>` / `pnpm sheet:sync` | create the leads Sheet / append pending rows + read labels back |
-| `pnpm ops` | nightly upkeep: usage guard → janitor (retention) → verified backup to R2 |
+| `pnpm ops` | nightly upkeep: usage guard → janitor (retention) → eval metrics → verified backup to R2 |
 | `pnpm forget --name "X" --domain d` / `--email e` | delete a person everywhere (Neon, Sheet, R2 backups) and suppress them |
 
 Which pack loads: `TELL_PACK_R2_PREFIX` (private R2, production) > `TELL_PACK_DIR` > `packs/example-gtm`. To run locally against the operator's real pack: `TELL_PACK_R2_PREFIX=packs/main pnpm score --dry --show`.
@@ -53,7 +53,10 @@ Packages (`packages/*`, imported as `@tell/<name>`, `main` points at `src/index.
 - **intel**: pure logic, no I/O: Gate 1 rules, Gate 5 corroboration, ICP hard filters, job classification + daily board diff, scoring/ranking, gig rules.
 - **people**: entity resolution (domains via tldts with private suffixes, never-guess rules, HN profile mapping), signal/person-lead persistence, contact picking by persona.
 - **pipeline**: orchestration that touches the DB: tick, board discovery/check, scoring run, contacts enrichment, gigs.
-- **deliver**: digest rendering + Gmail API sender + `runDigest`.
+- **deliver**: digest rendering + Gmail API sender + `runDigest`, Google Sheet (append rows, read labels back).
+- **ops**: backups to R2, janitor (plan section 12 retention), usage guard, `computeMetrics` (nightly production evals into `eval_results`, shown in the digest health line), `forgetPerson`.
+
+`evals/` holds the golden sets (`evals/golden/*.jsonl`, synthetic data only) run by `evals/golden.test.ts` in CI: role families, gig rules, Gate 1, staffing agencies. Each row's `note` names the false-positive class it guards; add a row whenever a new class is found.
 
 Data flow:
 
@@ -76,6 +79,7 @@ Key invariants (each was a real bug or a deliberate design decision):
 - **Idempotency** is enforced by unique keys (signals on `evidence_url,type`; plays per account; people per account+name+source; gigs per source+external id; digest once per IST day via `runs.idempotency_key`).
 - **Spend**: Haiku daily cap is persisted per IST day in `usage_daily`; every run checks remaining budget.
 - `raw_items`, `candidates`, `scores` are monthly-partitioned (migration 0001); `ensure-partitions.ts` runs daily.
+- **`digest --test` records nothing**, so repeated test sends show the same leads; only real (scheduled) digests write `deliveries`, and an account isn't re-delivered for `redeliver_after_days` (90) unless a new play fires.
 - Tests must use the frozen fixture pack (`packages/config/fixtures/pack`), never `packs/*`.
 
 ## Operations
@@ -88,3 +92,21 @@ Key invariants (each was a real bug or a deliberate design decision):
 ## Eval and improvement requirements (from the operator)
 
 When building evals or self-tuning, cover: India coverage at every stage (the operator is India-first; YC-only discovery yields ~3.5% Indian accounts), people-not-accounts (every lead names a persona-matched contact), regression fixtures for every false-positive class found so far (contract sales hires, stale fast-lane signals, recruiter titles, old roles announced as new, "Growth Engineer", internships, full-time "consultant" gigs), and the ranking bias of large companies with many sales roles over tiny teams matching two plays.
+
+## Status vs plan v3 (as of 13 Nov 2026)
+
+Built: Gates 1, 3, 4, 5; entity resolution; scoring, plays, fast lane, watchlist, reserved non-hiring slots; YC + Greenhouse/Lever/Ashby + Keka/Freshteam (Common Crawl) discovery; daily careers diff; weekly homepage/pricing/CTA/tool/DNS watch; persona contacts (YC founders + Exa people search); freelance gigs; digest + Sheet + label sync; upkeep (backups, janitor, usage guard, partitions, healthchecks, forget); golden-set evals + nightly metrics.
+
+Deliberate deviations: Trigger.dev → GitHub Actions + Cloudflare Worker; single-business config → config packs; Haiku job-description extractor → title rules (`roles.yaml`); Haiku analyst → code-written "why now"; funding/launches from YC pages, not news feeds; raw text not stored in R2 (evidence = quote + URL); Exa people search is a paid API (~$0.007/search, capped 25/run), an exception to the plan's "no paid data vendors". Darwinbox skipped (JS app, no plain API). Reddit off until API approval.
+
+Not built yet, in suggested order:
+1. **Email engine** (plan 9b): mail profile via DoH, pattern learning from observed addresses (GitHub commits, press), `observed/likely/guessed/invalid`, bounce reading, channel field. Leads currently give a LinkedIn link only.
+2. **Haiku analyst + code critic** (8e, 8f): cited hypothesis/angle; vendor, already-solved and stale checks; Sunday critic audit.
+3. **Gate 2** (pgvector exemplar bank, ~100 seed examples, labels from the Sheet) and the uncertain queue.
+4. **Maturity stages** (8b, incl. agency model) and **event dedupe** clusters (8a).
+5. **Sources**: Indian funding news (Inc42, Entrackr, YourStory RSS), Product Hunt/BetaList, SEC Form D, Bluesky, Indie Hackers, tool forums, VC portfolios, newsletter inbox, CT subdomains, lookalike domains, Wayback backfill, Workable/Recruitee/SmartRecruiters.
+6. **Self-tuning** (11, after ~150 labels): weekly refit with guardrails, champion/challenger with blind interleaving, exploration picks, trend snapshots, Sunday/monthly reviews.
+7. Smaller: source drift alarm, archive cold accounts to R2, Haiku Batch API.
+
+`PLAN-next.md` (git-ignored) holds the private side: the operator's pack details, live numbers and open questions.
+
