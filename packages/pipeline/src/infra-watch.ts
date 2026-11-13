@@ -41,10 +41,17 @@ export async function runInfraWatch(opts: { pack: Pack; now?: Date; ctPerRun?: n
     order by s.taken_at asc nulls first, a.id limit ${limit}`)).rows as { id: string; domain: string; extracted: { items?: string[] } | null }[];
 
   if (specs.marketing_subdomain) {
-    const cap = opts.ctPerRun ?? (process.env.CERTSPOTTER_API_KEY ? 90 : 9); // unauthenticated Cert Spotter: ~10/hour
+    // Cert Spotter reports a limit of 10 lookups with or without a free key: 9 per run unless CERTSPOTTER_PER_RUN says more
+    const cap = opts.ctPerRun ?? Number(process.env.CERTSPOTTER_PER_RUN ?? 9);
+    let refusedInRow = 0;
     for (const a of await due("ct", cap)) {
       const subs = await fetchCtSubdomains(a.domain);
-      if (!subs) { res.ct.failed++; continue; }
+      if (!subs) {
+        res.ct.failed++;
+        if (++refusedInRow >= 2) break; // rate limit reached: the rest wait for next week (they stay first in line)
+        continue;
+      }
+      refusedInRow = 0;
       res.ct.checked++;
       if (!a.extracted) res.ct.baselines++;
       else for (const s of newGtmSubdomains(a.extracted.items ?? [], subs)) await emit(a.id, "marketing_subdomain", `New subdomain ${s}.${a.domain}`, `https://${s}.${a.domain}/`);
