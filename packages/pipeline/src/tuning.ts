@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
-import { proposeLrs, pairwiseAgreement, scoreAccount, type LabelledLead, type LrProposal } from "@tell/intel";
-import { getDb, deliveries, labels, tuningActions, eq, sql } from "@tell/db";
+import { proposeLrs, pairwiseAgreement, scoreAccount, featurize, type LabelledLead, type LrProposal } from "@tell/intel";
+import { getDb, deliveries, labels, tuningActions, exemplars, eq, sql } from "@tell/db";
 import { runScoring } from "./score.js";
 
 export interface TuningResult {
@@ -10,7 +10,31 @@ export interface TuningResult {
   champion: { agreement: number; pairs: number };
   challenger: { agreement: number; pairs: number };
   recorded: number;
+  /** Gate 2 examples rebuilt from labelled posts */
+  exemplars?: { pos: number; neg: number };
   skipped?: string;
+}
+
+/**
+ * Gate 2 examples from your labels: the post quotes (explicit asks, pain posts) behind leads you marked Good (pos)
+ * or Bad (neg). Rebuilt each week, so a changed label moves its example. Seeds in the pack are separate.
+ */
+export async function refreshExemplars(pack: Pack): Promise<{ pos: number; neg: number }> {
+  const postTypes = Object.entries(pack.signals.signals).filter(([, s]) => s.class === "explicit" || s.class === "pain").map(([t]) => t);
+  if (!postTypes.length) return { pos: 0, neg: 0 };
+  const db = getDb();
+  const rows = (await db.execute(sql`
+    select l.id as label_id, l.label, s.type, s.evidence_quote as quote
+    from labels l join deliveries d on d.id = l.delivery_id
+    join signals s on s.account_id = d.account_id and s.observed_at <= d.delivered_at + interval '1 day'
+    where l.label in ('good', 'bad') and s.type in (${sql.join(postTypes.map((t) => sql`${t}`), sql`, `)})`)).rows as { label_id: string; label: string; type: string; quote: string }[];
+  await db.delete(exemplars).where(sql`${exemplars.sourceLabelId} is not null`);
+  if (rows.length) {
+    await db.insert(exemplars).values(rows.map((r) => ({
+      text: r.quote, embedding: featurize(r.quote), signalType: r.type, label: r.label === "good" ? "pos" : "neg", sourceLabelId: r.label_id,
+    })));
+  }
+  return { pos: rows.filter((r) => r.label === "good").length, neg: rows.filter((r) => r.label === "bad").length };
 }
 
 /** Labels count once there are this many labelled leads with at least one good and one bad. */
@@ -27,8 +51,9 @@ export async function runTuning(opts: { pack: Pack; write?: boolean }): Promise<
   const rows = (await db.select({ accountId: deliveries.accountId, label: labels.label, outcome: labels.outcome })
     .from(labels).innerJoin(deliveries, eq(labels.deliveryId, deliveries.id))
     .where(sql`${deliveries.accountId} is not null and (${labels.label} is not null or ${labels.outcome} is not null)`)) as { accountId: string; label: string | null; outcome: string | null }[];
+  const ex = opts.write !== false ? await refreshExemplars(pack).catch(() => undefined) : undefined;
   const empty = { agreement: 0.5, pairs: 0 };
-  const base: TuningResult = { labelled: rows.length, proposals: [], champion: empty, challenger: empty, recorded: 0 };
+  const base: TuningResult = { labelled: rows.length, proposals: [], champion: empty, challenger: empty, recorded: 0, exemplars: ex };
   if (rows.length < MIN_LABELLED) return { ...base, skipped: `${rows.length}/${MIN_LABELLED} labelled leads` };
 
   const scored = await runScoring({ pack, write: false });

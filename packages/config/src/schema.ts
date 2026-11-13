@@ -105,6 +105,14 @@ export const SignalsSchema = z.object({
      *  (need `triggers_needed` independent fresh signals). 1 = every listed class qualifies alone. */
     alone_min_strength: z.number().int().min(1).max(5).default(1),
   }).default({ alone: ["explicit", "implicit"], triggers_needed: 2, corroborate: ["trigger", "pain"], fresh_days: 30, alone_min_strength: 1 }),
+  /** Gate 2: similarity of new posts to good/bad examples (seeds here + your labelled posts). Shadow = log only. */
+  gate2: z.object({
+    mode: z.enum(["shadow", "enforce"]).default("shadow"),
+    min_exemplars: z.number().int().min(1).default(20),
+    drop_margin: z.number().min(0).max(1).default(0.15),
+    drop_min_similarity: z.number().min(0).max(1).default(0.35),
+    seeds: z.object({ pos: z.array(z.string()).default([]), neg: z.array(z.string()).default([]) }).default({ pos: [], neg: [] }),
+  }).default({ mode: "shadow", min_exemplars: 20, drop_margin: 0.15, drop_min_similarity: 0.35, seeds: { pos: [], neg: [] } }),
 });
 
 export const PlaysSchema = z.object({

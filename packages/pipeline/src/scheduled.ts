@@ -1,6 +1,8 @@
 import type { Pack } from "@tell/config";
 import { makeHn, makeReddit, makeForhire, isSourceEnabled, setBotIdentity, type Watcher, type RawItem } from "@tell/watchers";
 import { HaikuClient, type PostExtraction } from "@tell/extract";
+import { gate2Decide, featurize, type Exemplar } from "@tell/intel";
+import { getDb, exemplars } from "@tell/db";
 import { gate1, gate1Rules } from "@tell/intel";
 import {
   resolveItem, recordConfirmed, domainLists, neonLeadStore,
@@ -67,6 +69,8 @@ export async function runScheduledTick(opts: {
   leads?: LeadStore;
   net?: ResolverNet;
   watchers?: Watcher[];
+  /** Gate 2 example bank (tests); loaded from the pack seeds + exemplars table when omitted */
+  gate2Bank?: Exemplar[];
 }): Promise<ScheduledTickResult> {
   const { pack } = opts;
   applyPackIdentity(pack);
@@ -79,10 +83,15 @@ export async function runScheduledTick(opts: {
 
   const rules = gate1Rules(pack);
   const llm = new HaikuClient({ capUsd: remaining });
+  const bank = opts.gate2Bank ?? await loadGate2Bank(pack);
+  const g2 = pack.signals.gate2;
   try {
     const summaries = await runTick({
       store: opts.store ?? neonStore(),
-      gates: { llm, gate1: (t) => gate1(t, rules.never, rules.required), extractor: pack.extractor, minStrength: pack.signals.min_post_strength },
+      gates: {
+        llm, gate1: (t) => gate1(t, rules.never, rules.required), extractor: pack.extractor, minStrength: pack.signals.min_post_strength,
+        gate2: async (t) => gate2Decide(t, bank, g2),
+      },
       watchers: opts.watchers ?? tickWatchers(pack),
       maxPerSource: opts.maxPerSource ?? 50,
       onConfirmed: makeOnConfirmed(pack, opts.leads ?? neonLeadStore(), opts.net ?? liveNet),
@@ -91,5 +100,19 @@ export async function runScheduledTick(opts: {
   } finally {
     // record spend even if the tick failed partway
     await usage.addSpend("haiku", llm.spent, opts.dailyCapUsd);
+  }
+}
+
+/** Gate 2 bank: the pack's seed examples plus examples from your labelled posts. A DB problem means seeds only. */
+export async function loadGate2Bank(pack: Pack): Promise<Exemplar[]> {
+  const seeds: Exemplar[] = [
+    ...pack.signals.gate2.seeds.pos.map((t) => ({ vec: featurize(t), label: "pos" as const })),
+    ...pack.signals.gate2.seeds.neg.map((t) => ({ vec: featurize(t), label: "neg" as const })),
+  ];
+  try {
+    const rows = await getDb().select({ text: exemplars.text, label: exemplars.label }).from(exemplars);
+    return [...seeds, ...rows.map((r) => ({ vec: featurize(r.text), label: (r.label === "pos" ? "pos" : "neg") as "pos" | "neg" }))];
+  } catch {
+    return seeds;
   }
 }

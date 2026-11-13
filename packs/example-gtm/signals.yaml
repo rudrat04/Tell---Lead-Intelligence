@@ -37,3 +37,23 @@ gate1:
     - "(?i)available for hire"
     # HN "Seeking freelancer" threads are mostly freelancers advertising themselves (competitors)
     - "(?im)^\\s*SEEKING WORK"
+# Gate 2: similarity of new posts to good/bad examples. Shadow = logged only, nothing dropped.
+# Seeds are synthetic; your labelled posts are added weekly. Switch to `enforce` once there are min_exemplars each side.
+gate2:
+  mode: shadow
+  min_exemplars: 20
+  seeds:
+    pos:
+      - "Looking for a freelancer to set up HubSpot properly: lead routing, lifecycle stages and a clean pipeline for our two SDRs."
+      - "Our leads go cold because nobody follows up. Need someone to automate follow-ups and connect our forms to the CRM."
+      - "Seed-stage B2B SaaS, founder-led sales so far. Want help building our first outbound system before we hire an AE."
+      - "We use Apollo, HubSpot and Calendly and none of it talks to each other. Who can untangle this for us?"
+      - "Hiring a contract RevOps person for 3 months to clean our Salesforce and build reporting."
+      - "Can anyone recommend a GTM engineer? We need enrichment, scoring and routing set up for inbound leads."
+    neg:
+      - "I'm a freelance HubSpot consultant available for new projects. DM me for my rates."
+      - "We are a lead generation agency offering appointment setting for B2B companies."
+      - "Looking for a full-time job as a sales development representative, open to relocation."
+      - "Check out our new AI SDR tool that books meetings on autopilot. Free trial this week."
+      - "Our staffing firm is hiring account executives for one of our clients in fintech."
+      - "Hot take: CRMs are dead and every startup should just use spreadsheets."
