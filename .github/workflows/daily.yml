@@ -5,8 +5,7 @@ name: Daily chain
 # Starts 07:30 IST so the digest lands before 09:00 even when GitHub delays scheduled runs.
 # Public repo: every script prints counts only.
 on:
-  schedule:
-    - cron: "0 2 * * *" # 07:30 IST
+  # Triggered daily at 07:30 IST by the Cloudflare scheduler Worker (infra/scheduler).
   workflow_dispatch:
 
 concurrency:
@@ -104,6 +103,13 @@ jobs:
           if [ -z "$HC_URL" ]; then echo "no HEALTHCHECK_DAILY_URL set, skipping"; exit 0; fi
           if [ "$OUTCOME" = "success" ]; then curl -fsS -m 10 --retry 3 "$HC_URL" >/dev/null && echo "pinged: ok"
           else curl -fsS -m 10 --retry 3 "$HC_URL/fail" >/dev/null && echo "pinged: fail"; fi
+
+      - name: Upkeep (usage guard, janitor, backup to R2)
+        if: always()
+        continue-on-error: true
+        run: pnpm ops
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       # GitHub disables scheduled workflows after 60 days without repository activity.
       # Re-enabling them through the API keeps them alive without commits.

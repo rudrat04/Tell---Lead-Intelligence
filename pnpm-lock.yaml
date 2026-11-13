@@ -23,6 +23,9 @@ importers:
       '@tell/intel':
         specifier: workspace:*
         version: link:packages/intel
+      '@tell/ops':
+        specifier: workspace:*
+        version: link:packages/ops
       '@tell/people':
         specifier: workspace:*
         version: link:packages/people
@@ -133,6 +136,18 @@ importers:
       '@tell/watchers':
         specifier: workspace:*
         version: link:../watchers
+
+  packages/ops:
+    dependencies:
+      '@tell/config':
+        specifier: workspace:*
+        version: link:../config
+      '@tell/db':
+        specifier: workspace:*
+        version: link:../db
+      '@tell/deliver':
+        specifier: workspace:*
+        version: link:../deliver
 
   packages/people:
     dependencies:

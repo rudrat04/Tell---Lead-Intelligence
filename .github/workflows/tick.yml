@@ -4,10 +4,8 @@ name: Tick (30 min)
 # Stand-in for the Trigger.dev schedule while Trigger.dev deployments are blocked for this org.
 # The repo is public, so this log is public: scripts/tick.ts prints counts only.
 on:
-  # Primary trigger: the Cloudflare scheduler Worker (infra/scheduler) dispatches this every 30 min.
-  # GitHub's own cron stays as a backup.
-  schedule:
-    - cron: "7,37 * * * *" # off the :00/:30 rush, when GitHub delays scheduled runs most
+  # Triggered by the Cloudflare scheduler Worker (infra/scheduler) every 30 min; GitHub's own cron was unreliable.
+  # If the Worker stops, the healthchecks.io dead-man's switch alerts.
   workflow_dispatch:
     inputs:
       max_per_source:

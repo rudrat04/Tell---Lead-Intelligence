@@ -17,6 +17,8 @@ export interface DigestHealth {
   /** India coverage (eval requirement): tracked Indian accounts, and how many made today's leads */
   indiaTracked?: number;
   indiaInLeads?: number;
+  /** free-tier usage from the nightly usage guard: service -> share of limit */
+  usage?: { service: string; pct: number }[];
 }
 
 export interface DigestEmail { subject: string; html: string; text: string }
@@ -154,6 +156,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `Haiku spend today: $${health.haikuTodayUsd.toFixed(3)} of $${health.haikuCapUsd} cap`,
     `Accounts scored: ${r.scored} · held back (source outage): ${r.ranking.held.incomplete} · already sent recently: ${r.ranking.held.recentlyDelivered}`,
     health.indiaTracked != null ? `India: ${health.indiaTracked} Indian companies tracked, ${health.indiaInLeads ?? 0} in today's leads` : "",
+    health.usage?.length ? `Free-tier usage: ${health.usage.map((u) => `${u.service.replace(/_/g, " ")} ${Math.round(u.pct * 100)}%${u.pct >= 0.8 ? " (high: retention tightened)" : ""}`).join(", ")}` : "",
     `Config: ${r.configVersion}`,
   ].filter(Boolean);
 

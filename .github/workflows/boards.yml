@@ -3,8 +3,7 @@ name: Weekly discovery + account watch
 # Weekly: YC companies -> ICP hard filters -> accounts + job boards.
 # The daily board diff runs inside daily.yml. Public repo: the script prints counts only.
 on:
-  schedule:
-    - cron: "15 22 * * 6" # Sundays 03:45 IST
+  # Triggered Sundays 03:45 IST by the Cloudflare scheduler Worker (infra/scheduler).
   workflow_dispatch:
 
 concurrency:

@@ -32,7 +32,11 @@ Runtime jobs (need `.env`; see `.env.example`):
 | `pnpm gigs` | fetch freelance/contract gigs |
 | `pnpm score [--dry] [--show]` | score + rank accounts |
 | `pnpm digest [--dry\|--test]` | score, render, send the digest (`--dry` writes `digest-preview.html`; `--test` sends with `[TEST]` and records nothing) |
-| `pnpm gmail:auth` | one-time OAuth to get `GMAIL_REFRESH_TOKEN` into `.env` |
+| `pnpm google:auth` | one-time OAuth (gmail.send + drive.file) to get `GMAIL_REFRESH_TOKEN` into `.env` |
+| `pnpm watch` | weekly account watch: YC pages (founders, funding, launches), homepage + DNS changes, GTM tools |
+| `pnpm sheet:setup <pack-dir>` / `pnpm sheet:sync` | create the leads Sheet / append pending rows + read labels back |
+| `pnpm ops` | nightly upkeep: usage guard → janitor (retention) → verified backup to R2 |
+| `pnpm forget --name "X" --domain d` / `--email e` | delete a person everywhere (Neon, Sheet, R2 backups) and suppress them |
 
 Which pack loads: `TELL_PACK_R2_PREFIX` (private R2, production) > `TELL_PACK_DIR` > `packs/example-gtm`. To run locally against the operator's real pack: `TELL_PACK_R2_PREFIX=packs/main pnpm score --dry --show`.
 
@@ -75,7 +79,7 @@ Key invariants (each was a real bug or a deliberate design decision):
 
 ## Operations
 
-- Scheduling runs on **GitHub Actions** (`.github/workflows`): `tick.yml` (every 30 min; GitHub schedules have been unreliable), `daily.yml` (07:30 IST chain incl. digest), `boards.yml` (weekly discovery), `ci.yml`. Trigger.dev code exists (`trigger/`, `trigger.config.ts`) but deploys are blocked for the org.
+- Jobs run on **GitHub Actions** (`.github/workflows`) but are **triggered by a Cloudflare Worker** (`infra/scheduler`, free plan) via `workflow_dispatch`, because GitHub's own cron was unreliable; the workflows have no `schedule:`. `tick.yml` every 30 min, `daily.yml` 07:30 IST (migrate → pack check → partitions → boards → gigs → fallback tick → sheet sync → digest → healthchecks ping → upkeep), `boards.yml` Sundays (discovery + account watch). healthchecks.io alerts if the daily ping is missing. Trigger.dev code exists (`trigger/`) but deploys are blocked for the org.
 - Secrets live in GitHub repo secrets and `.env`; the pack location is the repo variable `TELL_PACK_R2_PREFIX`.
 - Migrations are applied by `pnpm db:migrate` (also the first step of `daily.yml`). Never edit an applied migration.
 - External sources: respect robots.txt and each source's terms (recorded in code comments: Remote OK link-back, Himalayas section 113, Reddit off pending approval). Don't bypass access controls (e.g. CSRF-protected APIs).
