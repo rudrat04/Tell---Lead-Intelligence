@@ -81,6 +81,7 @@ Key invariants (each was a real bug or a deliberate design decision):
 - **Idempotency** is enforced by unique keys (signals on `evidence_url,type`; plays per account; people per account+name+source; gigs per source+external id; digest once per IST day via `runs.idempotency_key`).
 - **Spend**: Haiku daily cap is persisted per IST day in `usage_daily`; every run checks remaining budget.
 - `raw_items`, `candidates`, `scores` are monthly-partitioned (migration 0001); `ensure-partitions.ts` runs daily.
+- **One-tap labels**: real digests carry signed 👍/👎 links (`TELL_LABEL_URL` + `LABEL_SECRET`) to the Worker, which shows a confirm page (GETs never label: link scanners prefetch) and stores taps in KV; `sheet:sync` pulls them, fills empty Label cells, then acks. The Sheet stays the single source labels are read from.
 - **`digest --test` records nothing**, so repeated test sends show the same leads; only real (scheduled) digests write `deliveries`, and an account isn't re-delivered for `redeliver_after_days` (90) unless a new play fires.
 - Tests must use the frozen fixture pack (`packages/config/fixtures/pack`), never `packs/*`.
 

@@ -27,7 +27,7 @@ if (cmd === "setup") {
   console.log(`created: ${s.url}\nsaved spreadsheet_id to ${file}\nnext: pnpm pack:push ${dir} <your R2 prefix>`);
 } else if (cmd === "sync") {
   const r = await runSheetSync(await loadPack());
-  console.log(`sheet: appended=${r.appended} labels_synced=${r.labelsSynced}${r.skipped ? ` (skipped: ${r.skipped})` : ""}`);
+  console.log(`sheet: appended=${r.appended} labels_synced=${r.labelsSynced} taps=${r.taps ?? 0}${r.tapsNote ? ` (${r.tapsNote})` : ""}${r.skipped ? ` (skipped: ${r.skipped})` : ""}`);
 } else {
   console.error("usage: pnpm sheet:setup <pack-dir> | pnpm sheet:sync");
   process.exit(1);

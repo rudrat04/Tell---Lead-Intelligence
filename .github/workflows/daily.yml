@@ -77,6 +77,8 @@ jobs:
         run: pnpm sheet:sync
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
+          LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
@@ -102,6 +104,9 @@ jobs:
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # one-tap Good/Bad links (Worker URL + signing secret); without them the digest has no buttons
+          TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
+          LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
           # public GitHub org commits for email patterns (5000 req/h instead of 60)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

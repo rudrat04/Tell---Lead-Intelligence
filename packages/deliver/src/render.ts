@@ -122,7 +122,7 @@ function contactLinks(c: Contact): string {
   return links.join(" · ");
 }
 
-function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes): string {
+function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes, tap?: { good: string; bad: string }): string {
   const a = l.account, s = l.score;
   const play = s.plays[0];
   const c = contacts?.get(a.id);
@@ -147,6 +147,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   <ul style="margin:8px 0 0 18px;padding:0;font-size:14px;color:#111827">${why}</ul>
   ${n || play ? `<div style="margin-top:8px;font-size:14px;color:#374151"><b>Angle:</b> ${esc(n?.angle ?? play!.angle)}</div>` : ""}
   ${n?.counterEvidence ? `<div style="margin-top:4px;font-size:13px;color:#b45309"><b>Watch out:</b> ${esc(n.counterEvidence)}</div>` : ""}
+  ${tap ? `<div style="margin-top:10px;font-size:14px">Worth reaching out? <a href="${safeHref(tap.good)}" style="text-decoration:none;padding:4px 12px;border:1px solid #065f46;border-radius:14px;color:#065f46">👍 Good</a> <a href="${safeHref(tap.bad)}" style="text-decoration:none;padding:4px 12px;border:1px solid #991b1b;border-radius:14px;color:#991b1b">👎 Bad</a></div>` : ""}
   <div style="margin-top:6px;font-size:12px;color:#9ca3af">priority ${s.priority.toFixed(2)} · intent ${pct(s.intent)} · fit ${pct(s.fit)} · timing ${pct(s.timing)}</div>
 </td></tr>`;
 }
@@ -181,7 +182,7 @@ function gigHtml(g: DigestGig): string {
   return `<li style="margin:6px 0"><a href="${safeHref(g.applyUrl ?? g.url)}" style="color:#111827;font-weight:600">${esc(g.title)}</a><div style="font-size:12px;color:#6b7280">${meta}${meta ? " · " : ""}${via}</div></li>`;
 }
 
-export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes): DigestEmail {
+export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes, labels?: Map<string, { good: string; bad: string }>): DigestEmail {
   const leads = r.ranking.leads, watch = r.ranking.watchlist, people = r.personLeads;
   const named = (l: Lead) => { const c = contacts?.get(l.account.id); const co = l.account.name ?? l.account.domain; return c ? `${firstName(c.person.name)} at ${co}` : co; };
   const subject = leads.length
@@ -217,7 +218,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   <div style="font-size:13px;color:#6b7280">${esc(pack.meta.name)} · ${esc(date)}</div>
   <h2 style="font-size:20px;margin:4px 0 4px">${leads.length ? `${leads.length} ${leads.length === 1 ? "person" : "people"} to contact today` : "No leads today"}</h2>
   <div style="font-size:13px;color:#6b7280">Ranked by need now × ICP fit × timing. Month one: trust the order more than the percentages, and label what you see.</div>
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px">${leads.map((l, i) => leadHtml(l, i, contacts, pack.icp.personas, notes)).join("")}</table>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px">${leads.map((l, i) => leadHtml(l, i, contacts, pack.icp.personas, notes, labels?.get(l.account.id))).join("")}</table>
   ${gigs.length ? `<h3 style="font-size:15px;margin:24px 0 4px">Freelance gigs (${gigs.length})</h3><ul style="margin:0 0 0 18px;padding:0;font-size:14px">${gigs.map(gigHtml).join("")}</ul>` : ""}
   ${watchHtml}${peopleHtml}
   <h3 style="font-size:15px;margin:24px 0 4px">Health</h3>

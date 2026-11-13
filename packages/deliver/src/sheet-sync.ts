@@ -1,8 +1,27 @@
 import type { Pack } from "@tell/config";
 import { getDb, deliveries, labels, inArray, sql } from "@tell/db";
-import { appendRows, readLabels, ensureLeadHeaders, LEAD_CELLS_BEFORE_ID } from "./sheets.js";
+import { appendRows, readLabels, ensureLeadHeaders, fillColumnById, LEAD_CELLS_BEFORE_ID } from "./sheets.js";
+import { fetchTaps, ackTaps } from "./label-links.js";
 
-export interface SheetSyncResult { appended: number; labelsSynced: number; skipped?: string }
+export interface SheetSyncResult { appended: number; labelsSynced: number; taps?: number; tapsNote?: string; skipped?: string }
+
+/**
+ * One-tap labels from the digest: write each tap into the Sheet's empty Label cells (a label you typed there wins),
+ * so the Sheet stays the one place labels are read from. Returns taps applied.
+ */
+export async function applyTaps(pack: Pack): Promise<{ taps: number; note?: string }> {
+  const url = process.env.TELL_LABEL_URL, secret = process.env.LABEL_SECRET, id = pack.delivery.sheet.spreadsheet_id;
+  if (!url || !secret || !id) return { taps: 0, note: "label links not configured" };
+  const taps = await fetchTaps(url, secret);
+  if (!taps.length) return { taps: 0 };
+  const known = new Set((await getDb().select({ id: deliveries.id }).from(deliveries).where(inArray(deliveries.id, taps.map((t) => t.d)))).map((r) => r.id));
+  const latest = new Map<string, string>();
+  for (const t of [...taps].sort((a, b) => a.at.localeCompare(b.at))) if (known.has(t.d)) latest.set(t.d, t.v);
+  const written = await fillColumnById(id, "Label", latest);
+  // acknowledged once the Sheet has them (or a label was already there); unknown ids (test sends) are cleared too
+  await ackTaps(url, secret, taps.map((t) => t.d));
+  return { taps: written };
+}
 
 /** Append every delivered lead whose row isn't in the Sheet yet (retries earlier failures without resending email). */
 export async function appendPendingLeads(pack: Pack): Promise<number> {
@@ -41,6 +60,8 @@ export async function syncLabels(pack: Pack): Promise<number> {
 export async function runSheetSync(pack: Pack): Promise<SheetSyncResult> {
   if (!pack.delivery.sheet.spreadsheet_id) return { appended: 0, labelsSynced: 0, skipped: "no delivery.sheet.spreadsheet_id in the pack" };
   const appended = await appendPendingLeads(pack);
-  const labelsSynced = await syncLabels(pack);
-  return { appended, labelsSynced };
+  let tapped: { taps: number; note?: string } = { taps: 0 };
+  try { tapped = await applyTaps(pack); } catch (e) { tapped = { taps: 0, note: `taps unavailable (${(e as Error).message.slice(0, 40)})` }; }
+  const labelsSynced = await syncLabels(pack); // reads the Sheet, including the taps just written
+  return { appended, labelsSynced, taps: tapped.taps, tapsNote: tapped.note };
 }

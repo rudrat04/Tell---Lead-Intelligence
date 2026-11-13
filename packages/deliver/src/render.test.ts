@@ -150,3 +150,11 @@ describe("safeHref", () => {
     expect(safeHref(null)).toBe("#");
   });
 });
+
+describe("one-tap label buttons", () => {
+  it("appear only when links are passed (real sends)", () => {
+    const links = new Map([["a0", { good: "https://w.test/l?v=good", bad: "https://w.test/l?v=bad" }]]);
+    expect(renderDigest(result(1), pack, health, "2026-11-14", undefined, [], undefined, links).html).toContain("👍 Good");
+    expect(renderDigest(result(1), pack, health, "2026-11-14").html).not.toContain("👍 Good");
+  });
+});

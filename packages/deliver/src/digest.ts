@@ -3,6 +3,7 @@ import { runScoring, istDay, contactsFor, attachEmails, analyzeLeads, gigsForDig
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
 import { appendPendingLeads } from "./sheet-sync.js";
+import { assignDeliveryIds, labelLinks } from "./label-links.js";
 import { appendRows } from "./sheets.js";
 import type { Sender } from "./gmail.js";
 
@@ -83,7 +84,12 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const gigList = await gigsForDigest(pack);
   const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
   h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;
-  const email = renderDigest(score, pack, h, day, contacts, gigList, notes);
+  // one-tap labels only on the real send (test and dry runs record no deliveries for the links to point at)
+  const ids = assignDeliveryIds(score.ranking.leads.map((l) => l.account.id));
+  const labelUrl = process.env.TELL_LABEL_URL, labelSecret = process.env.LABEL_SECRET;
+  const taps = !opts.dryRun && !opts.test && labelUrl && labelSecret
+    ? new Map([...ids].map(([a, d]) => [a, labelLinks(labelUrl, labelSecret, d)])) : undefined;
+  const email = renderDigest(score, pack, h, day, contacts, gigList, notes, taps);
   const counts = { enrich: enrich.join("; "), leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   // no sender configured yet: scores are written, nothing is sent, the day stays open
@@ -110,7 +116,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   ];
   if (score.ranking.leads.length) {
     batch.push(db.insert(deliveries).values(score.ranking.leads.map((l) => ({
-      accountId: l.account.id, deliveredAt: now, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
+      id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: now, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
       sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature),
     }))));
   }
