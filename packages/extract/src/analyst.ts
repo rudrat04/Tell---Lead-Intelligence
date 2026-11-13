@@ -90,6 +90,13 @@ export function validateAnalysis(raw: string, input: AnalystInput): Analysis | n
       if (!all.some((c) => c.includes(q))) return null;
     }
   }
+  // unquoted numbers and funding rounds must also come from the input (no invented "$4M Series A")
+  const source = norm(analystUserPrompt(input));
+  for (const text of [r.hypothesis, r.opener, r.angle]) {
+    for (const m of norm(text).matchAll(/\d+(?:[.,]\d+)*|\bseries [a-f]\b/g)) {
+      if (!new RegExp(`(^|[^0-9a-z])${m[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^0-9a-z])`).test(source)) return null;
+    }
+  }
   // the code writes the greeting
   const opener = r.opener.replace(/^(hi|hey|hello|dear)\b[^,]{0,40},\s*/i, "").trim();
   if (opener.length < 10) return null;

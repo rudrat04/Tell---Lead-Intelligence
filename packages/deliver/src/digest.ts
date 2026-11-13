@@ -16,6 +16,8 @@ export interface DigestResult {
   personLeads: number;
   email?: DigestEmail;
   score?: ScoreRunResult;
+  /** counts only (safe for public CI logs): emails by status, analyst fresh/cached/failed */
+  enrich?: string;
 }
 
 async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
@@ -68,15 +70,21 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id),
   });
-  try { await attachEmails(contacts, { write: !opts.dryRun }); } catch { /* email engine down: leads still go out with LinkedIn */ }
+  const enrich: string[] = [];
+  try { const e = await attachEmails(contacts, { write: !opts.dryRun }); enrich.push(`emails ${JSON.stringify(e.byStatus)} (${e.domains} domains checked)`); }
+  catch { enrich.push("emails failed"); /* leads still go out with LinkedIn */ }
   // analyst only for today's leads; cached by evidence, so test sends and re-runs don't pay again
   let notes: Awaited<ReturnType<typeof analyzeLeads>>["analyses"] | undefined;
-  try { notes = (await analyzeLeads(score.ranking.leads, contacts, pack, { dailyCapUsd: opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) })).analyses; } catch { /* code-written openers stand */ }
+  try {
+    const an = await analyzeLeads(score.ranking.leads, contacts, pack, { dailyCapUsd: opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) });
+    notes = an.analyses;
+    enrich.push(`analyst fresh=${an.fresh} cached=${an.cached} failed=${an.failed}${an.skipped ? ` (${an.skipped})` : ""}`);
+  } catch { enrich.push("analyst failed"); /* code-written openers stand */ }
   const gigList = await gigsForDigest(pack);
   const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
   h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;
   const email = renderDigest(score, pack, h, day, contacts, gigList, notes);
-  const counts = { leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
+  const counts = { enrich: enrich.join("; "), leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   // no sender configured yet: scores are written, nothing is sent, the day stays open
   if (!opts.sender) return { status: "skipped", reason: "Gmail not configured (run pnpm gmail:auth, then add the GitHub secrets)", email, score, ...counts };

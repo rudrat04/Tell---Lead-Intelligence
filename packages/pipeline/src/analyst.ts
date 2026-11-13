@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
-import { HaikuClient, HAIKU_MODEL, analyzeLead, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
+import { HaikuClient, HAIKU_MODEL, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
 import type { Contact } from "@tell/people";
 import type { RankInput } from "@tell/intel";
 import { getDb, analyses, and, inArray } from "@tell/db";
@@ -12,11 +12,11 @@ export const ANALYST_MAX_EVIDENCE = 6;
 
 export interface LeadAnalysis extends Analysis { cachedFrom?: Date | null }
 
-function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefined): { input: AnalystInput; key: string; refs: { kind: string; id: string; url: string }[] } {
+function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefined, version: string): { input: AnalystInput; key: string; refs: { kind: string; id: string; url: string }[] } {
   const a = l.account, s = l.score;
   const ev = s.drivers.slice(0, ANALYST_MAX_EVIDENCE);
   const refs = ev.map((e) => ({ kind: e.ref.kind, id: e.ref.id, url: e.url }));
-  const key = createHash("sha256").update(JSON.stringify([refs.map((r) => `${r.kind}:${r.id}`), s.plays.map((p) => p.id)])).digest("hex").slice(0, 24);
+  const key = createHash("sha256").update(JSON.stringify([version, refs.map((r) => `${r.kind}:${r.id}`), s.plays.map((p) => p.id)])).digest("hex").slice(0, 24);
   return {
     key, refs,
     input: {
@@ -42,7 +42,9 @@ export async function analyzeLeads(
   if (!leads.length) return res;
   const write = opts.write !== false;
   const db = getDb();
-  const prepared = leads.map((l) => ({ l, ...inputFor(l, contacts.get(l.account.id)) }));
+  // model + prompt in the key: a prompt change re-writes openers instead of serving stale cached ones
+  const version = `${HAIKU_MODEL}:${createHash("sha256").update(analystSystemPrompt(pack)).digest("hex").slice(0, 8)}`;
+  const prepared = leads.map((l) => ({ l, ...inputFor(l, contacts.get(l.account.id), version) }));
 
   const prior = await db.select().from(analyses).where(and(
     inArray(analyses.accountId, prepared.map((p) => p.l.account.id)),

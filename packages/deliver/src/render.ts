@@ -83,7 +83,9 @@ export type Notes = Map<string, LeadNote>;
 export function leadOpener(c: Contact | null | undefined, company: string, e: Evidence | undefined, n: LeadNote | undefined): string | null {
   if (!n) return opener(c, company, e);
   const body = n.opener.replace(/\s+$/, "");
-  return c ? `Hi ${firstName(c.person.name)}, ${body.charAt(0).toLowerCase()}${body.slice(1)}` : `${body.charAt(0).toUpperCase()}${body.slice(1)}`;
+  // lowercase after "Hi X," unless the sentence starts with "I"/"I'm"... or a proper noun such as the company name
+  const keepCase = /^I\b/.test(body) || body.toLowerCase().startsWith(company.toLowerCase());
+  return c ? `Hi ${firstName(c.person.name)}, ${keepCase ? body : body.charAt(0).toLowerCase() + body.slice(1)}` : `${body.charAt(0).toUpperCase()}${body.slice(1)}`;
 }
 
 function othersHtml(c: Contact | null | undefined): string {

@@ -40,3 +40,10 @@ describe("analyst", () => {
     expect(called).toBe(false);
   });
 });
+
+describe("analyst: invented numbers", () => {
+  it("rejects an unquoted funding amount not in the evidence, keeps numbers that are", () => {
+    expect(validateAnalysis(JSON.stringify({ ...good, opener: "congrats on the $4M Series A, big moment." }), input)).toBeNull();
+    expect(validateAnalysis(JSON.stringify({ ...good, opener: "saw the AE role at an 11-50 person team." }), input)).not.toBeNull();
+  });
+});

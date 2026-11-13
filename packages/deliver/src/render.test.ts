@@ -124,5 +124,7 @@ describe("analyst notes in the digest", () => {
     expect(leadOpener(c, "Tanmark", undefined, n)).toBe("Hi Ravi, saw the founding AE role.");
     expect(leadOpener(null, "Tanmark", undefined, n)).toBe("Saw the founding AE role.");
     expect(leadOpener(c, "Tanmark", undefined, undefined)).toBeNull();
+    expect(leadOpener(c, "Tanmark", undefined, { ...n, opener: "I saw Tanmark is hiring." })).toBe("Hi Ravi, I saw Tanmark is hiring.");
+    expect(leadOpener(c, "Tanmark", undefined, { ...n, opener: "Tanmark's AE role caught my eye." })).toBe("Hi Ravi, Tanmark's AE role caught my eye.");
   });
 });
