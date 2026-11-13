@@ -12,4 +12,4 @@ GH_REPO = "rudrat04/Tell---Lead-Intelligence"
 # Create it once (npx wrangler kv namespace create LABELS) and paste the id it prints.
 [[kv_namespaces]]
 binding = "LABELS"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "1f0f20c8bd1f4c348c8953b3464a4e5e"
