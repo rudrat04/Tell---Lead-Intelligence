@@ -22,6 +22,10 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   reddit: { enabled: false, allowedMappings: ["explicit"], note: "Awaiting Reddit API approval (Responsible Builder Policy)" },
   "forhire-subs": { enabled: false, allowedMappings: ["explicit"], note: "Awaiting Reddit API approval (Responsible Builder Policy)" },
   hn: { enabled: true, allowedMappings: ALL },
+  // Keka tenants: robots.txt allows only /careers (the portal's own JSON API sits under it). Freshteam: only /jobs.
+  // Tenants are listed from Common Crawl's public URL index; each tenant's robots.txt is checked before use.
+  keka: { enabled: true, allowedMappings: ["explicit"], note: "robots.txt: /careers only" },
+  freshteam: { enabled: true, allowedMappings: ["explicit"], note: "robots.txt: /jobs only" },
 };
 
 export function isSourceEnabled(sourceId: string): boolean {

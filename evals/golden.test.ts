@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
-import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules } from "@tell/intel";
+import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing } from "@tell/intel";
 
 const load = <T>(f: string): T[] =>
   readFileSync(fileURLToPath(new URL(`./golden/${f}`, import.meta.url)), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as T);
@@ -46,6 +46,12 @@ describe("golden sets", () => {
     const positives = rows.filter((r) => r.expect);
     const recall = positives.filter((r) => gate1(r.text, g.never, g.required).pass).length / positives.length;
     expect(recall).toBeGreaterThanOrEqual(0.95);
+    expect(failures).toEqual([]);
+  });
+
+  it("staffing agencies (their boards list clients' roles, not their own)", () => {
+    const rows = load<{ name: string; texts: string[]; expect: boolean; note?: string }>("staffing.jsonl");
+    const failures = report("staffing", rows.map((r) => ({ ok: looksLikeStaffing(r.name, r.texts) === r.expect, label: `${r.name} -> expected ${r.expect}${r.note ? ` (${r.note})` : ""}` })));
     expect(failures).toEqual([]);
   });
 });

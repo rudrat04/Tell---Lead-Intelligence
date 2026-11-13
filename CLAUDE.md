@@ -28,7 +28,7 @@ Runtime jobs (need `.env`; see `.env.example`):
 | `pnpm db:generate` | generate a migration after editing `packages/db/src/schema.ts` (custom SQL: `cd packages/db && npx drizzle-kit generate --custom --name x`) |
 | `pnpm pack:check [dir\|--r2]` / `pnpm pack:push <dir> <prefix>` | validate a pack / upload it to private R2 |
 | `pnpm tick` / `pnpm smoke [n]` | 30-min tick (HN → cascade → resolution); smoke = capped at n items per source |
-| `pnpm boards:discover` / `pnpm boards:check` | weekly YC discovery / daily job-board diff |
+| `pnpm boards:discover [--yc-only\|--cc-only]` / `pnpm boards:check` | weekly discovery (YC, then Keka/Freshteam tenants from Common Crawl) / daily job-board diff |
 | `pnpm gigs` | fetch freelance/contract gigs |
 | `pnpm score [--dry] [--show]` | score + rank accounts |
 | `pnpm digest [--dry\|--test]` | score, render, send the digest (`--dry` writes `digest-preview.html`; `--test` sends with `[TEST]` and records nothing) |
@@ -48,7 +48,7 @@ Packages (`packages/*`, imported as `@tell/<name>`, `main` points at `src/index.
 
 - **config**: pack schema (zod) + loader (local dir or R2 via aws4fetch) + `loadFixturePack()` for tests. `CODE_SIGNAL_TYPES` lists signal types the code emits; a pack must define every one.
 - **db**: Drizzle schema, migrations, `getDb()` (neon-http), `migrateDb()`. Re-exports `eq/and/inArray/sql` — import them from `@tell/db`, not `drizzle-orm`, or you get duplicate-type errors from two drizzle instances.
-- **watchers**: source adapters (HN/Algolia, Reddit, YC directory + jobs pages, Greenhouse/Lever/Ashby, Remote OK, Himalayas), robots.txt, politeness (`politeGet`, per-host gap), bot identity, and `policy.ts` (per-source terms-of-use gates).
+- **watchers**: source adapters (HN/Algolia, Reddit, YC directory + jobs pages, Greenhouse/Lever/Ashby, Keka/Freshteam, Common Crawl index, Remote OK, Himalayas), robots.txt, politeness (`politeGet`, per-host gap), bot identity, and `policy.ts` (per-source terms-of-use gates).
 - **extract**: the LLM gates. Gate 3 post extractor and Gate 4 verifier (Claude Haiku 5.5, prompts built from the pack), `runCascade`, `HaikuClient` (thinking disabled, cost tracking).
 - **intel**: pure logic, no I/O: Gate 1 rules, Gate 5 corroboration, ICP hard filters, job classification + daily board diff, scoring/ranking, gig rules.
 - **people**: entity resolution (domains via tldts with private suffixes, never-guess rules, HN profile mapping), signal/person-lead persistence, contact picking by persona.
@@ -62,6 +62,7 @@ tick (30 min):   watchers → seen-hash skip → Gate1 → Gate3 → Gate4 → r
 daily chain:     migrate → pack:check → partitions → boards:check (diff jobs) → gigs → tick (fallback) → digest
 digest:          runScoring (jobs state + signals → evidence → score → rank) → contactsFor → render → send → deliveries
 weekly:          boards:discover (YC → ICP hard filters → accounts + job_boards; own-site ATS links)
+                 + Common Crawl → Keka/Freshteam tenants → backlink proof → accounts + job_boards (India coverage)
 ```
 
 Key invariants (each was a real bug or a deliberate design decision):
@@ -70,7 +71,7 @@ Key invariants (each was a real bug or a deliberate design decision):
 - **Role families are generic**: `core` = the role the operator substitutes for (long-open → "struggling to hire", removed fast → filled); `adjacent` = the need is forming. Patterns live in the pack's `roles.yaml`.
 - **Board diff**: a board's first check is a baseline (no "new role" signals); a role is only announced as new if posted within 14 days; an empty fetch with ≥3 open roles is "suspect" and closes nothing.
 - **Seen-hash dedupe** marks only items that actually went through the cascade; `lastRunAt` advances only on a clean, complete run (catch-up after outages).
-- **Never guess a domain.** With a company name, exactly one candidate domain must match it; tool/vendor/ATS/free-mail domains are excluded (`domains.yaml`); homepages must load on the same brand. Reddit authors map from the post only (Reddit Responsible Builder Policy).
+- **Never guess a domain.** With a company name, exactly one candidate domain must match it; tool/vendor/ATS/free-mail domains are excluded (`domains.yaml`); homepages must load on the same brand. Reddit authors map from the post only (Reddit Responsible Builder Policy). An ATS tenant (acme.keka.com) becomes an account only when a candidate site's own pages link back to that exact board; slugs and names only suggest which sites to check. Region comes from job locations, never from the ATS. Staffing-agency boards are skipped.
 - **Month-one ranking, no threshold**: probabilities are uncalibrated; fast lane = fresh (≤14d) strong signal, guaranteed a slot, not the top.
 - **Idempotency** is enforced by unique keys (signals on `evidence_url,type`; plays per account; people per account+name+source; gigs per source+external id; digest once per IST day via `runs.idempotency_key`).
 - **Spend**: Haiku daily cap is persisted per IST day in `usage_daily`; every run checks remaining budget.

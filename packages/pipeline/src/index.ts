@@ -7,3 +7,4 @@ export * from "./score.js";
 export * from "./contacts.js";
 export * from "./gigs.js";
 export * from "./watch.js";
+export * from "./discover-cc.js";

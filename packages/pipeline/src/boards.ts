@@ -22,7 +22,7 @@ export interface DiscoveryResult {
   atsBoardsFound: number;
 }
 
-async function ownPages(website: string): Promise<{ html: string; url: string }[]> {
+export async function ownPages(website: string): Promise<{ html: string; url: string }[]> {
   const base = website.replace(/\/+$/, "");
   const own = registrableDomain(base);
   const out: { html: string; url: string }[] = [];

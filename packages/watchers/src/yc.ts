@@ -9,6 +9,12 @@ export interface JobPosting {
   employmentType?: string;
   role?: string;
   postedAt?: Date;
+  /** free-text location(s), when the source gives them */
+  location?: string;
+  /** ISO country codes, when the source gives them (Keka) */
+  countryCodes?: string[];
+  /** short description / excerpt, when the source gives it */
+  text?: string;
 }
 
 /** Fields we use from the public YC company dataset (yc-oss/api, built from YC's public directory). */

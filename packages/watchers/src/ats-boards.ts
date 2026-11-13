@@ -1,8 +1,9 @@
 import { getJson } from "./http.js";
 import { RawItemSchema, type RawItem } from "./types.js";
 import type { JobPosting } from "./yc.js";
+import { fetchKekaPostings, fetchFreshteamPostings } from "./india-ats.js";
 
-export type Ats = "greenhouse" | "lever" | "ashby";
+export type Ats = "greenhouse" | "lever" | "ashby" | "keka" | "freshteam";
 export interface TrackedBoard { ats: Ats; slug: string; domain: string }
 
 const GTM_TITLE = /(revops|revenue operations|marketing ops|sales ops|gtm|growth|crm|hubspot|salesforce|demand gen|account executive|sdr|bdr)/i;
@@ -13,6 +14,8 @@ interface AshbyResp { jobs: { id: string; title: string; jobUrl: string; publish
 
 /** All open roles on a public ATS board, normalised (titles only; no descriptions). Throws if the board can't be read. */
 export async function fetchBoardPostings(ats: Ats, slug: string): Promise<JobPosting[]> {
+  if (ats === "keka") return fetchKekaPostings(slug);
+  if (ats === "freshteam") return fetchFreshteamPostings(slug);
   if (ats === "greenhouse") {
     const d = await getJson<{ jobs: (GhJob & { first_published?: string })[] }>(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs`);
     return d.jobs.map((j) => ({ externalId: String(j.id), title: j.title, url: j.absolute_url, postedAt: j.first_published ? new Date(j.first_published) : undefined }));
@@ -31,6 +34,7 @@ export async function fetchBoard(b: TrackedBoard): Promise<RawItem[]> {
   const mk = (externalId: string, url: string, title: string, text: string, postedAt: Date | string, meta: Record<string, unknown> = {}) =>
     RawItemSchema.parse({ sourceId: src, externalId: `${b.slug}:${externalId}`, url, title, text, postedAt, meta: { domain: b.domain, slug: b.slug, ...meta } });
 
+  if (b.ats === "keka" || b.ats === "freshteam") return []; // tracked through the daily board diff only
   if (b.ats === "greenhouse") {
     const d = await getJson<{ jobs: GhJob[] }>(`https://boards-api.greenhouse.io/v1/boards/${b.slug}/jobs?content=true`);
     return d.jobs.filter((j) => GTM_TITLE.test(j.title)).map((j) => mk(String(j.id), j.absolute_url, j.title, j.content ?? j.title, j.updated_at, { location: j.location?.name }));

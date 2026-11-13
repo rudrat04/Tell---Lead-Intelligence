@@ -10,6 +10,9 @@ const PATTERNS: [Ats, RegExp][] = [
   ["lever", /jobs\.(?:eu\.)?lever\.co\/([a-z0-9_.-]+)/gi],
   ["ashby", /jobs\.ashbyhq\.com\/([a-z0-9_.%-]+)/gi],
   ["ashby", /api\.ashbyhq\.com\/posting-api\/job-board\/([a-z0-9_.%-]+)/gi],
+  // tenant subdomains: the slug is the tenant (Keka's stored slug adds its GUID after discovery)
+  ["keka", /\/\/([a-z0-9][a-z0-9-]*)\.keka\.com\/careers/gi],
+  ["freshteam", /\/\/([a-z0-9][a-z0-9-]*)\.freshteam\.com\/jobs/gi],
 ];
 
 const JUNK = new Set(["embed", "api", "v1", "jobs", "js", "static", "assets", "careers"]);

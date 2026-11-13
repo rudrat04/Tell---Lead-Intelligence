@@ -16,7 +16,7 @@ permissions:
 jobs:
   discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       # private config pack in R2; falls back to packs/example-gtm when TELL_PACK_R2_PREFIX is unset
       TELL_PACK_R2_PREFIX: ${{ vars.TELL_PACK_R2_PREFIX }}
