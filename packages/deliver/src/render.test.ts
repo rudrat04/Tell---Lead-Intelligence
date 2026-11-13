@@ -14,7 +14,7 @@ const score = (o: Partial<AccountScore> = {}): AccountScore => ({
   plays: [{ id: "struggling_to_hire", title: "Struggling to hire ops", angle: "Bridge while they hire.", evidence: [ev({})] }], ...o,
 });
 const result = (leads: number): ScoreRunResult => ({
-  configVersion: "example-gtm@abc", scored: 10, eligible: 9, playsMatched: 3, personLeads: [],
+  configVersion: "example-gtm@abc", scored: 10, eligible: 9, playsMatched: 3, criticDropped: {}, personLeads: [],
   ranking: {
     leads: Array.from({ length: leads }, (_, i) => ({ account: { id: `a${i}`, domain: `acme${i}.com`, name: `Acme ${i}`, sizeBand: "2-10", region: "India", segment: "b2b" }, score: score(), incomplete: false, recentlyDelivered: false, newPlaySinceDelivery: false })),
     watchlist: [], held: { incomplete: 0, recentlyDelivered: 0 },

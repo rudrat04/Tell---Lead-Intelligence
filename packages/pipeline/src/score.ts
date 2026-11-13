@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
 import {
-  buildEvidence, scoreAccount, rankAccounts, compileRoles, timing as timingScore,
+  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, type CriticVerdict, timing as timingScore,
   type JobRow, type SignalRow, type AccountScore, type Ranking,
 } from "@tell/intel";
-import { getDb, accounts, jobBoards, jobs, signals, scores, playsMatched, deliveries, personLeads, eq, and, inArray, sql } from "@tell/db";
+import { getDb, accounts, jobBoards, jobs, signals, snapshots, scores, playsMatched, deliveries, personLeads, eq, and, inArray, sql } from "@tell/db";
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const DAY = 86_400_000;
@@ -27,6 +27,8 @@ export interface ScoreRunResult {
   ranking: Ranking<ScoredAccount>;
   personLeads: PersonLeadRank[];
   playsMatched: number;
+  /** eligible accounts the code critic dropped before ranking, by check */
+  criticDropped: Record<string, number>;
 }
 
 /** Pack name + content hash: every score row says which config produced it (calibration, champion/challenger later). */
@@ -89,7 +91,32 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     results.push({ account, score, incomplete: failing.has(id), recentlyDelivered: !!delivered, newPlaySinceDelivery: newPlay });
   }
 
-  const ranking = rankAccounts(results, opts.maxLeads ?? pack.delivery.digest.max_leads, 5, {
+  // Code critic (plan 8f) before the cut, so a dropped account frees its slot for the next one
+  const criticDropped: Record<string, number> = {};
+  const eligibleIds = results.filter((r) => r.score.eligible).map((r) => r.account.id);
+  const site = new Map<string, { title?: string; tools?: string[] }>();
+  const dnsTools = new Map<string, string[]>();
+  for (const part of chunk(eligibleIds, 500)) {
+    const snaps = await db.execute(sql`
+      select distinct on (account_id, kind) account_id, kind, extracted from ${snapshots}
+      where ${inArray(snapshots.accountId, part)} and kind in ('site', 'dns')
+      order by account_id, kind, taken_at desc`);
+    for (const r of snaps.rows as { account_id: string; kind: string; extracted: { title?: string; tools?: string[] } | null }[]) {
+      if (r.kind === "site") site.set(r.account_id, r.extracted ?? {});
+      else dnsTools.set(r.account_id, r.extracted?.tools ?? []);
+    }
+  }
+  const verdicts = new Map<string, CriticVerdict>();
+  for (const r of results) {
+    if (!r.score.eligible) continue;
+    const sf = site.get(r.account.id);
+    const v = critic({ name: r.account.name, domain: r.account.domain, siteTitle: sf?.title, tools: [...(sf?.tools ?? []), ...(dnsTools.get(r.account.id) ?? [])], evidence: r.score.evidence }, pack);
+    verdicts.set(r.account.id, v);
+    if (!v.pass) for (const f of v.failed) criticDropped[f.check] = (criticDropped[f.check] ?? 0) + 1;
+  }
+  const passed = results.filter((r) => verdicts.get(r.account.id)?.pass !== false);
+
+  const ranking = rankAccounts(passed, opts.maxLeads ?? pack.delivery.digest.max_leads, 5, {
     reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days,
   });
 
@@ -126,6 +153,6 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   return {
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
-    ranking, personLeads: personRanked, playsMatched: playsCount,
+    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped,
   };
 }

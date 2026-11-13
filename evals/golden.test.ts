@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
-import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing } from "@tell/intel";
+import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic } from "@tell/intel";
 
 const load = <T>(f: string): T[] =>
   readFileSync(fileURLToPath(new URL(`./golden/${f}`, import.meta.url)), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as T);
@@ -20,6 +20,16 @@ function report(name: string, results: { ok: boolean; label: string }[]) {
 }
 
 describe("golden sets", () => {
+  it("code critic: vendors and already-solved accounts are dropped", () => {
+    type Row = { name: string; domain: string; title: string; tools: string[]; evidence: { type: string; class: string; ageDays: number; current: boolean }[]; expect: boolean; note?: string };
+    const rows = load<Row>("critic.jsonl");
+    const failures = report("critic", rows.map((r) => {
+      const v = critic({ name: r.name, domain: r.domain, siteTitle: r.title, tools: r.tools, evidence: r.evidence.map((e, i) => ({ ...e, quote: e.type, url: "https://example.invalid", ref: { kind: "signal" as const, id: `${i}` } })) }, pack);
+      return { ok: v.pass === r.expect, label: `${r.name} -> expected pass=${r.expect}, got ${v.failed.map((f) => f.check).join(",") || "pass"}${r.note ? ` (${r.note})` : ""}` };
+    }));
+    expect(failures).toEqual([]);
+  });
+
   it("job titles -> role family (incl. every false-positive class found so far)", () => {
     const roles = compileRoles(pack.roles);
     const rows = load<{ title: string; type: string | null; expect: "core" | "adjacent" | null; note?: string }>("roles.jsonl");

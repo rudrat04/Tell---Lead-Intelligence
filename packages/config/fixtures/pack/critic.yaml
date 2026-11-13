@@ -1,0 +1,10 @@
+# Code critic: drops leads before ranking (the next account takes the slot).
+# vendor_patterns: companies that sell what you sell (matched on name, domain, homepage title).
+vendor_patterns:
+  - "(?i)\\b(lead ?gen(eration)?|outsourced (sdr|sales)|sdr[- ]as[- ]a[- ]service|appointment setting|sales outsourcing|gtm agency|growth agency|revops (agency|consult(ing|ancy)))\\b"
+  - "(?i)\\b(staffing|recruit(ment|ing) (agency|firm|partners)|talent solutions|manpower)\\b"
+# tool keys from tools.yaml whose presence means the problem is already solved (empty: none)
+solved_tools: []
+# negative signal types meaning "already solved" when newer than every positive signal
+solved_types: [core_role_filled, ops_team_2plus]
+solved_max_age_days: 60

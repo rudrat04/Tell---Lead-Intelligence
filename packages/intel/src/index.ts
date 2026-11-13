@@ -7,3 +7,4 @@ export * from "./rank.js";
 export * from "./gigs.js";
 export * from "./watch.js";
 export * from "./india.js";
+export * from "./critic.js";

@@ -202,6 +202,17 @@ export const DeliverySchema = z.object({
   sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),
 });
 
+/** Code critic (plan 8f): drops leads that should never reach you. Every field optional so older packs still load. */
+export const CriticSchema = z.object({
+  /** a company selling what you sell (agency, outsourced SDRs, staffing): matched on name, domain and homepage title */
+  vendor_patterns: z.array(pattern).default([]),
+  /** tool keys (tools.yaml) whose presence means the problem is already solved */
+  solved_tools: z.array(z.string()).default([]),
+  /** negative signal types that mean "already solved" when newer than every positive signal */
+  solved_types: z.array(z.string()).default(["core_role_filled"]),
+  solved_max_age_days: z.number().int().min(1).default(60),
+});
+
 export const PackSchema = z.object({
   meta: PackMetaSchema,
   icp: IcpSchema,
@@ -213,6 +224,7 @@ export const PackSchema = z.object({
   domains: DomainsSchema,
   delivery: DeliverySchema,
   tools: ToolsSchema.default({ sprawl_min: 4, tools: {} }),
+  critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60 }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
 }).superRefine((p, ctx) => {
   for (const t of CODE_SIGNAL_TYPES) {
@@ -232,4 +244,4 @@ export const PackSchema = z.object({
 });
 
 export type Pack = z.infer<typeof PackSchema>;
-export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools"] as const;
+export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic"] as const;

@@ -17,7 +17,7 @@ if (show && process.env.CI) {
 
 const r = await runScoring({ pack: await loadPack(), write: !dry });
 const lanes = r.ranking.leads.reduce((m, l) => ((m[l.score.lane] = (m[l.score.lane] ?? 0) + 1), m), {} as Record<string, number>);
-console.log(`scoring: config=${r.configVersion} scored=${r.scored} eligible=${r.eligible} leads=${r.ranking.leads.length} (fast=${lanes.fast ?? 0} combined=${lanes.combined ?? 0}) watchlist=${r.ranking.watchlist.length} person_leads=${r.personLeads.length} held_incomplete=${r.ranking.held.incomplete} held_recent=${r.ranking.held.recentlyDelivered} plays=${r.playsMatched}${dry ? " (dry run)" : ""}`);
+console.log(`scoring: config=${r.configVersion} scored=${r.scored} eligible=${r.eligible} leads=${r.ranking.leads.length} (fast=${lanes.fast ?? 0} combined=${lanes.combined ?? 0}) watchlist=${r.ranking.watchlist.length} person_leads=${r.personLeads.length} held_incomplete=${r.ranking.held.incomplete} held_recent=${r.ranking.held.recentlyDelivered} plays=${r.playsMatched} critic_dropped=${JSON.stringify(r.criticDropped)}${dry ? " (dry run)" : ""}`);
 
 if (show) {
   const line = (l: (typeof r.ranking.leads)[number], i: number) => {
