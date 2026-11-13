@@ -1,0 +1,9 @@
+{"title":"HubSpot Consultant","type":"Contractor","location":"Worldwide","tags":[],"expect":true}
+{"title":"Freelance RevOps Specialist","type":"Full Time","location":"","tags":[],"expect":true,"note":"explicit contract word overrides full-time"}
+{"title":"Systems Specialist","type":"Contractor","location":"Anywhere","tags":["hubspot"],"expect":true,"note":"matches on tags"}
+{"title":"HubSpot Consultant","type":"Full Time","location":"Worldwide","tags":[],"expect":false,"note":"false positive: full-time consultant"}
+{"title":"Contract Backend Engineer (CRM integrations)","type":"Contractor","location":"Worldwide","tags":[],"expect":false,"note":"false positive: engineering gig"}
+{"title":"Commission-only HubSpot Sales Rep","type":"Contractor","location":"Worldwide","tags":[],"expect":false,"note":"false positive: commission-only sales"}
+{"title":"Recruiter for GTM roles","type":"Contractor","location":"Worldwide","tags":[],"expect":false,"note":"false positive: recruiter"}
+{"title":"HubSpot Consultant","type":"Contractor","location":"USA only","tags":[],"expect":false,"note":"location not open to the operator"}
+{"title":"Contract Video Editor","type":"Contractor","location":"Worldwide","tags":[],"expect":false,"note":"not the operator's kind of work"}

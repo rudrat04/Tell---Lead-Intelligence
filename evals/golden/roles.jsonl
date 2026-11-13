@@ -1,0 +1,22 @@
+{"title":"RevOps Manager","type":null,"expect":"core","note":"core ops role"}
+{"title":"Revenue Operations Lead","type":null,"expect":"core"}
+{"title":"GTM Engineer","type":null,"expect":"core"}
+{"title":"Founding GTM Engineer","type":null,"expect":"core"}
+{"title":"Salesforce Administrator","type":null,"expect":"core"}
+{"title":"Marketing Operations Manager","type":null,"expect":"core"}
+{"title":"Head of Revenue Operations","type":null,"expect":"core"}
+{"title":"Founding Account Executive","type":null,"expect":"adjacent"}
+{"title":"SDR","type":null,"expect":"adjacent"}
+{"title":"Head of Growth","type":null,"expect":"adjacent"}
+{"title":"Product Marketing Manager","type":null,"expect":"adjacent"}
+{"title":"Demand Generation Manager","type":null,"expect":"adjacent"}
+{"title":"Senior Software Engineer","type":null,"expect":null,"note":"engineering, not GTM"}
+{"title":"Sales Engineer","type":null,"expect":null,"note":"false positive: presales engineering"}
+{"title":"Solutions Engineer","type":null,"expect":null}
+{"title":"Data Engineer","type":null,"expect":null}
+{"title":"AI GTM Engineer Intern","type":null,"expect":null,"note":"false positive: internship"}
+{"title":"RevOps Internship","type":null,"expect":null,"note":"false positive: internship"}
+{"title":"GTM Engineer","type":"Intern","expect":null,"note":"false positive: intern employment type"}
+{"title":"Founding GTM Recruiter","type":null,"expect":null,"note":"false positive: recruiter"}
+{"title":"Talent Partner, GTM","type":null,"expect":null,"note":"false positive: recruiter"}
+{"title":"Office Manager","type":null,"expect":null}

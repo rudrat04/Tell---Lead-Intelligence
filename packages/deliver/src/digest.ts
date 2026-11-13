@@ -35,10 +35,12 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
   const usage = ((await db.execute(sql`select distinct on (service) service, used, "limit" from usage_daily
     where service <> 'haiku' and day > (now() - interval '3 days')::date order by service, day desc`)).rows as { service: string; used: number; limit: number }[])
     .map((u) => ({ service: u.service, pct: u.limit > 0 ? u.used / u.limit : 0 }));
+  const metrics = Object.fromEntries(((await db.execute(sql`select distinct on (metric) metric, value from eval_results
+    where computed_at > now() - interval '3 days' order by metric, computed_at desc`)).rows as { metric: string; value: number }[]).map((r) => [r.metric, Number(r.value)]));
   void pack;
   return {
     boardsTotal: b?.total ?? 0, boardsChecked24h: b?.checked ?? 0, boardsFailing: b?.failing ?? 0,
-    ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd, indiaTracked: india?.n ?? 0, usage,
+    ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd, indiaTracked: india?.n ?? 0, usage, metrics,
   };
 }
 

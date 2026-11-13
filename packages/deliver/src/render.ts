@@ -19,6 +19,8 @@ export interface DigestHealth {
   indiaInLeads?: number;
   /** free-tier usage from the nightly usage guard: service -> share of limit */
   usage?: { service: string; pct: number }[];
+  /** latest nightly eval metrics: metric -> value */
+  metrics?: Record<string, number>;
 }
 
 export interface DigestEmail { subject: string; html: string; text: string }
@@ -157,6 +159,10 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `Accounts scored: ${r.scored} · held back (source outage): ${r.ranking.held.incomplete} · already sent recently: ${r.ranking.held.recentlyDelivered}`,
     health.indiaTracked != null ? `India: ${health.indiaTracked} Indian companies tracked, ${health.indiaInLeads ?? 0} in today's leads` : "",
     health.usage?.length ? `Free-tier usage: ${health.usage.map((u) => `${u.service.replace(/_/g, " ")} ${Math.round(u.pct * 100)}%${u.pct >= 0.8 ? " (high: retention tightened)" : ""}`).join(", ")}` : "",
+    health.metrics && Object.keys(health.metrics).length ? (() => {
+      const m = health.metrics!; const p = (k: string) => `${Math.round((m[k] ?? 0) * 100)}%`;
+      return `Last 30 days: named contacts ${p("named_contact_rate_30d")}, non-founder ${p("non_founder_contact_rate_30d")}, non-hiring leads ${p("non_hiring_lead_share_30d")}, India ${p("india_share_delivered_30d")} of leads (${p("india_share_tracked")} of tracked), labelled ${m.label_count_30d ?? 0}${(m.label_count_30d ?? 0) > 0 ? `, precision ${p("precision_30d")}` : ""}`;
+    })() : "",
     `Config: ${r.configVersion}`,
   ].filter(Boolean);
 

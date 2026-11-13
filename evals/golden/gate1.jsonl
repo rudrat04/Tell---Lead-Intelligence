@@ -1,0 +1,9 @@
+{"text":"Looking for a freelancer to set up HubSpot and outbound sequences for our seed-stage startup","expect":true}
+{"text":"We need someone to fix our HubSpot lead routing and cold email setup this month","expect":true}
+{"text":"Hiring our first SDR, who should own the CRM?","expect":true}
+{"text":"Our RevOps is a mess, attribution is broken and nobody owns the CRM","expect":true}
+{"text":"We are a recruiting agency with great candidates for your GTM team","expect":false,"note":"never-pattern: recruiter"}
+{"text":"I am looking for a job in revops, 5 years experience","expect":false,"note":"never-pattern: job seeker"}
+{"text":"SEEKING WORK | Remote | HubSpot + Clay expert, 8 yrs RevOps","expect":false,"note":"false positive: freelancer advertising"}
+{"text":"Should the CEO be fired over the board's decision?","expect":false,"note":"off-topic"}
+{"text":"Our CI pipeline is slow and the build keeps failing","expect":false,"note":"off-topic: 'pipeline' isn't GTM"}
