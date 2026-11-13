@@ -157,6 +157,16 @@ export const SourcesSchema = z.object({
     /** companies checked per run (each costs a few requests) */
     max_companies: z.number().int().min(1).default(150),
   }).default({ enabled: false, location: "India", queries: [], day_range: 30, max_pages: 5, max_companies: 150 }),
+  /** VC / accelerator portfolio pages (weekly): each company page's "Website" link becomes an account; job boards
+   *  are found on that site. Region comes from job locations, never from the investor. */
+  portfolios: z.array(z.object({
+    id: z.string().regex(/^[a-z0-9-]+$/),
+    index: z.string().url(),
+    company_path: z.string().startsWith("/"),
+    max_pages: z.number().int().min(1).max(50).default(20),
+    /** the label text next to the company's own website link on a company page */
+    website_labels: z.array(z.string()).default(["website", "visit website", "visit site"]),
+  })).default([]),
 });
 
 export const DomainsSchema = z.object({

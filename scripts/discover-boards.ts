@@ -1,8 +1,8 @@
 /** Weekly: seed YC companies through the ICP filter and discover their job boards; then Keka/Freshteam tenants
- * from Common Crawl and Workable job search (India coverage). Counts only (public logs). Flags: --yc-only, --cc-only, --workable-only. */
+ * from Common Crawl and Workable job search (India coverage). Counts only (public logs). Flags: --yc-only, --cc-only, --workable-only, --portfolios-only. */
 import "dotenv/config";
 import { loadPack } from "@tell/config";
-import { runDiscovery, runCcDiscovery, runWorkableDiscovery } from "@tell/pipeline";
+import { runDiscovery, runCcDiscovery, runWorkableDiscovery, runPortfolioDiscovery } from "@tell/pipeline";
 
 const pack = await loadPack();
 const args = process.argv.slice(2);
@@ -30,5 +30,14 @@ if (!only || only === "--workable-only") {
     console.log(`workable discovery: queries=${w.queries} hits=${w.hits} companies=${w.companies} due=${w.due} checked=${w.checked} no_website=${w.noWebsite} bad_site=${w.badSite} no_board=${w.noBoard} staffing=${w.staffing} not_region=${w.notRegion} filtered=${w.filtered} resolved=${w.resolved} india=${w.india} gtm_roles=${w.withGtmRoles} boards_new=${w.boardsNew}`);
   } catch (e) {
     console.log(`workable discovery: failed (${(e as Error).name})`);
+  }
+}
+
+if (!only || only === "--portfolios-only") {
+  try {
+    const p = await runPortfolioDiscovery({ pack });
+    console.log(`portfolio discovery: sources=${p.sources} listed=${p.listed} due=${p.due} checked=${p.checked} no_website=${p.noWebsite} bad_site=${p.badSite} filtered=${p.filtered} accounts_new=${p.accountsNew} with_board=${p.withBoard} india=${p.india}`);
+  } catch (e) {
+    console.log(`portfolio discovery: failed (${(e as Error).name})`);
   }
 }

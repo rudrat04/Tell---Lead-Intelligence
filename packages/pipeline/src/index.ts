@@ -12,3 +12,4 @@ export * from "./emails.js";
 export * from "./analyst.js";
 export * from "./discover-workable.js";
 export * from "./tuning.js";
+export * from "./discover-portfolios.js";

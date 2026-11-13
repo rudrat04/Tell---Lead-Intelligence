@@ -28,7 +28,7 @@ Runtime jobs (need `.env`; see `.env.example`):
 | `pnpm db:generate` | generate a migration after editing `packages/db/src/schema.ts` (custom SQL: `cd packages/db && npx drizzle-kit generate --custom --name x`) |
 | `pnpm pack:check [dir\|--r2]` / `pnpm pack:push <dir> <prefix>` | validate a pack / upload it to private R2 |
 | `pnpm tick` / `pnpm smoke [n]` | 30-min tick (HN → cascade → resolution); smoke = capped at n items per source |
-| `pnpm boards:discover [--yc-only\|--cc-only\|--workable-only]` / `pnpm boards:check` | weekly discovery (YC, Keka/Freshteam tenants from Common Crawl, Workable job search) / daily job-board diff |
+| `pnpm boards:discover [--yc-only\|--cc-only\|--workable-only\|--portfolios-only]` / `pnpm boards:check` | weekly discovery (YC, Keka/Freshteam tenants from Common Crawl, Workable job search) / daily job-board diff |
 | `pnpm gigs` | fetch freelance/contract gigs |
 | `pnpm score [--dry] [--show]` | score + rank accounts |
 | `pnpm digest [--dry\|--test]` | score, render, send the digest (`--dry` writes `digest-preview.html`; `--test` sends with `[TEST]` and records nothing) |
@@ -108,7 +108,7 @@ Not built yet, in suggested order:
 2. **Haiku analyst + code critic**, built: `intel/critic.ts` (vendor, solved tool, solved signal; optional `critic.yaml`; runs before the ranking cut, `criticDropped` counts) and `extract/analyst.ts` + `pipeline/analyst.ts` (today's leads only, cited hypothesis/angle/opener validated in code: citations in range, quotes verbatim, greeting written by code; cached in `analyses` by evidence key; shares the daily Haiku cap; falls back to the code opener). The analyst also drafts the opening email (subject + 3 short paragraphs: what we noticed, what you'd do and what they get, the pack's `delivery.email.next_step`), checked like the rest; it goes in the Sheet's "Email draft" column with a code-written greeting and the pack signature, and stays empty (never a generic template) when there's no checked draft. Left: the Sunday critic audit.
 3. **Gate 2** (pgvector exemplar bank, ~100 seed examples, labels from the Sheet) and the uncertain queue.
 4. **Maturity stages** (8b, incl. agency model) and **event dedupe** clusters (8a).
-5. **Sources**: Indian funding news (blocked: Inc42 and Entrackr terms forbid automated collection without written consent; YourStory robots.txt blocks AI/RSS bots), Product Hunt/BetaList, SEC Form D, Bluesky, Indie Hackers, tool forums, VC portfolios, newsletter inbox, CT subdomains, lookalike domains, Wayback backfill, Recruitee/SmartRecruiters. (Workable is built: weekly India search.)
+5. **Sources**: Indian funding news (blocked: Inc42 and Entrackr terms forbid automated collection without written consent; YourStory robots.txt blocks AI/RSS bots), Product Hunt/BetaList, SEC Form D, Bluesky, Indie Hackers, tool forums, VC portfolios, newsletter inbox, CT subdomains, lookalike domains, Wayback backfill, Recruitee/SmartRecruiters. (Built: Workable weekly India search; portfolio pages via pack `sources.portfolios`, domain from each page's labelled website link. Checked and not usable: Zoho Recruit (JS app, robots), Inc42/Entrackr/YourStory (terms/robots): see `policy.ts`.)
 6. **Self-tuning** (11, after ~150 labels): weekly refit with guardrails, champion/challenger with blind interleaving, exploration picks, trend snapshots, Sunday/monthly reviews.
 7. Smaller: source drift alarm, archive cold accounts to R2, Haiku Batch API.
 

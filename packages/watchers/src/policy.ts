@@ -26,6 +26,17 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   // Tenants are listed from Common Crawl's public URL index; each tenant's robots.txt is checked before use.
   keka: { enabled: true, allowedMappings: ["explicit"], note: "robots.txt: /careers only" },
   freshteam: { enabled: true, allowedMappings: ["explicit"], note: "robots.txt: /jobs only" },
+  // Workable: robots.txt doesn't block the job-search or widget APIs (ai-input=yes); terms have no automated-access ban.
+  workable: { enabled: true, allowedMappings: ["explicit"], note: "public job search + widget API" },
+  // Portfolio pages: Surge / Peak XV robots.txt allow all crawlers; robots checked per page.
+  portfolio: { enabled: true, allowedMappings: ["explicit"], note: "company page's own Website link only" },
+  // Checked Nov 2026 and NOT used: Inc42 terms ban bots/monitoring; Entrackr terms ban automated collection without
+  // written consent; YourStory robots.txt blocks AI and RSS bots; Zoho Recruit career sites are a JS app whose job
+  // data sits behind paths robots.txt disallows.
+  inc42: { enabled: false, allowedMappings: [], note: "terms: no bots without written approval" },
+  entrackr: { enabled: false, allowedMappings: [], note: "terms: no automated collection without written consent" },
+  yourstory: { enabled: false, allowedMappings: [], note: "robots.txt blocks AI/RSS bots" },
+  zohorecruit: { enabled: false, allowedMappings: [], note: "JS app; job data behind robots-disallowed paths" },
 };
 
 export function isSourceEnabled(sourceId: string): boolean {
