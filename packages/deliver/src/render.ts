@@ -26,6 +26,8 @@ export interface DigestHealth {
 export interface DigestEmail { subject: string; html: string; text: string }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+/** Link targets come from scraped pages: only http(s) and mailto, never javascript: or data: URLs. */
+export const safeHref = (u: string | null | undefined): string => (u && /^(https?:\/\/|mailto:)/i.test(u.trim()) ? esc(u.trim()) : "#");
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 const ago = (d: number) => (d >= 60 ? `${Math.round(d / 30)} months` : `${Math.round(d)} days`);
 
@@ -98,12 +100,12 @@ export function leadOpener(c: Contact | null | undefined, company: string, e: Ev
 function othersHtml(c: Contact | null | undefined): string {
   const others = c?.others ?? [];
   if (!others.length) return "";
-  return `<div style="font-size:13px;margin-top:4px">Also: ${others.map((o) => `${o.person.linkedin ? `<a href="${esc(o.person.linkedin)}" style="color:#1a56db">${esc(o.person.name)}</a>` : esc(o.person.name)}, ${esc(o.person.role ?? o.persona)}`).join(" · ")}</div>`;
+  return `<div style="font-size:13px;margin-top:4px">Also: ${others.map((o) => `${o.person.linkedin ? `<a href="${safeHref(o.person.linkedin)}" style="color:#1a56db">${esc(o.person.name)}</a>` : esc(o.person.name)}, ${esc(o.person.role ?? o.persona)}`).join(" · ")}</div>`;
 }
 
 function alsoHtml(links: { persona: string; url: string }[]): string {
   if (!links.length) return "";
-  return `<div style="font-size:12px;color:#6b7280;margin-top:4px">Also reach: ${links.map((x) => `<a href="${esc(x.url)}" style="color:#1a56db">${esc(x.persona)}</a>`).join(" · ")} <span style="color:#9ca3af">(LinkedIn search)</span></div>`;
+  return `<div style="font-size:12px;color:#6b7280;margin-top:4px">Also reach: ${links.map((x) => `<a href="${safeHref(x.url)}" style="color:#1a56db">${esc(x.persona)}</a>`).join(" · ")} <span style="color:#9ca3af">(LinkedIn search)</span></div>`;
 }
 
 const EMAIL_LABEL = { observed: "seen in public", likely: "likely", guessed: "guessed, unverified", invalid: "" } as const;
@@ -116,7 +118,7 @@ export function emailText(p: Contact["person"]): string | null {
 function contactLinks(c: Contact): string {
   const e = c.person.email && c.person.email.status !== "invalid" ? c.person.email : null;
   const links = [e && `<a href="mailto:${esc(e.address)}" style="color:#1a56db">${esc(e.address)}</a> <span style="color:#9ca3af">(${EMAIL_LABEL[e.status]})</span>`,
-    !e && c.generic && `<a href="mailto:${esc(c.generic)}" style="color:#1a56db">${esc(c.generic)}</a> <span style="color:#9ca3af">(shared inbox)</span>`, c.person.linkedin && `<a href="${esc(c.person.linkedin)}" style="color:#1a56db">LinkedIn</a>`, c.person.twitter && `<a href="${esc(c.person.twitter)}" style="color:#1a56db">X</a>`].filter(Boolean);
+    !e && c.generic && `<a href="mailto:${esc(c.generic)}" style="color:#1a56db">${esc(c.generic)}</a> <span style="color:#9ca3af">(shared inbox)</span>`, c.person.linkedin && `<a href="${safeHref(c.person.linkedin)}" style="color:#1a56db">LinkedIn</a>`, c.person.twitter && `<a href="${safeHref(c.person.twitter)}" style="color:#1a56db">X</a>`].filter(Boolean);
   return links.join(" · ");
 }
 
@@ -133,7 +135,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   <div style="font-size:13px;color:#6b7280;margin-top:2px">${contactLinks(c)}${contactLinks(c) ? " · " : ""}${esc(c.persona ?? c.note)} · ${esc(a.domain)}${facts ? ` · ${esc(facts)}` : ""}</div>`
     : `<div style="font-size:16px;font-weight:600">${i + 1}. <a href="https://${esc(a.domain)}" style="color:#111827;text-decoration:none">${esc(company)}</a>
     <span style="font-weight:400;color:#6b7280;font-size:13px">${esc(a.domain)}${facts ? ` · ${esc(facts)}` : ""} · no contact found yet</span></div>`;
-  const why = s.drivers.slice(0, 4).map((e) => `<li style="margin:2px 0"><a href="${esc(e.url)}" style="color:#1a56db;text-decoration:none">${esc(describe(e))}</a></li>`).join("");
+  const why = s.drivers.slice(0, 4).map((e) => `<li style="margin:2px 0"><a href="${safeHref(e.url)}" style="color:#1a56db;text-decoration:none">${esc(describe(e))}</a></li>`).join("");
   const plays = s.plays.map((p) => esc(p.title)).join(" + ");
   return `
 <tr><td style="padding:16px 0;border-top:1px solid #e5e7eb">
@@ -175,8 +177,8 @@ const SOURCE_NAME: Record<string, string> = { remoteok: "Remote OK", himalayas: 
 
 function gigHtml(g: DigestGig): string {
   const meta = [g.company, g.employmentType, g.location].filter(Boolean).map((x) => esc(x!)).join(" · ");
-  const via = `via <a href="${esc(g.url)}" style="color:#6b7280">${esc(SOURCE_NAME[g.source] ?? g.source)}</a>`;
-  return `<li style="margin:6px 0"><a href="${esc(g.applyUrl ?? g.url)}" style="color:#111827;font-weight:600">${esc(g.title)}</a><div style="font-size:12px;color:#6b7280">${meta}${meta ? " · " : ""}${via}</div></li>`;
+  const via = `via <a href="${safeHref(g.url)}" style="color:#6b7280">${esc(SOURCE_NAME[g.source] ?? g.source)}</a>`;
+  return `<li style="margin:6px 0"><a href="${safeHref(g.applyUrl ?? g.url)}" style="color:#111827;font-weight:600">${esc(g.title)}</a><div style="font-size:12px;color:#6b7280">${meta}${meta ? " · " : ""}${via}</div></li>`;
 }
 
 export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes): DigestEmail {
@@ -207,7 +209,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     : "";
   const peopleHtml = people.length
     ? `<h3 style="font-size:15px;margin:24px 0 4px">Person leads (no company yet; reply in the thread)</h3><ul style="margin:0 0 0 18px;padding:0;font-size:14px">${people.map((p) =>
-        `<li style="margin:4px 0">${esc(p.platform)}/${esc(p.handle)}: <a href="${esc(p.url)}" style="color:#1a56db">"${esc(p.quote)}"</a></li>`).join("")}</ul>`
+        `<li style="margin:4px 0">${esc(p.platform)}/${esc(p.handle)}: <a href="${safeHref(p.url)}" style="color:#1a56db">"${esc(p.quote)}"</a></li>`).join("")}</ul>`
     : "";
 
   const html = `<!doctype html><html><body style="margin:0;padding:0;background:#f9fafb">

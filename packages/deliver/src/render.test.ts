@@ -139,3 +139,14 @@ describe("email draft", () => {
     expect(emailDraft(c, { ...n, email: null })).toBe("");
   });
 });
+
+describe("safeHref", () => {
+  it("keeps http(s) and mailto links, blocks script and data URLs from scraped pages", async () => {
+    const { safeHref } = await import("./render.js");
+    expect(safeHref("https://example.test/a?b=1&c=2")).toBe("https://example.test/a?b=1&amp;c=2");
+    expect(safeHref("mailto:jo@example.test")).toBe("mailto:jo@example.test");
+    expect(safeHref("javascript:alert(1)")).toBe("#");
+    expect(safeHref(" data:text/html,x")).toBe("#");
+    expect(safeHref(null)).toBe("#");
+  });
+});
