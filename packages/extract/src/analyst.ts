@@ -53,11 +53,11 @@ You get one company and numbered evidence items (each with a quote and its age).
 Return JSON only, no prose, exactly these keys:
 {"hypothesis": "...", "angle": "...", "opener": "...", "citations": [0], "counter_evidence": null, "confidence": 0.0, "email_subject": "...", "email_body": "..."}
 
-- hypothesis: one or two sentences: why this company likely needs the offer now. Cite by meaning, not by number.
+- hypothesis: ONE sentence, under 25 words: why this company likely needs the offer now. Cite by meaning, not by number. Don't repeat what the opener says.
 - angle: one sentence: which part of the offer to lead with, given the evidence and the matched plays.
 - opener: the first sentence of a cold email after the greeting (do not write "Hi" or a name). Specific to the evidence, plain, no flattery, no hype, no question stacking, under 30 words. If you quote, quote words exactly as they appear in an evidence quote, in double quotes.
 - citations: indexes of the evidence items the hypothesis relies on (at least one).
-- counter_evidence: anything in the evidence that suggests they do NOT need it (e.g. a role already filled, an old signal), or null.
+- counter_evidence: ONE short sentence (under 20 words) on the strongest reason they may NOT need it (e.g. a role already filled, an old signal), or null.
 - confidence: 0 to 1, how strongly the evidence supports the hypothesis.
 - email_subject: 2 to 6 words, lowercase is fine, specific to them (e.g. their open role), no clickbait, no "quick question".
 - email_body: the whole cold email without greeting or sign-off, at most ${pack.delivery.email.max_words} words, in 3 short paragraphs separated by a blank line:

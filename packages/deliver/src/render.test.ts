@@ -95,7 +95,7 @@ describe("non-hiring signal wording", () => {
 });
 
 describe("people beyond founders", () => {
-  it("names people found for other personas and drops their search link", () => {
+  it("names people found for other personas; no persona search links once someone is named", () => {
     const contact = {
       person: { name: "Riya S", role: "Founder/CEO", source: "yc" }, persona: "Founder / CEO", note: "",
       others: [{ persona: "RevOps lead", person: { name: "Jane Doe", role: "Head of Revenue Operations at Acme 0", linkedin: "https://www.linkedin.com/in/jane", source: "exa" } }],
@@ -103,8 +103,9 @@ describe("people beyond founders", () => {
     const e = renderDigest(result(1), pack, health, "2026-11-13", new Map([["a0", contact]]));
     expect(e.html).toContain('<a href="https://www.linkedin.com/in/jane"');
     expect(e.text).toContain("Also: Jane Doe, Head of Revenue Operations at Acme 0");
-    expect(e.text).not.toContain("Also reach RevOps lead");
-    expect(e.text).toContain("Also reach Head of GTM / Revenue");
+    expect(e.text).not.toContain("Search ");
+    // without a named contact, the search links are the way in
+    expect(renderDigest(result(1), pack, health, "2026-11-13", new Map()).text).toContain("Search ");
   });
 });
 
@@ -154,7 +155,7 @@ describe("safeHref", () => {
 describe("one-tap label buttons", () => {
   it("appear only when links are passed (real sends)", () => {
     const links = new Map([["a0", { good: "https://w.test/l?v=good", bad: "https://w.test/l?v=bad" }]]);
-    expect(renderDigest(result(1), pack, health, "2026-11-14", undefined, [], undefined, links).html).toContain("👍 Good");
-    expect(renderDigest(result(1), pack, health, "2026-11-14").html).not.toContain("👍 Good");
+    expect(renderDigest(result(1), pack, health, "2026-11-14", undefined, [], undefined, links).html).toContain("👍&nbsp; Good");
+    expect(renderDigest(result(1), pack, health, "2026-11-14").html).not.toContain("👍&nbsp; Good");
   });
 });
