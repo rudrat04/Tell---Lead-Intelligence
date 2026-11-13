@@ -78,6 +78,13 @@
       "when": 1794558924792,
       "tag": "0010_email_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794559572709,
+      "tag": "0011_analyst",
+      "breakpoints": true
     }
   ]
 }

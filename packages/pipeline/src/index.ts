@@ -9,3 +9,4 @@ export * from "./gigs.js";
 export * from "./watch.js";
 export * from "./discover-cc.js";
 export * from "./emails.js";
+export * from "./analyst.js";

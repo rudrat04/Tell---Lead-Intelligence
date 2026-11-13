@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { runScoring, istDay, contactsFor, attachEmails, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
+import { runScoring, istDay, contactsFor, attachEmails, analyzeLeads, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
 import { appendPendingLeads } from "./sheet-sync.js";
@@ -69,10 +69,13 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id),
   });
   try { await attachEmails(contacts, { write: !opts.dryRun }); } catch { /* email engine down: leads still go out with LinkedIn */ }
+  // analyst only for today's leads; cached by evidence, so test sends and re-runs don't pay again
+  let notes: Awaited<ReturnType<typeof analyzeLeads>>["analyses"] | undefined;
+  try { notes = (await analyzeLeads(score.ranking.leads, contacts, pack, { dailyCapUsd: opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) })).analyses; } catch { /* code-written openers stand */ }
   const gigList = await gigsForDigest(pack);
   const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
   h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;
-  const email = renderDigest(score, pack, h, day, contacts, gigList);
+  const email = renderDigest(score, pack, h, day, contacts, gigList, notes);
   const counts = { leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   // no sender configured yet: scores are written, nothing is sent, the day stays open
@@ -100,7 +103,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (score.ranking.leads.length) {
     batch.push(db.insert(deliveries).values(score.ranking.leads.map((l) => ({
       accountId: l.account.id, deliveredAt: now, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
-      sheetRow: leadSheetRow(l, contacts.get(l.account.id), day),
+      sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id)),
     }))));
   }
   await db.batch(batch as unknown as Parameters<typeof db.batch>[0]);

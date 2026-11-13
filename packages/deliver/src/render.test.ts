@@ -115,3 +115,14 @@ describe("MIME", () => {
     expect(m).toContain("--BOUND--");
   });
 });
+
+describe("analyst notes in the digest", () => {
+  it("uses the analyst opener with a code-written greeting, else falls back", async () => {
+    const { leadOpener } = await import("./render.js");
+    const c = { person: { name: "Ravi Tannery", role: "CEO", source: "yc" }, persona: "Founder", note: "" };
+    const n = { hypothesis: "h", angle: "a", opener: "Saw the founding AE role.", counterEvidence: null, confidence: 0.6 };
+    expect(leadOpener(c, "Tanmark", undefined, n)).toBe("Hi Ravi, saw the founding AE role.");
+    expect(leadOpener(null, "Tanmark", undefined, n)).toBe("Saw the founding AE role.");
+    expect(leadOpener(c, "Tanmark", undefined, undefined)).toBeNull();
+  });
+});

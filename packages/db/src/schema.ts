@@ -165,7 +165,14 @@ export const analyses = pgTable("analyses", {
   angle: text("angle"),
   confidence: real("confidence"),
   criticChecks: jsonb("critic_checks"),
-});
+  /** hash of the evidence refs the analysis was written from: same evidence, same analysis (no repeat spend) */
+  evidenceKey: text("evidence_key"),
+  opener: text("opener"),
+  /** cited evidence as [{ kind: job|signal, id, url }] (citations uuid[] can't say which table) */
+  cited: jsonb("cited"),
+  model: text("model"),
+  createdAt: ts("created_at").defaultNow(),
+}, (t) => [uniqueIndex("analyses_account_evidence_uq").on(t.accountId, t.evidenceKey)]);
 
 export const exemplars = pgTable("exemplars", {
   id: id(),

@@ -101,7 +101,7 @@ Deliberate deviations: Trigger.dev → GitHub Actions + Cloudflare Worker; singl
 
 Not built yet, in suggested order:
 1. **Email engine** (plan 9b), mostly built: `people/email.ts` (pure: patterns, `learnPattern`, `emailFor` → `observed/likely/guessed/invalid`), `watchers/mail.ts` (MX via DoH, own-site pages, GitHub org commits only when the org's `blog` is the domain), `pipeline/emails.ts` `attachEmails` (cached 30 days in `domain_mail`, stored in `emails`, suppression respected), shown in digest + Sheet. No SMTP probing. Left: bounce reading (needs gmail.readonly; `markBounced` is ready), press-release addresses.
-2. **Haiku analyst + code critic** (8e, 8f): cited hypothesis/angle; vendor, already-solved and stale checks; Sunday critic audit.
+2. **Haiku analyst + code critic**, built: `intel/critic.ts` (vendor, solved tool, solved signal; optional `critic.yaml`; runs before the ranking cut, `criticDropped` counts) and `extract/analyst.ts` + `pipeline/analyst.ts` (today's leads only, cited hypothesis/angle/opener validated in code: citations in range, quotes verbatim, greeting written by code; cached in `analyses` by evidence key; shares the daily Haiku cap; falls back to the code opener). Left: the Sunday critic audit.
 3. **Gate 2** (pgvector exemplar bank, ~100 seed examples, labels from the Sheet) and the uncertain queue.
 4. **Maturity stages** (8b, incl. agency model) and **event dedupe** clusters (8a).
 5. **Sources**: Indian funding news (Inc42, Entrackr, YourStory RSS), Product Hunt/BetaList, SEC Form D, Bluesky, Indie Hackers, tool forums, VC portfolios, newsletter inbox, CT subdomains, lookalike domains, Wayback backfill, Workable/Recruitee/SmartRecruiters.
