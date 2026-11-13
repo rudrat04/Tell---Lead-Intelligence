@@ -7,11 +7,11 @@ import { toRegex, type Pack } from "@tell/config";
  *  - evidence URLs are unique per event (the signals table is unique on url + type), e.g. https://acme.com/#tool=hubspot.
  */
 
-export interface ToolRules { sprawlMin: number; tools: { key: string; label: string; category: string; site: RegExp[]; dns: RegExp[] }[] }
+export interface ToolRules { sprawlMin: number; sprawlExclude?: string[]; overlap?: string[]; tools: { key: string; label: string; category: string; site: RegExp[]; dns: RegExp[] }[] }
 
 export function compileTools(t: Pack["tools"]): ToolRules {
   return {
-    sprawlMin: t.sprawl_min,
+    sprawlMin: t.sprawl_min, sprawlExclude: t.sprawl_exclude_categories ?? [], overlap: t.overlap_categories ?? [],
     tools: Object.entries(t.tools).map(([key, v]) => ({ key, label: v.label, category: v.category, site: v.site.map(toRegex), dns: v.dns.map(toRegex) })),
   };
 }
@@ -24,7 +24,7 @@ export function toolsFromTxt(txt: string[], rules: ToolRules): string[] {
 export interface SiteState { salesLed: boolean; selfServe: boolean; pricing: boolean; tools: string[]; ctas?: string[] }
 
 export interface WatchEvent {
-  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "funding_raise" | "product_launch";
+  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "tool_overlap" | "funding_raise" | "product_launch";
   quote: string;
   url: string;
   observedAt: Date;
@@ -59,9 +59,23 @@ export function diffDnsTools(domain: string, prev: string[] | null, cur: string[
 
 /** Stack sprawl is a state: this many GTM tools at once (site and DNS combined). One event per account (unique URL). */
 export function stackSprawl(domain: string, tools: string[], rules: ToolRules, now: Date): WatchEvent | null {
-  const uniq = [...new Set(tools)];
+  const cat = (k: string) => rules.tools.find((t) => t.key === k)?.category ?? "";
+  const uniq = [...new Set(tools)].filter((t) => !(rules.sprawlExclude ?? []).includes(cat(t)));
   if (uniq.length < rules.sprawlMin) return null;
   return { type: "stack_sprawl", quote: `${uniq.length} GTM tools: ${uniq.map((t) => toolLabel(t, rules)).join(", ")}`, url: `https://${domain}/#stack`, observedAt: now };
+}
+
+/** Two or more tools doing the same job (two CRMs, two email platforms): real sprawl, not just many tools. One event per account. */
+export function toolOverlap(domain: string, tools: string[], rules: ToolRules, now: Date): WatchEvent | null {
+  const by = new Map<string, string[]>();
+  for (const k of new Set(tools)) {
+    const c = rules.tools.find((t) => t.key === k)?.category;
+    if (c && (rules.overlap ?? []).includes(c)) by.set(c, [...(by.get(c) ?? []), k]);
+  }
+  const dup = [...by].filter(([, ks]) => ks.length >= 2);
+  if (!dup.length) return null;
+  const quote = dup.map(([c, ks]) => `${ks.length} ${c.replace(/_/g, " ")} tools: ${ks.map((k) => toolLabel(k, rules)).join(", ")}`).join("; ");
+  return { type: "tool_overlap", quote, url: `https://${domain}/#overlap`, observedAt: now };
 }
 
 /** Funding headlines need a round word or an amount; "raises the bar" doesn't count. */

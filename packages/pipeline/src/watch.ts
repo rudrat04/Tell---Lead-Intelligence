@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { fetchYcCompanyProfile, fetchHomepage, fetchTxtRecords, extractSiteFacts } from "@tell/watchers";
-import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, eventsFromYcProfile, type SiteState, type WatchEvent } from "@tell/intel";
+import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, eventsFromYcProfile, type SiteState, type WatchEvent } from "@tell/intel";
 import { getDb, accounts, jobBoards, snapshots, signals, and, eq, inArray, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
 import { saveYcFounders } from "./contacts.js";
@@ -60,7 +60,8 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
     for (const s of snaps.rows as { account_id: string; kind: string; extracted: unknown }[]) latest.set(`${s.account_id}:${s.kind}`, s.extracted);
   }
 
-  const emit = async (accountId: string, events: WatchEvent[]) => {
+  const emit = async (accountId: string, all: WatchEvent[]) => {
+    const events = all.filter((e) => specs[e.type]); // a type the pack doesn't define is not emitted
     if (!events.length) return;
     const inserted = await db.insert(signals).values(events.map((e) => ({
       accountId, class: specs[e.type]!.class, type: e.type, strength: specs[e.type]!.strength,
@@ -123,6 +124,8 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
 
         const sprawl = stackSprawl(a.domain, [...siteTools, ...dnsTools], rules, now);
         if (sprawl) events.push(sprawl);
+        const overlap = toolOverlap(a.domain, [...siteTools, ...dnsTools], rules, now);
+        if (overlap) events.push(overlap);
         await emit(a.id, events);
       }
     }));

@@ -223,3 +223,17 @@ describe("plays: min_count, qualifies, and fit influence", () => {
     expect(p("2-10")).toBe(p("51-150"));
   });
 });
+
+describe("known people as evidence", () => {
+  it("one ops person = has an owner; two = ops team (only when the pack defines the types)", () => {
+    const withTypes = { ...pack, signals: { ...pack.signals, signals: { ...pack.signals.signals,
+      ops_owner_known: { class: "negative" as const, lr: 0.5, half_life_days: 365, strength: 3, fast_lane: false },
+      ops_team_2plus: { class: "negative" as const, lr: 0.25, half_life_days: 365, strength: 3, fast_lane: false } } } };
+    const p = (role: string, id: string) => ({ id, role, url: "https://x.test/p", fetchedAt: now });
+    const types = (people: ReturnType<typeof p>[], pk: typeof pack = withTypes as typeof pack) => buildEvidence([], [], pk, roles, now, people).map((e) => e.type);
+    expect(types([p("Founder", "1")])).toEqual([]);
+    expect(types([p("Head of Revenue Operations", "1")])).toEqual(["ops_owner_known"]);
+    expect(types([p("RevOps Manager", "1"), p("Marketing Operations Lead", "2")])).toEqual(["ops_team_2plus"]);
+    expect(types([p("RevOps Manager", "1")], pack)).toEqual([]); // fixture pack doesn't define it: nothing emitted
+  });
+});

@@ -106,3 +106,14 @@ describe("ICP hard filters", () => {
     expect(sizeBand(120, icp)).toBe("51-150");
   });
 });
+
+describe("reposted roles", () => {
+  it("flags a core or founding role back on the board after closing, not a sales role or an old closure", async () => {
+    const { repostedRoles } = await import("./jobs.js");
+    const now = new Date("2026-11-14T00:00:00Z");
+    const f = (title: string, family: "core" | "adjacent", founding = false) => ({ externalId: title, title, url: `https://x.test/${title}`, cls: { family, contract: false, founding } });
+    const closed = [{ title: "Senior RevOps Manager", closedAt: new Date("2026-09-20T00:00:00Z") }, { title: "Account Executive", closedAt: new Date("2026-10-01T00:00:00Z") }, { title: "GTM Engineer", closedAt: new Date("2026-01-01T00:00:00Z") }];
+    const r = repostedRoles([f("RevOps Manager (Remote)", "core"), f("Account Executive", "adjacent"), f("GTM Engineer", "core")], closed, now);
+    expect(r.map((x) => x.quote)).toEqual(["RevOps Manager (Remote) (reposted; closed 55 days ago)"]);
+  });
+});

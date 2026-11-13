@@ -3,7 +3,7 @@ import {
   fetchYcCompanies, fetchYcJobs, fetchBoardPostings, findBoardLinks, robotsAllows,
   userAgent, type YcCompany, type JobPosting, type Ats,
 } from "@tell/watchers";
-import { classifyJob, compileRoles, diffBoard, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
+import { classifyJob, compileRoles, diffBoard, repostedRoles, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
 import { registrableDomain } from "@tell/people";
 import { applyPackIdentity } from "./scheduled.js";
 import { getDb, accounts, jobBoards, jobs, signals, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -173,6 +173,14 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
     openByBoard.set(r.boardId, list);
   }
 
+  // roles closed in the last 120 days, for "reposted" (the same role back again)
+  const closedRows = specs.role_reposted && boards.length
+    ? await db.select({ boardId: jobs.boardId, title: jobs.title, closedAt: jobs.closedAt }).from(jobs)
+      .where(and(inArray(jobs.boardId, boards.map((b) => b.id)), sql`${jobs.closedAt} > ${new Date(now.getTime() - 120 * 86_400_000)}`))
+    : [];
+  const closedByBoard = new Map<string, { title: string; closedAt: Date }[]>();
+  for (const r of closedRows) (closedByBoard.get(r.boardId) ?? closedByBoard.set(r.boardId, []).get(r.boardId)!).push({ title: r.title, closedAt: r.closedAt! });
+
   const res: BoardCheckResult = { boards: boards.length, checked: 0, failed: 0, suspect: 0, baselines: 0, newRoles: 0, closedRoles: 0, signals: {} };
 
   async function checkOne(b: BoardRow) {
@@ -190,6 +198,8 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
       return cls ? [{ externalId: p.externalId, title: p.title, url: p.url, employmentType: p.employmentType, postedAt: p.postedAt, cls }] : [];
     });
     const d = diffBoard(openByBoard.get(b.id) ?? [], fetched, now, b.baselineDone);
+    if (b.baselineDone && specs.role_reposted) d.signals.push(...(repostedRoles(d.insert, closedByBoard.get(b.id) ?? [], now) as unknown as typeof d.signals));
+    d.signals = d.signals.filter((s) => specs[s.type]);
 
     const stmts: unknown[] = [];
     if (d.insert.length) {

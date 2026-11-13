@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
 import {
   buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, type CriticVerdict, timing as timingScore,
-  type JobRow, type SignalRow, type AccountScore, type Ranking,
+  type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
-import { getDb, accounts, jobBoards, jobs, signals, snapshots, scores, playsMatched, deliveries, personLeads, eq, and, inArray, sql } from "@tell/db";
+import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, personLeads, eq, and, inArray, sql } from "@tell/db";
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const DAY = 86_400_000;
@@ -59,10 +59,13 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     observedAt: signals.observedAt, accountId: signals.accountId,
   }).from(signals).where(and(sql`${signals.accountId} is not null`, sql`${signals.observedAt} > ${new Date(now.getTime() - 180 * DAY)}`));
 
-  const byAccount = new Map<string, { jobs: JobRow[]; signals: SignalRow[] }>();
-  const slot = (id: string) => byAccount.get(id) ?? (byAccount.set(id, { jobs: [], signals: [] }), byAccount.get(id)!);
+  const byAccount = new Map<string, { jobs: JobRow[]; signals: SignalRow[]; people: PersonRow[] }>();
+  const slot = (id: string) => byAccount.get(id) ?? (byAccount.set(id, { jobs: [], signals: [], people: [] }), byAccount.get(id)!);
   for (const j of jobRows) slot(j.accountId).jobs.push(j);
   for (const s of sigRows) slot(s.accountId!).signals.push(s);
+  // known people (for "has an ops owner"): attached only to accounts that already have evidence
+  const known = await db.select({ id: peopleTable.id, a: peopleTable.accountId, role: peopleTable.role, url: peopleTable.sourceUrl, fetchedAt: peopleTable.fetchedAt }).from(peopleTable);
+  for (const p of known) byAccount.get(p.a)?.people.push({ id: p.id, role: p.role, url: p.url, fetchedAt: p.fetchedAt });
 
   const ids = [...byAccount.keys()];
   const accts = new Map<string, ScoredAccount>();
@@ -87,7 +90,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   for (const [id, data] of byAccount) {
     const account = accts.get(id);
     if (!account) continue;
-    const score = scoreAccount(buildEvidence(data.jobs, data.signals, pack, roles, now), account, pack);
+    const score = scoreAccount(buildEvidence(data.jobs, data.signals, pack, roles, now, data.people), account, pack);
     const delivered = lastDelivery.get(id);
     const newPlay = !!delivered && score.plays.some((p) => { const t = firstMatched.get(`${id}:${p.id}`); return !t || t > delivered; });
     results.push({ account, score, incomplete: failing.has(id), recentlyDelivered: !!delivered, newPlaySinceDelivery: newPlay });

@@ -115,3 +115,17 @@ export function diffBoard(open: OpenJobRow[], fetched: FetchedJob[], now: Date, 
 
   return { insert, touch, close: closing.map((o) => o.id), signals, suspect };
 }
+
+const normRole = (t: string) => t.toLowerCase().replace(/\(.*?\)|\[.*?\]/g, " ").replace(/[^a-z0-9]+/g, " ").replace(/\b(senior|sr|junior|jr|lead|i{1,3}|remote|hybrid|india|us|usa|uk|emea|apac)\b/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * A role that comes back after being closed (same title on the same board, closed within `windowDays`) means the
+ * first hire didn't happen or didn't stick: struggling to hire. Only roles new to the board today count.
+ */
+export function repostedRoles(inserted: FetchedJob[], recentlyClosed: { title: string; closedAt: Date }[], now: Date, windowDays = 120): { type: "role_reposted"; quote: string; url: string; observedAt: Date }[] {
+  const closed = recentlyClosed.filter((c) => now.getTime() - c.closedAt.getTime() <= windowDays * DAY);
+  return inserted.filter((f) => f.cls.family === "core" || f.cls.founding).flatMap((f) => {
+    const hit = closed.find((c) => normRole(c.title) === normRole(f.title));
+    return hit ? [{ type: "role_reposted" as const, quote: `${f.title} (reposted; closed ${Math.round((now.getTime() - hit.closedAt.getTime()) / DAY)} days ago)`, url: f.url, observedAt: now }] : [];
+  });
+}

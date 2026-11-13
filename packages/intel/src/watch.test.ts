@@ -67,3 +67,16 @@ describe("funding and launches from YC pages", () => {
     expect(ev.map((e) => [e.type, e.observedAt.toISOString().slice(0, 10)])).toEqual([["funding_raise", "2026-10-20"], ["product_launch", "2026-11-01"]]);
   });
 });
+
+describe("tool overlap and sprawl exclusions", () => {
+  it("two CRMs is overlap; ad pixels don't count toward sprawl", async () => {
+    const { toolOverlap, stackSprawl } = await import("./watch.js");
+    const now = new Date();
+    const rules = { sprawlMin: 4, sprawlExclude: ["ads"], overlap: ["crm"], tools: [
+      ["hubspot", "crm"], ["salesforce", "crm"], ["google_ads", "ads"], ["linkedin_ads", "ads"], ["intercom", "chat"],
+    ].map(([key, category]) => ({ key: key!, label: key!, category: category!, site: [], dns: [] })) };
+    expect(toolOverlap("acme.test", ["hubspot", "salesforce", "intercom"], rules, now)!.quote).toBe("2 crm tools: hubspot, salesforce");
+    expect(toolOverlap("acme.test", ["hubspot", "intercom"], rules, now)).toBeNull();
+    expect(stackSprawl("acme.test", ["hubspot", "google_ads", "linkedin_ads", "intercom"], rules, now)).toBeNull(); // 2 real tools, not 4
+  });
+});

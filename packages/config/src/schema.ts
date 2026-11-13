@@ -204,6 +204,10 @@ export const DomainsSchema = z.object({
 export const ToolsSchema = z.object({
   /** this many detected GTM tools = stack sprawl */
   sprawl_min: z.number().int().min(2).default(4),
+  /** tool categories that don't count toward sprawl (e.g. ads: nearly every site has ad pixels) */
+  sprawl_exclude_categories: z.array(z.string()).default([]),
+  /** two or more tools in one of these categories = tool_overlap (e.g. two CRMs), if the pack defines that signal */
+  overlap_categories: z.array(z.string()).default([]),
   tools: z.record(z.string().regex(/^[a-z0-9_]+$/), z.object({
     label: z.string(),
     category: z.string(),
@@ -281,7 +285,7 @@ export const PackSchema = z.object({
   sources: SourcesSchema,
   domains: DomainsSchema,
   delivery: DeliverySchema,
-  tools: ToolsSchema.default({ sprawl_min: 4, tools: {} }),
+  tools: ToolsSchema.default({ sprawl_min: 4, sprawl_exclude_categories: [], overlap_categories: [], tools: {} }),
   critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60 }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
 }).superRefine((p, ctx) => {

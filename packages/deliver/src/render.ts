@@ -49,6 +49,9 @@ export function describe(e: Evidence): string {
     case "pricing_page_added": return e.quote;
     case "gtm_tool_added": return e.quote;
     case "stack_sprawl": return `Tool sprawl: ${e.quote}`;
+    case "tool_overlap": return `Overlapping tools: ${e.quote}`;
+    case "role_reposted": return `Reposted: "${e.quote}"`;
+    case "ops_owner_known": case "ops_team_2plus": return e.quote;
     default: return `${e.type}: ${t}`;
   }
 }
@@ -299,6 +302,7 @@ const SIGNAL_LABEL: Record<string, string> = {
   contract_role: "Contract/fractional role", adjacent_role_open: "Sales/marketing hiring", core_role_filled: "Core role filled (against)",
   explicit_hire_request: "Asked for help", pain_post: "Pain in public", funding_raise: "Recently raised", product_launch: "Product launch",
   cta_sales_led: "Site went sales-led", pricing_page_added: "Pricing page added", gtm_tool_added: "New GTM tool", stack_sprawl: "Tool sprawl",
+  tool_overlap: "Overlapping tools", role_reposted: "Role reposted", ops_owner_known: "Has an ops owner (against)", ops_team_2plus: "Ops team of 2+ (against)",
 };
 
 /** "Core role open 45+ days, Founding GTM hire, Recently raised ×2": every signal type behind a lead, strongest kinds first. */

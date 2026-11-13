@@ -64,7 +64,14 @@ export const hasFreshNonHiring = (s: { drivers: Evidence[] }, freshDays: number)
 const normTitle = (t: string) => t.toLowerCase().replace(/\(.*?\)|\[.*?\]/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
 
 /** Turn an account's jobs + signals into deduplicated evidence (one per real-world role or post). */
-export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, roles: RoleRules, now: Date): Evidence[] {
+export interface PersonRow { id: string; role: string | null; url: string | null; fetchedAt: Date }
+
+/**
+ * Evidence: open/closed roles (state), stored signals, and known people. A known person in a core (ops) role means the
+ * system has an owner: `ops_owner_known`, and two or more `ops_team_2plus` (both only if the pack defines them).
+ * Coverage is partial (founders from YC, people search for the leads that go out), so absence proves nothing.
+ */
+export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, roles: RoleRules, now: Date, people: PersonRow[] = []): Evidence[] {
   const specs = pack.signals.signals;
   const out = new Map<string, Evidence>();
   const keep = (key: string, e: Evidence) => {
@@ -104,6 +111,13 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
       current: false, quote: s.evidenceQuote, url: s.evidenceUrl, ref: { kind: "signal", id: s.id },
     });
   }
+  const ops = people.filter((p) => p.role && roles.core.some((r) => r.test(p.role!)) && !roles.exclude.some((r) => r.test(p.role!)));
+  const add = (type: string, p: PersonRow, quote: string) => {
+    if (!specs[type]) return;
+    out.set(`person:${type}`, { type, class: specs[type]!.class, ageDays: Math.max(0, (now.getTime() - p.fetchedAt.getTime()) / DAY), current: true, quote, url: p.url ?? "#", ref: { kind: "signal", id: p.id } });
+  };
+  if (ops.length >= 2) add("ops_team_2plus", ops[0]!, `${ops.length} people in ops roles: ${ops.slice(0, 3).map((p) => p.role).join("; ")}`);
+  else if (ops.length === 1) add("ops_owner_known", ops[0]!, `Known ops owner: ${ops[0]!.role}`);
   return [...out.values()];
 }
 
