@@ -16,3 +16,5 @@ export * from "./india-ats.js";
 export * from "./mail.js";
 export * from "./workable.js";
 export * from "./portfolio.js";
+export * from "./infra.js";
+export * from "./formd.js";

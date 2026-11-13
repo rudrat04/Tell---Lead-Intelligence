@@ -51,7 +51,7 @@ export function describe(e: Evidence): string {
     case "stack_sprawl": return `Tool sprawl: ${e.quote}`;
     case "tool_overlap": return `Overlapping tools: ${e.quote}`;
     case "role_reposted": return `Reposted: "${e.quote}"`;
-    case "ops_owner_known": case "ops_team_2plus": case "leaky_capture": case "has_gtm_agency": case "new_gtm_leader": case "ops_person_left": return e.quote;
+    case "ops_owner_known": case "ops_team_2plus": case "leaky_capture": case "has_gtm_agency": case "new_gtm_leader": case "ops_person_left": case "marketing_subdomain": case "outbound_domain": return e.quote;
     case "jd_mentions": return `Job ad says: ${e.quote}`;
     default: return `${e.type}: ${t}`;
   }
@@ -305,7 +305,7 @@ const SIGNAL_LABEL: Record<string, string> = {
   cta_sales_led: "Site went sales-led", pricing_page_added: "Pricing page added", gtm_tool_added: "New GTM tool", stack_sprawl: "Tool sprawl",
   tool_overlap: "Overlapping tools", role_reposted: "Role reposted", ops_owner_known: "Has an ops owner (against)", ops_team_2plus: "Ops team of 2+ (against)",
   jd_mentions: "Job ad names the pain", leaky_capture: "Leaky lead capture", has_gtm_agency: "Credits a GTM agency (against)",
-  new_gtm_leader: "New GTM leader", ops_person_left: "Ops person left",
+  new_gtm_leader: "New GTM leader", ops_person_left: "Ops person left", marketing_subdomain: "New marketing subdomain", outbound_domain: "Cold-email domain set up",
 };
 
 /** "Core role open 45+ days, Founding GTM hire, Recently raised ×2": every signal type behind a lead, strongest kinds first. */

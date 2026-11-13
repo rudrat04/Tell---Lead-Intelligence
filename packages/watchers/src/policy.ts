@@ -37,6 +37,15 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   entrackr: { enabled: false, allowedMappings: [], note: "terms: no automated collection without written consent" },
   yourstory: { enabled: false, allowedMappings: [], note: "robots.txt blocks AI/RSS bots" },
   zohorecruit: { enabled: false, allowedMappings: [], note: "JS app; job data behind robots-disallowed paths" },
+  // Certificate Transparency: SSLMate Cert Spotter API (crt.sh is NOT used: its robots.txt disallows all bots).
+  certspotter: { enabled: true, allowedMappings: ["explicit"], note: "tracked accounts only; ~10 lookups/hour without a key" },
+  crtsh: { enabled: false, allowedMappings: [], note: "robots.txt: Disallow /" },
+  // SEC EDGAR: fair-access policy, contact email in User-Agent (SEC_USER_AGENT); exact unique name matches only.
+  sec_form_d: { enabled: true, allowedMappings: ["explicit"], note: "needs SEC_USER_AGENT with a contact email" },
+  // Tool forums checked Nov 2026 and NOT used: n8n and Make community terms forbid automated access and monitoring.
+  n8n_forum: { enabled: false, allowedMappings: [], note: "terms: no automated access or monitoring" },
+  make_forum: { enabled: false, allowedMappings: [], note: "terms: no automated access or monitoring" },
+  hubspot_community: { enabled: false, allowedMappings: [], note: "terms page needs JS; HubSpot site terms bar robots" },
 };
 
 export function isSourceEnabled(sourceId: string): boolean {

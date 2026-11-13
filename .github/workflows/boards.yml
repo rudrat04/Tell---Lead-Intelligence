@@ -57,6 +57,9 @@ jobs:
       - run: pnpm watch
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # SEC asks for a contact email in the User-Agent (Form D); unset = skipped. Cert Spotter key optional.
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          CERTSPOTTER_API_KEY: ${{ secrets.CERTSPOTTER_API_KEY }}
       # Weekly self-tuning proposals from your labels (never applied automatically; counts only in this log)
       - name: Tuning proposals
         if: always()
