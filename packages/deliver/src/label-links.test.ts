@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { signLabel, labelLinks } from "./label-links.js";
 // @ts-expect-error plain JS Worker module
-import { sign } from "../../../infra/scheduler/worker.js";
+import { sign } from "../../../infra/scheduler/sign.js";
 
 const D = "11111111-2222-4333-8444-555555555555";
 

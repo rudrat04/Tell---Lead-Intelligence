@@ -1,5 +1,7 @@
 # Likelihood ratios and half-lives are starting guesses; the weekly refit replaces them once labels exist.
 base_rate: 0.02
+# each further event of one type counts half the one before (a hiring spree is one story)
+repeat_dampening: 0.5
 min_post_strength: 3
 signals:
   # posts

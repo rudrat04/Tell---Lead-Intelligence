@@ -7,3 +7,9 @@ crons = ["*/30 * * * *", "0 2 * * *", "15 22 * * 6"]
 
 [vars]
 GH_REPO = "rudrat04/Tell---Lead-Intelligence"
+
+# One-tap labels: taps wait here until the daily sync collects them.
+# Create it once (npx wrangler kv namespace create LABELS) and paste the id it prints.
+[[kv_namespaces]]
+binding = "LABELS"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

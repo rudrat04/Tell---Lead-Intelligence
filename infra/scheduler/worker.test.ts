@@ -36,7 +36,7 @@ describe("one-tap labels", () => {
   const req = (path: string, init?: RequestInit) => new Request(`https://w.test${path}`, init);
   it("a GET only shows a confirm page; the POST stores the tap", async () => {
     const env = { LABEL_SECRET: "s3cret", LABELS: kv() };
-    const sig = await (await import("./worker.js")).sign("s3cret", D, "good");
+    const sig = await (await import("./sign.js")).sign("s3cret", D, "good");
     const get = await worker.fetch(req(`/l?d=${D}&v=good&s=${sig}`), env);
     expect(get.status).toBe(200);
     expect(await get.text()).toContain("method=\"post\"");
@@ -47,7 +47,7 @@ describe("one-tap labels", () => {
   });
   it("rejects a bad signature, a swapped label or a non-UUID id", async () => {
     const env = { LABEL_SECRET: "s3cret", LABELS: kv() };
-    const { sign } = await import("./worker.js");
+    const { sign } = await import("./sign.js");
     const good = await sign("s3cret", D, "good");
     for (const q of [`d=${D}&v=good&s=${"0".repeat(32)}`, `d=${D}&v=bad&s=${good}`, `d=x&v=good&s=${good}`]) {
       expect((await worker.fetch(req(`/l?${q}`), env)).status).toBe(400);

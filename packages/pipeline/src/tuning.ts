@@ -6,7 +6,7 @@ import { runScoring } from "./score.js";
 export interface TuningResult {
   labelled: number;
   proposals: LrProposal[];
-  /** offline check on the same labelled leads: how often good ranks above bad (0.5 = chance) */
+  /** offline check on the newest 30% of labels (held out from fitting): how often good ranks above bad (0.5 = chance) */
   champion: { agreement: number; pairs: number };
   challenger: { agreement: number; pairs: number };
   recorded: number;
@@ -48,9 +48,9 @@ export const MIN_LABELLED = 20;
 export async function runTuning(opts: { pack: Pack; write?: boolean }): Promise<TuningResult> {
   const { pack } = opts;
   const db = getDb();
-  const rows = (await db.select({ accountId: deliveries.accountId, label: labels.label, outcome: labels.outcome })
+  const rows = (await db.select({ accountId: deliveries.accountId, label: labels.label, outcome: labels.outcome, at: deliveries.deliveredAt })
     .from(labels).innerJoin(deliveries, eq(labels.deliveryId, deliveries.id))
-    .where(sql`${deliveries.accountId} is not null and (${labels.label} is not null or ${labels.outcome} is not null)`)) as { accountId: string; label: string | null; outcome: string | null }[];
+    .where(sql`${deliveries.accountId} is not null and (${labels.label} is not null or ${labels.outcome} is not null)`)) as { accountId: string; label: string | null; outcome: string | null; at: Date }[];
   const ex = opts.write !== false ? await refreshExemplars(pack).catch(() => undefined) : undefined;
   const empty = { agreement: 0.5, pairs: 0 };
   const base: TuningResult = { labelled: rows.length, proposals: [], champion: empty, challenger: empty, recorded: 0, exemplars: ex };
@@ -58,16 +58,19 @@ export async function runTuning(opts: { pack: Pack; write?: boolean }): Promise<
 
   const scored = await runScoring({ pack, write: false });
   const byId = new Map((scored.all ?? []).map((r) => [r.account.id, r]));
-  const leads: (LabelledLead & { accountId: string })[] = rows.flatMap((r) => {
+  const leads: (LabelledLead & { accountId: string })[] = [...rows].sort((a, b) => a.at.getTime() - b.at.getTime()).flatMap((r) => {
     const s = byId.get(r.accountId);
     return s ? [{ accountId: r.accountId, types: [...new Set(s.score.evidence.map((e) => e.type))], label: (r.label === "good" || r.label === "bad" ? r.label : null), outcome: r.outcome }] : [];
   });
-  const proposals = proposeLrs(pack.signals.signals, leads);
+  // time split: learn from the older 70% of labels, judge both configs on the newest 30% (never on what it learned from)
+  const cut = Math.floor(leads.length * 0.7);
+  const train = leads.slice(0, cut), test = leads.slice(cut);
+  const proposals = proposeLrs(pack.signals.signals, train);
 
   // challenger = the pack with the proposed LRs; both scored on the same evidence
   const challenger: Pack = { ...pack, signals: { ...pack.signals, signals: { ...pack.signals.signals } } };
   for (const p of proposals) challenger.signals.signals[p.type] = { ...challenger.signals.signals[p.type]!, lr: p.after };
-  const judged = leads.filter((l) => l.label);
+  const judged = test.filter((l) => l.label);
   const rank = (p: Pack) => pairwiseAgreement(judged.map((l) => {
     const s = byId.get(l.accountId)!;
     return { good: l.label === "good", priority: scoreAccount(s.score.evidence, s.account, p).priority };

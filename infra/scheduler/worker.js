@@ -18,6 +18,8 @@
  */
 
 // cron expression (UTC) -> workflow file to dispatch
+import { sign } from "./sign.js";
+
 const SCHEDULE = {
   "*/30 * * * *": "tick.yml",    // every 30 minutes
   "0 2 * * *": "daily.yml",      // 07:30 IST: boards, gigs, scoring, digest
@@ -43,12 +45,6 @@ const LABELS = new Set(["good", "bad"]);
 const page = (title, body, status = 200) => new Response(`<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:420px;margin:48px auto;padding:0 16px;color:#111827">${body}</body>`,
   { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-robots-tag": "noindex", "referrer-policy": "no-referrer" } });
 
-/** hex HMAC-SHA256 of "<delivery id>|<label>", first 32 chars (same as the digest's signer) */
-export async function sign(secret, d, v) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${d}|${v}`)));
-  return [...mac].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
-}
 function sameText(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
   let x = 0;

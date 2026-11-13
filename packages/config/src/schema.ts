@@ -77,7 +77,7 @@ export const SignalsSchema = z.object({
   /** at most this many events of one type count toward intent (a hiring spree is one story) */
   max_events_per_type: z.number().int().min(1).default(3),
   /** each further event of the same type counts this much of the one before (a hiring spree is one story, not five) */
-  repeat_dampening: z.number().gt(0).max(1).default(0.5),
+  repeat_dampening: z.number().gt(0).max(1).default(1),
   signals: z.record(z.string(), z.object({
     class: z.enum(["explicit", "implicit", "trigger", "pain", "negative"]),
     lr: z.number().gt(0),
