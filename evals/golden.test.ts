@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
-import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic } from "@tell/intel";
+import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic, buildEvidence, scoreAccount, type JobRow, type SignalRow } from "@tell/intel";
 
 const load = <T>(f: string): T[] =>
   readFileSync(fileURLToPath(new URL(`./golden/${f}`, import.meta.url)), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as T);
@@ -20,6 +20,28 @@ function report(name: string, results: { ok: boolean; label: string }[]) {
 }
 
 describe("golden sets", () => {
+  it("ranking archetypes: who should come first (needs over volume, states over old news)", () => {
+    type Ev = { job?: string; signal?: string; days: number; closed?: number; seen?: number };
+    type Side = { size?: string; ev: Ev[] };
+    const now = new Date(Date.UTC(2026, 10, 12));
+    const ago = (d: number) => new Date(now.getTime() - d * 86_400_000);
+    const roles = compileRoles(pack.roles);
+    let n = 0;
+    const priority = (side: Side) => {
+      const jobs: JobRow[] = side.ev.filter((e) => e.job).map((e) => ({ id: `j${++n}`, title: e.job!, url: `https://jobs.example/${n}`, employmentType: null, family: "x",
+        postedAt: ago(e.days), firstSeenAt: ago(e.days), closedAt: e.closed == null ? null : ago(e.closed) }));
+      const sigs: SignalRow[] = side.ev.filter((e) => e.signal).map((e) => ({ id: `s${++n}`, type: e.signal!, evidenceQuote: "q", evidenceUrl: `https://ev.example/${n}`,
+        observedAt: ago(e.days), lastSeenAt: e.seen == null ? null : ago(e.seen) }));
+      return scoreAccount(buildEvidence(jobs, sigs, pack, roles, now), { sizeBand: side.size ?? "11-50", region: "India", segment: "b2b" }, pack).priority;
+    };
+    const rows = load<{ higher: Side; lower: Side; note: string }>("ranking.jsonl");
+    const failures = report("ranking", rows.map((r) => {
+      const [h, l] = [priority(r.higher), priority(r.lower)];
+      return { ok: h > l, label: `${r.note}: ${h.toFixed(4)} vs ${l.toFixed(4)}` };
+    }));
+    expect(failures).toEqual([]);
+  });
+
   it("code critic: vendors and already-solved accounts are dropped", () => {
     type Row = { name: string; domain: string; title: string; tools: string[]; evidence: { type: string; class: string; ageDays: number; current: boolean }[]; expect: boolean; note?: string };
     const rows = load<Row>("critic.jsonl");
@@ -60,8 +82,8 @@ describe("golden sets", () => {
   });
 
   it("staffing agencies (their boards list clients' roles, not their own)", () => {
-    const rows = load<{ name: string; texts: string[]; expect: boolean; note?: string }>("staffing.jsonl");
-    const failures = report("staffing", rows.map((r) => ({ ok: looksLikeStaffing(r.name, r.texts) === r.expect, label: `${r.name} -> expected ${r.expect}${r.note ? ` (${r.note})` : ""}` })));
+    const rows = load<{ name: string; texts: string[]; titles?: string[]; expect: boolean; note?: string }>("staffing.jsonl");
+    const failures = report("staffing", rows.map((r) => ({ ok: looksLikeStaffing(r.name, r.texts, r.titles ?? []) === r.expect, label: `${r.name} -> expected ${r.expect}${r.note ? ` (${r.note})` : ""}` })));
     expect(failures).toEqual([]);
   });
 });

@@ -17,7 +17,7 @@ export async function backfillContacts(opts: { pack: Pack; maxAccounts?: number;
   const ids = rows.map((r) => r.account.id);
   const searched = !!process.env.EXA_API_KEY;
   const contacts = await contactsFor(ids, pack, {
-    write: true, searchFor: ids, maxSearches: opts.maxSearches ?? 80, preferred: preferredPersonas(rows.map((r) => ({ ...r, incomplete: false, recentlyDelivered: false, newPlaySinceDelivery: false }))),
+    write: true, searchFor: ids, maxSearches: opts.maxSearches ?? 80, preferred: preferredPersonas(rows.map((r) => ({ ...r, incomplete: false, recentlyDelivered: false, newSinceDelivery: false }))),
   });
   return { candidates: ids.length, withContact: ids.filter((id) => contacts.get(id)).length, searched };
 }

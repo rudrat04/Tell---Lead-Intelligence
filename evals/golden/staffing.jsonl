@@ -3,3 +3,7 @@
 {"name":"Acme Pay","texts":["We are hiring for our client, a leading NBFC in Mumbai","On behalf of our client we seek a sales head","Our client is a Series B fintech"],"expect":true,"note":"agency by role texts"}
 {"name":"Acme Pay","texts":["Own the CRM and reporting for our sales team","Build outbound for our customers across India"],"expect":false,"note":"'our customers' is a normal company, not an agency"}
 {"name":"Zeta Commerce","texts":["Work with clients to onboard them onto our platform","Account manager for our enterprise clients"],"expect":false,"note":"customer-facing roles mention clients without hiring for them"}
+{"name":"Brightpath Advisory","texts":[],"titles":["Business Development Manager - Hiring for Northwind Hospital (Mumbai)","Sales Manager","Area Sales Lead"],"expect":true,"note":"recruiter: a title names the client it hires for"}
+{"name":"Brightpath Advisory","texts":[],"titles":["Regional Sales Head (Hiring for a leading NBFC)"],"expect":true,"note":"recruiter: 'hiring for a leading ...' in the title"}
+{"name":"Acme Pay","texts":[],"titles":["Inside Sales Executive - Hiring for Mumbai","SDR | Hiring for Sales Team","Account Executive - Hiring for multiple roles"],"expect":false,"note":"'hiring for' a city, team or 'multiple roles' is a normal company"}
+{"name":"Acme Pay","texts":[],"titles":["RevOps Manager","Head of Growth"],"expect":false,"note":"plain titles"}

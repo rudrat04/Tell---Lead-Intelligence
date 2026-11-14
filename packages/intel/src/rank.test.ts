@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import { compileRoles } from "./jobs.js";
-import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, type JobRow, type SignalRow, type AccountFacts } from "./rank.js";
+import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, displayScore, redelivery, STATE_MAX_AGE_DAYS, type JobRow, type SignalRow, type AccountFacts, type DeliveryHistory } from "./rank.js";
 
 const pack = await loadFixturePack();
 const roles = compileRoles(pack.roles);
@@ -38,6 +38,36 @@ describe("job roles are state, not events", () => {
   it("a closed role ages from when it closed", () => {
     const e = buildEvidence([job("RevOps Lead", 100, { closedAt: ago(10) })], [], pack, roles, now)[0]!;
     expect(e).toMatchObject({ current: false, ageDays: 10 });
+  });
+});
+
+describe("watch findings are states (signals.last_seen_at)", () => {
+  it("still seen by the watch: current, age capped", () => {
+    const e = buildEvidence([], [sig("stack_sprawl", 90, { lastSeenAt: ago(4) })], pack, roles, now)[0]!;
+    expect(e).toMatchObject({ current: true, ageDays: STATE_MAX_AGE_DAYS });
+  });
+  it("no longer seen: ages from the last time it was", () => {
+    const e = buildEvidence([], [sig("stack_sprawl", 90, { lastSeenAt: ago(40) })], pack, roles, now)[0]!;
+    expect(e).toMatchObject({ current: false, ageDays: 40 });
+  });
+  it("one-off news is not a state: a funding headline ages from its date", () => {
+    const e = buildEvidence([], [sig("funding_raise", 50, { lastSeenAt: ago(1) })], pack, roles, now)[0]!;
+    expect(e).toMatchObject({ current: false, ageDays: 50 });
+  });
+});
+
+describe("priority decays once", () => {
+  it("an old signal is decayed by its own half-life only, not again by timing", () => {
+    const s = score([], [sig("stack_sprawl", 60, { lastSeenAt: ago(60) })]);
+    expect(s.timing).toBeLessThan(0.1); // still reported as freshness
+    const intentOnly = s.intent * (1 - (pack.icp.soft_fit.influence ?? 1) + (pack.icp.soft_fit.influence ?? 1) * s.fit);
+    expect(s.priority).toBeCloseTo(intentOnly, 10);
+  });
+  it("displayScore: 0 at the base rate, 50 at twice it, same order as priority", () => {
+    expect(displayScore({ priority: 0.02, baseRate: 0.02 })).toBe(0);
+    expect(displayScore({ priority: 0.04, baseRate: 0.02 })).toBe(50);
+    expect(displayScore({ priority: 0.01, baseRate: 0.02 })).toBe(0);
+    expect(displayScore({ priority: 0.2, baseRate: 0.02 })).toBeGreaterThan(displayScore({ priority: 0.1, baseRate: 0.02 }));
   });
 });
 
@@ -87,15 +117,15 @@ describe("fit, plays, ranking", () => {
     expect(matchPlays(ev, pack.plays.plays).map((p) => p.id)).toEqual(["first_gtm_hire"]);
   });
   it("orders by priority, guarantees fast-lane slots, never pads, holds back incomplete and recently delivered", () => {
-    const mk = (name: string, sc: ReturnType<typeof score>, o: Partial<{ incomplete: boolean; recentlyDelivered: boolean; newPlaySinceDelivery: boolean }> = {}) =>
-      ({ account: name, score: sc, incomplete: false, recentlyDelivered: false, newPlaySinceDelivery: false, ...o });
+    const mk = (name: string, sc: ReturnType<typeof score>, o: Partial<{ incomplete: boolean; recentlyDelivered: boolean; newSinceDelivery: boolean }> = {}) =>
+      ({ account: name, score: sc, incomplete: false, recentlyDelivered: false, newSinceDelivery: false, ...o });
     const rows = [
       mk("combined-high", score([job("RevOps Manager", 90)])),
       mk("fast", score([], [sig("explicit_hire_request", 1)])),
       mk("not-eligible", score([], [sig("pain_post", 1)])),
       mk("outage", score([job("RevOps Lead", 90)]), { incomplete: true }),
       mk("sent-last-week", score([job("GTM Engineer", 90)]), { recentlyDelivered: true }),
-      mk("sent-but-new-play", score([job("Sales Ops Manager", 90)]), { recentlyDelivered: true, newPlaySinceDelivery: true }),
+      mk("sent-but-new-play", score([job("Sales Ops Manager", 90)]), { recentlyDelivered: true, newSinceDelivery: true }),
     ];
     const r = rankAccounts(rows, 10);
     expect(r.leads.map((l) => l.account).sort()).toEqual(["combined-high", "fast", "sent-but-new-play"]);
@@ -150,7 +180,7 @@ describe("non-hiring signals: eligibility and absent conditions", () => {
 });
 
 describe("reserved slots for non-hiring leads", () => {
-  const mk = (name: string, sc: ReturnType<typeof score>) => ({ account: name, score: sc, incomplete: false, recentlyDelivered: false, newPlaySinceDelivery: false });
+  const mk = (name: string, sc: ReturnType<typeof score>) => ({ account: name, score: sc, incomplete: false, recentlyDelivered: false, newSinceDelivery: false });
   const rows = () => [
     mk("hiring-1", score([job("RevOps Manager", 90)])),
     mk("hiring-2", score([job("GTM Engineer", 90)])),
@@ -235,5 +265,60 @@ describe("known people as evidence", () => {
     expect(types([p("Head of Revenue Operations", "1")])).toEqual(["ops_owner_known"]);
     expect(types([p("RevOps Manager", "1"), p("Marketing Operations Lead", "2")])).toEqual(["ops_team_2plus"]);
     expect(types([p("RevOps Manager", "1")], pack)).toEqual([]); // fixture pack doesn't define it: nothing emitted
+  });
+});
+
+describe("re-delivery: leads you've seen come back only with something new", () => {
+  const sentAt = ago(20);
+  const hist = (o: Partial<DeliveryHistory> = {}): DeliveryHistory => ({ at: sentAt, label: null, outcome: null, ...o });
+  const seenBefore = () => sentAt; // every play first matched at delivery time
+  const firstSeen = (jobs: JobRow[], sigs: SignalRow[] = []) =>
+    new Map<string, Date>([...jobs.map((j) => [j.id, j.postedAt ?? j.firstSeenAt] as const), ...sigs.map((x) => [x.id, x.observedAt] as const)]);
+  const run = (jobs: JobRow[], sigs: SignalRow[], h?: DeliveryHistory, plays: (id: string) => Date | undefined = seenBefore) =>
+    redelivery(score(jobs, sigs), h, firstSeen(jobs, sigs), plays, now, 90, pack);
+
+  it("never delivered: nothing held", () => {
+    expect(run([job("RevOps Manager", 100)], [])).toEqual({ recentlyDelivered: false, newSinceDelivery: false });
+  });
+  it("same evidence inside the window: held", () => {
+    expect(run([job("RevOps Manager", 100)], [], hist())).toMatchObject({ recentlyDelivered: true, newSinceDelivery: false });
+  });
+  it("a new strong role since the delivery brings it back, with the reason", () => {
+    const r = run([job("RevOps Manager", 100), job("Sales Operations Manager", 5)], [], hist());
+    expect(r).toMatchObject({ recentlyDelivered: true, newSinceDelivery: true });
+    expect(r.backReason).toContain("Sales Operations Manager");
+  });
+  // weak = below eligibility.alone_min_strength (the fixture's is 1, so every signal stands alone there)
+  const strict = { ...pack, signals: { ...pack.signals, eligibility: { ...pack.signals.eligibility, alone_min_strength: 4 } } };
+  const runStrict = (jobs: JobRow[], sigs: SignalRow[]) => redelivery(score(jobs, sigs), hist(), firstSeen(jobs, sigs), seenBefore, now, 90, strict);
+  it("one more weak role of a type it already had is not news", () => {
+    expect(runStrict([job("Account Executive", 40), job("Account Executive, Mid-Market", 5)], [])).toMatchObject({ newSinceDelivery: false });
+  });
+  it("a weak signal of a new type is news", () => {
+    expect(runStrict([job("RevOps Manager", 100)], [sig("stack_sprawl", 3, { lastSeenAt: ago(3) })])).toMatchObject({ newSinceDelivery: true });
+  });
+  it("a role posted before the delivery but found later is not new", () => {
+    const j = job("Sales Operations Manager", 60, { firstSeenAt: ago(2) });
+    expect(redelivery(score([job("RevOps Manager", 100), j]), hist(), new Map([[j.id, ago(60)]]), seenBefore, now, 90, pack)).toMatchObject({ newSinceDelivery: false });
+  });
+  it("a new play brings it back", () => {
+    const r = run([job("RevOps Manager", 100)], [], hist(), () => undefined);
+    expect(r).toMatchObject({ newSinceDelivery: true });
+    expect(r.backReason).toMatch(/New play/);
+  });
+  it("past the window: free to be delivered again", () => {
+    expect(run([job("RevOps Manager", 100)], [], hist({ at: ago(120) }))).toEqual({ recentlyDelivered: false, newSinceDelivery: false });
+  });
+  it("👎: held past the window, and new evidence alone doesn't bring it back; a new play does", () => {
+    const bad = hist({ at: ago(120), label: "bad" });
+    const sameAsThen = () => bad.at;
+    expect(run([job("RevOps Manager", 200)], [], bad, sameAsThen)).toMatchObject({ recentlyDelivered: true, newSinceDelivery: false });
+    expect(run([job("RevOps Manager", 200), job("Sales Operations Manager", 5)], [], bad, sameAsThen)).toMatchObject({ newSinceDelivery: false });
+    expect(run([job("RevOps Manager", 200)], [], bad, () => undefined)).toMatchObject({ newSinceDelivery: true });
+  });
+  it("in a meeting or won: never brought back", () => {
+    for (const outcome of ["meeting", "won"]) {
+      expect(run([job("RevOps Manager", 100)], [], hist({ outcome }), () => undefined)).toEqual({ recentlyDelivered: true, newSinceDelivery: false });
+    }
   });
 });

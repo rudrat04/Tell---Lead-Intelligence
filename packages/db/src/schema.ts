@@ -96,6 +96,8 @@ export const signals = pgTable("signals", {
   evidenceQuote: text("evidence_quote").notNull(),
   evidenceUrl: text("evidence_url").notNull(),
   observedAt: ts("observed_at").notNull(),
+  /** states the weekly watch re-checks (tool overlap, stack sprawl, leaky capture, agency credit): last time still seen */
+  lastSeenAt: ts("last_seen_at"),
   halfLifeDays: real("half_life_days").notNull(),
   eventClusterId: uuid("event_cluster_id").references(() => eventClusters.id),
 }, (t) => [
@@ -312,7 +314,7 @@ export const jobBoards = pgTable("job_boards", {
   slug: text("slug").notNull(),
   /** where ownership was proven: the company's own page that links the board, or the YC directory */
   proofUrl: text("proof_url").notNull(),
-  status: text("status").notNull().default("active"), // active | dead
+  status: text("status").notNull().default("active"), // active | dead | staffing (a recruiter's board)
   baselineDone: boolean("baseline_done").notNull().default(false),
   failCount: integer("fail_count").notNull().default(0),
   lastCheckedAt: ts("last_checked_at"),

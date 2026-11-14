@@ -17,6 +17,14 @@ import { classifyJob, type RoleRules } from "./jobs.js";
 const DAY = 86_400_000;
 export const OPEN_ROLE_MAX_AGE_DAYS = 45;
 export const FAST_LANE_MAX_AGE_DAYS = 14;
+/**
+ * Website/DNS findings the weekly watch re-checks are states, like open roles: "two CRMs" is still true while the watch
+ * keeps seeing it (signals.last_seen_at). Seen within STATE_SEEN_DAYS (a weekly watch plus one missed run) = current, and
+ * its age stops at STATE_MAX_AGE_DAYS. Once it stops being seen it ages from the last time it was.
+ */
+export const STATE_SIGNAL_TYPES = new Set(["tool_overlap", "stack_sprawl", "leaky_capture", "has_gtm_agency"]);
+export const STATE_SEEN_DAYS = 15;
+export const STATE_MAX_AGE_DAYS = 30;
 
 export interface JobRow {
   id: string;
@@ -35,6 +43,8 @@ export interface SignalRow {
   evidenceQuote: string;
   evidenceUrl: string;
   observedAt: Date;
+  /** states (STATE_SIGNAL_TYPES): the last watch that still saw it */
+  lastSeenAt?: Date | null;
 }
 
 export interface Evidence {
@@ -94,10 +104,14 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
     else type = "adjacent_role_open";
     if (!specs[type]) continue;
 
+    // age while open: an unmet core need is current (0); other roles age from posting, never past the cap.
+    // A closed role keeps that age and adds the days since it closed: closing never makes a role look fresher.
+    const openAge = (days: number) => (cls.family === "core" && type !== "contract_role" && type !== "first_role" ? 0 : Math.min(days, OPEN_ROLE_MAX_AGE_DAYS));
     let ageDays: number;
-    if (!open) ageDays = (now.getTime() - j.closedAt!.getTime()) / DAY;
-    else if (cls.family === "core" && type !== "contract_role" && type !== "first_role") ageDays = 0; // unmet core need: current
-    else ageDays = Math.min(daysOpen, OPEN_ROLE_MAX_AGE_DAYS);
+    if (!open) {
+      const sinceClosed = Math.max(0, (now.getTime() - j.closedAt!.getTime()) / DAY);
+      ageDays = openAge(Math.max(0, daysOpen - sinceClosed)) + sinceClosed;
+    } else ageDays = openAge(daysOpen);
 
     keep(`role:${cls.family}:${normTitle(j.title)}`, {
       type, class: specs[type]!.class, ageDays, current: open, openDays: Math.round(daysOpen), quote: j.title.replace(/\s+/g, " ").trim(), url: j.url, ref: { kind: "job", id: j.id },
@@ -106,9 +120,16 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
 
   for (const s of signals) {
     if (JOB_STATE_TYPES.has(s.type) || !specs[s.type]) continue;
+    const since = (d: Date) => Math.max(0, (now.getTime() - d.getTime()) / DAY);
+    let ageDays = since(s.observedAt);
+    let current = false;
+    if (STATE_SIGNAL_TYPES.has(s.type)) {
+      const seen = since(s.lastSeenAt ?? s.observedAt);
+      if (seen <= STATE_SEEN_DAYS) { current = true; ageDays = Math.min(ageDays, STATE_MAX_AGE_DAYS); }
+      else ageDays = seen; // no longer seen: it was last true then
+    }
     keep(`signal:${s.type}:${s.evidenceUrl}`, {
-      type: s.type, class: specs[s.type]!.class, ageDays: Math.max(0, (now.getTime() - s.observedAt.getTime()) / DAY),
-      current: false, quote: s.evidenceQuote, url: s.evidenceUrl, ref: { kind: "signal", id: s.id },
+      type: s.type, class: specs[s.type]!.class, ageDays, current, quote: s.evidenceQuote, url: s.evidenceUrl, ref: { kind: "signal", id: s.id },
     });
   }
   const ops = people.filter((p) => p.role && roles.core.some((r) => r.test(p.role!)) && !roles.exclude.some((r) => r.test(p.role!)));
@@ -160,8 +181,12 @@ export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayM
 export interface AccountScore {
   intent: number;
   fit: number;
+  /** freshness of the newest positive signal (0.5^(days/14)): for display and the fast lane, not multiplied into priority */
   timing: number;
+  /** ranking value: intent (each signal already decayed by its own half-life) x fit; reach may scale it later */
   priority: number;
+  /** the pack's base rate, to show priority as a 0-100 score (displayScore) */
+  baseRate: number;
   lane: "fast" | "combined";
   /** has at least one current (or recent) explicit/implicit signal: required to be delivered in month one */
   eligible: boolean;
@@ -178,7 +203,8 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
 
   // Gate 5: classes listed in eligibility.corroborate need another signal behind them
   const asConfirmed = (e: Evidence, i: number): ConfirmedSignal => ({
-    class: e.class as ConfirmedSignal["class"], type: e.type, observedAt: new Date(Date.now() - e.ageDays * DAY), fastLane: specs[e.type]?.fast_lane, clusterId: `${i}`,
+    // Gate 5 only compares signals' dates with each other: a fixed origin keeps this pure (no clock)
+    class: e.class as ConfirmedSignal["class"], type: e.type, observedAt: new Date(-e.ageDays * DAY), fastLane: specs[e.type]?.fast_lane, clusterId: `${i}`,
   });
   const confirmed = ev.map(asConfirmed);
   const elig = pack.signals.eligibility;
@@ -218,12 +244,74 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const eligible = fresh.some(strong) || weakTypes.size >= elig.triggers_needed || plays.some((p) => p.qualifies && p.evidence.some((e) => e.current || e.ageDays <= elig.fresh_days));
   const drivers = [...positives].sort((a, b) => Math.log(specs[b.type]!.lr) * 0.5 ** (b.ageDays / specs[b.type]!.half_life_days) - Math.log(specs[a.type]!.lr) * 0.5 ** (a.ageDays / specs[a.type]!.half_life_days));
 
-  // fit's weight on priority is the pack's call: 1 = multiplies (default), 0.3 = tie-break, 0 = ignored
+  // fit's weight on priority is the pack's call: 1 = multiplies (default), 0.3 = tie-break, 0 = ignored.
+  // No separate timing factor: each signal already decays by its own half_life_days inside intent, and a second flat
+  // 14-day decay crushed slow states (a still-true tool overlap) and open roles to ~0.
   const influence = pack.icp.soft_fit.influence ?? 1;
-  return { intent, fit, timing, priority: intent * timing * (1 - influence + influence * fit), lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers };
+  return {
+    intent, fit, timing, priority: intent * (1 - influence + influence * fit), baseRate: pack.signals.base_rate,
+    lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers,
+  };
 }
 
-export interface RankInput<A> { account: A; score: AccountScore; incomplete: boolean; recentlyDelivered: boolean; newPlaySinceDelivery: boolean }
+/**
+ * Priority as 0-100 for people: how far above the base rate this lead is (0 = no better than a random account,
+ * 50 = twice the base rate, 80 = five times, 90 = ten times). Same order as priority; probabilities are uncalibrated.
+ */
+export function displayScore(s: { priority: number; baseRate: number }): number {
+  return s.priority > 0 ? Math.round(100 * Math.max(0, 1 - s.baseRate / s.priority)) : 0;
+}
+
+export interface RankInput<A> {
+  account: A; score: AccountScore; incomplete: boolean;
+  /** held by a past delivery: inside the re-delivery window, or labelled 👎, or in a meeting / won (redelivery()) */
+  recentlyDelivered: boolean;
+  /** something worth a second look since that delivery (a new play, or new strong evidence): delivered again */
+  newSinceDelivery: boolean;
+  /** shown on a lead that is back: why */
+  backReason?: string;
+}
+
+/** The account's last delivery and what you said about it in the Sheet. */
+export interface DeliveryHistory { at: Date; label: string | null; outcome: string | null }
+
+/** outcomes that mean you're already talking to them: the digest never brings them back */
+export const ENGAGED_OUTCOMES = new Set(["meeting", "won"]);
+
+/**
+ * Should a lead you've seen before come back? Rules:
+ *  - never delivered: nothing held;
+ *  - in a meeting / won: held for good (you don't need the digest for them);
+ *  - 👎 (label "bad"): held past the re-delivery window too; only a play that wasn't there before brings it back
+ *    (more of what you already turned down isn't news);
+ *  - otherwise held for `windowDays`, and back early when a new play fires or new strong evidence appears: positive,
+ *    first seen after the delivery, and either strong enough to stand alone or of a type the account didn't have.
+ * `firstSeen` maps evidence ref ids to when that evidence first existed (job posted / first seen, signal observed).
+ */
+export function redelivery(
+  s: AccountScore, h: DeliveryHistory | undefined, firstSeen: Map<string, Date>, playFirstMatched: (playId: string) => Date | undefined,
+  now: Date, windowDays: number, pack: Pack,
+): { recentlyDelivered: boolean; newSinceDelivery: boolean; backReason?: string } {
+  if (!h) return { recentlyDelivered: false, newSinceDelivery: false };
+  if (h.outcome && ENGAGED_OUTCOMES.has(h.outcome)) return { recentlyDelivered: true, newSinceDelivery: false };
+  const bad = h.label === "bad";
+  const inWindow = now.getTime() - h.at.getTime() < windowDays * DAY;
+  if (!inWindow && !bad) return { recentlyDelivered: false, newSinceDelivery: false };
+
+  const play = s.plays.find((p) => { const t = playFirstMatched(p.id); return !t || t > h.at; });
+  if (play) return { recentlyDelivered: true, newSinceDelivery: true, backReason: `New play since you saw it: ${play.title}` };
+  if (bad) return { recentlyDelivered: true, newSinceDelivery: false };
+
+  const specs = pack.signals.signals;
+  const minStrength = pack.signals.eligibility.alone_min_strength ?? 4;
+  const isNew = (e: Evidence) => { const t = firstSeen.get(e.ref.id); return !!t && t > h.at; };
+  const positives = s.evidence.filter((e) => e.class !== "negative");
+  const oldTypes = new Set(positives.filter((e) => !isNew(e)).map((e) => e.type));
+  const fresh = positives.filter(isNew).find((e) => (specs[e.type]?.strength ?? 3) >= minStrength || !oldTypes.has(e.type));
+  return fresh
+    ? { recentlyDelivered: true, newSinceDelivery: true, backReason: `New since you saw it: ${fresh.quote}` }
+    : { recentlyDelivered: true, newSinceDelivery: false };
+}
 
 export interface Ranking<A> { leads: RankInput<A>[]; watchlist: RankInput<A>[]; held: { incomplete: number; recentlyDelivered: number } }
 
@@ -238,7 +326,7 @@ export function rankAccounts<A>(rows: RankInput<A>[], max: number, watchlistSize
   const pool = rows.filter((r) => {
     if (!r.score.eligible) return false;
     if (r.incomplete) { held.incomplete++; return false; }
-    if (r.recentlyDelivered && !r.newPlaySinceDelivery) { held.recentlyDelivered++; return false; }
+    if (r.recentlyDelivered && !r.newSinceDelivery) { held.recentlyDelivered++; return false; }
     return true;
   });
   const byPriority = (a: RankInput<A>, b: RankInput<A>) => b.score.priority - a.score.priority;

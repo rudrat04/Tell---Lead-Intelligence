@@ -7,6 +7,7 @@
 import "dotenv/config";
 import { loadPack } from "@tell/config";
 import { runScoring } from "@tell/pipeline";
+import { displayScore } from "@tell/intel";
 
 const dry = process.argv.includes("--dry");
 const show = process.argv.includes("--show");
@@ -25,7 +26,7 @@ if (show) {
     const plays = s.plays.map((p) => p.title).join(", ") || "-";
     const why = s.drivers.slice(0, 3).map((e) => `${e.type}: "${e.quote}"${e.current ? "" : ` (${Math.round(e.ageDays)}d)`}`).join(" | ");
     return `${String(i + 1).padStart(2)}. ${l.account.name ?? l.account.domain} (${l.account.domain}) [${l.account.sizeBand ?? "?"}, ${l.account.segment ?? "?"}, ${l.account.region ?? "?"}]\n` +
-      `    priority=${s.priority.toFixed(3)} intent=${s.intent.toFixed(2)} fit=${s.fit.toFixed(2)} timing=${s.timing.toFixed(2)} lane=${s.lane}\n    plays: ${plays}\n    why: ${why}`;
+      `    score=${displayScore(s)}/100 (${(s.priority / (1 - s.priority) / (s.baseRate / (1 - s.baseRate))).toFixed(1)}x base) intent=${s.intent.toFixed(3)} fit=${s.fit.toFixed(2)} fresh=${s.timing.toFixed(2)} lane=${s.lane}\n    plays: ${plays}\n    why: ${why}`;
   };
   console.log("\nTOP LEADS"); r.ranking.leads.forEach((l, i) => console.log(line(l, i)));
   console.log("\nWATCHLIST"); r.ranking.watchlist.forEach((l, i) => console.log(line(l, i)));

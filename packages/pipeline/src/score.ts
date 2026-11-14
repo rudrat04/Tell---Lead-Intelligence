@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
 import {
-  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, type CriticVerdict, timing as timingScore,
+  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, type CriticVerdict, type DeliveryHistory, timing as timingScore,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
-import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, personLeads, eq, and, inArray, sql } from "@tell/db";
+import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, eq, and, inArray, sql } from "@tell/db";
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const DAY = 86_400_000;
@@ -56,8 +56,10 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   const sigRows = await db.select({
     id: signals.id, type: signals.type, evidenceQuote: signals.evidenceQuote, evidenceUrl: signals.evidenceUrl,
-    observedAt: signals.observedAt, accountId: signals.accountId,
-  }).from(signals).where(and(sql`${signals.accountId} is not null`, sql`${signals.observedAt} > ${new Date(now.getTime() - 180 * DAY)}`));
+    observedAt: signals.observedAt, lastSeenAt: signals.lastSeenAt, accountId: signals.accountId,
+  }).from(signals).where(and(sql`${signals.accountId} is not null`,
+    // a state first seen long ago but still seen by the watch stays in
+    sql`coalesce(${signals.lastSeenAt}, ${signals.observedAt}) > ${new Date(now.getTime() - 180 * DAY)}`));
 
   const byAccount = new Map<string, { jobs: JobRow[]; signals: SignalRow[]; people: PersonRow[] }>();
   const slot = (id: string) => byAccount.get(id) ?? (byAccount.set(id, { jobs: [], signals: [], people: [] }), byAccount.get(id)!);
@@ -80,21 +82,30 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   const failing = new Set((await db.select({ a: jobBoards.accountId }).from(jobBoards)
     .where(and(eq(jobBoards.status, "active"), sql`${jobBoards.failCount} > 0`))).map((r) => r.a));
 
-  const since = new Date(now.getTime() - pack.delivery.redeliver_after_days * DAY);
-  const lastDelivery = new Map((await db.select({ a: deliveries.accountId, at: sql<Date>`max(${deliveries.deliveredAt})` }).from(deliveries)
-    .where(and(sql`${deliveries.accountId} is not null`, sql`${deliveries.deliveredAt} > ${since}`)).groupBy(deliveries.accountId))
-    .map((r) => [r.a!, new Date(r.at)]));
+  // every account delivered before, with the latest label and outcome you gave it in the Sheet (any delivery):
+  // a 👎 or a meeting holds it beyond the re-delivery window (redelivery())
+  const history = new Map((await db.execute(sql`
+    select d.account_id, max(d.delivered_at) as at,
+      (array_agg(l.label order by d.delivered_at desc) filter (where l.label is not null))[1] as label,
+      (array_agg(l.outcome order by d.delivered_at desc) filter (where l.outcome is not null))[1] as outcome
+    from ${deliveries} d left join ${labels} l on l.delivery_id = d.id
+    where d.account_id is not null group by d.account_id`)).rows
+    .map((r) => { const x = r as { account_id: string; at: string; label: string | null; outcome: string | null }; return [x.account_id, { at: new Date(x.at), label: x.label, outcome: x.outcome } as DeliveryHistory] as const; }));
   const firstMatched = new Map((await db.select({ a: playsMatched.accountId, p: playsMatched.playId, at: playsMatched.matchedAt }).from(playsMatched))
     .map((r) => [`${r.a}:${r.p}`, r.at]));
 
-  const results: { account: ScoredAccount; score: AccountScore; incomplete: boolean; recentlyDelivered: boolean; newPlaySinceDelivery: boolean }[] = [];
+  const results: { account: ScoredAccount; score: AccountScore; incomplete: boolean; recentlyDelivered: boolean; newSinceDelivery: boolean; backReason?: string }[] = [];
   for (const [id, data] of byAccount) {
     const account = accts.get(id);
     if (!account) continue;
     const score = scoreAccount(buildEvidence(data.jobs, data.signals, pack, roles, now, data.people), account, pack);
-    const delivered = lastDelivery.get(id);
-    const newPlay = !!delivered && score.plays.some((p) => { const t = firstMatched.get(`${id}:${p.id}`); return !t || t > delivered; });
-    results.push({ account, score, incomplete: failing.has(id), recentlyDelivered: !!delivered, newPlaySinceDelivery: newPlay });
+    // when each piece of evidence first existed: a role posted before the delivery but found later isn't new
+    const firstSeen = new Map<string, Date>([
+      ...data.jobs.map((j) => [j.id, j.postedAt && j.postedAt < j.firstSeenAt ? j.postedAt : j.firstSeenAt] as const),
+      ...data.signals.map((x) => [x.id, x.observedAt] as const),
+    ]);
+    const r = redelivery(score, history.get(id), firstSeen, (p) => firstMatched.get(`${id}:${p}`), now, pack.delivery.redeliver_after_days, pack);
+    results.push({ account, score, incomplete: failing.has(id), ...r });
   }
 
   // Code critic (plan 8f) before the cut, so a dropped account frees its slot for the next one

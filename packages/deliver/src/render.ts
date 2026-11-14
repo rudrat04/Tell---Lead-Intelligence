@@ -2,7 +2,7 @@ import type { Pack } from "@tell/config";
 import type { Evidence } from "@tell/intel";
 import type { ScoreRunResult, DigestGig } from "@tell/pipeline";
 import { firstName, personaSearchLinks, type Contact } from "@tell/people";
-import { hasHiring } from "@tell/intel";
+import { hasHiring, displayScore } from "@tell/intel";
 
 /** Daily digest (plan section 10). "Why now" is written by code from cited evidence: free and deterministic. */
 
@@ -151,6 +151,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
        <div style="font-size:12px;margin-top:4px;color:${C.muted}">Sources: ${ev.map((e, k) => A(e.url, `${k + 1}. ${esc(describe(e).slice(0, 60))}${describe(e).length > 60 ? "…" : ""}`)).join(" &nbsp; ")}</div>`
     : `<div style="font-size:14px;line-height:1.6;margin-top:12px">${ev.map((e) => `<div>• ${A(e.url, esc(describe(e)), `color:${C.ink}`)}</div>`).join("")}</div>`;
 
+  const back = l.backReason ? `<div style="font-size:13px;margin-top:10px;color:${C.accent}"><b>Back on your list.</b> ${esc(l.backReason)}</div>` : "";
   const opener = open ? `<div style="margin-top:12px;padding:10px 12px;background:${C.quote};border-left:3px solid ${C.accent};border-radius:4px;font-size:14px;line-height:1.5;color:${C.ink}">${esc(open)}</div>` : "";
   const angle = n?.angle ?? s.plays[0]?.angle;
   const pitch = angle ? `<div style="font-size:13px;margin-top:8px;color:${C.muted}"><b style="color:${C.ink}">Pitch:</b> ${esc(angle)}</div>` : "";
@@ -164,7 +165,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
     <td width="28" valign="top" style="font-size:13px;font-weight:700;color:${C.faint};padding-top:3px">${i + 1}</td>
     <td valign="top">
-      ${head}${why}${opener}${pitch}${warn}
+      ${head}${back}${why}${opener}${pitch}${warn}
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px"><tr>
         <td valign="middle">${tags}</td>
         ${tap ? `<td valign="middle" align="right" style="white-space:nowrap">${btn(tap.good, "👍&nbsp; Good", "#047857")}${btn(tap.bad, "👎&nbsp; Bad", "#b91c1c")}</td>` : ""}
@@ -187,6 +188,7 @@ function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
     c ? `   ${[emailText(c.person) ?? (c.generic ? `${c.generic} (shared inbox)` : "No email found"), c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}` : "",
     ...(c?.others ?? []).map((o) => `   Also: ${o.person.name}, ${o.person.role ?? o.persona}${o.person.linkedin ? ` ${o.person.linkedin}` : ""}`),
     ...(c ? [] : personaSearchLinks(personas, a.sizeBand, company, null).slice(0, 2).map((x) => `   Search ${x.persona}: ${x.url}`)),
+    l.backReason ? `   Back on your list. ${l.backReason}` : "",
     n ? `   Why now: ${n.hypothesis}` : "",
     ...s.drivers.slice(0, 3).map((e) => `   - ${describe(e)}  ${e.url}`),
     open ? `   Opener: ${open}` : "",
@@ -289,10 +291,10 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     a.segment ?? "",
     a.region ?? "",
     s.plays.map((p) => p.title).join(" + "),
-    s.drivers.slice(0, 3).map((e) => `${describe(e)} (${e.url})`).join("\n"),
+    [l.backReason ? `Back: ${l.backReason}` : "", ...s.drivers.slice(0, 3).map((e) => `${describe(e)} (${e.url})`)].filter(Boolean).join("\n"),
     leadOpener(contact, company, s.drivers[0], note) ?? "",
     note?.angle ?? s.plays[0]?.angle ?? "",
-    s.priority.toFixed(3),
+    String(displayScore(s)), // 0-100: how far above the base rate
     "", "", "", "", // Label, Reason, Outcome, Notes: yours
     // (the hidden ID column is inserted here when the row is appended)
     emailDraft(contact, note, signature),

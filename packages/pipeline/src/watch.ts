@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { fetchYcCompanyProfile, fetchHomepage, fetchTxtRecords, extractSiteFacts } from "@tell/watchers";
-import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, leakyCapture, agencyCredited, eventsFromYcProfile, type SiteState, type WatchEvent } from "@tell/intel";
+import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, leakyCapture, agencyCredited, eventsFromYcProfile, STATE_SIGNAL_TYPES, type SiteState, type WatchEvent } from "@tell/intel";
 import { getDb, accounts, jobBoards, snapshots, signals, and, eq, inArray, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
 import { saveYcFounders } from "./contacts.js";
@@ -63,11 +63,24 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
   const emit = async (accountId: string, all: WatchEvent[]) => {
     const events = all.filter((e) => specs[e.type]); // a type the pack doesn't define is not emitted
     if (!events.length) return;
-    const inserted = await db.insert(signals).values(events.map((e) => ({
+    const row = (e: WatchEvent) => ({
       accountId, class: specs[e.type]!.class, type: e.type, strength: specs[e.type]!.strength,
       evidenceQuote: e.quote.slice(0, 500), evidenceUrl: e.url, observedAt: e.observedAt, halfLifeDays: specs[e.type]!.half_life_days,
-    }))).onConflictDoNothing({ target: [signals.evidenceUrl, signals.type] }).returning({ type: signals.type });
+    });
+    const changes = events.filter((e) => !STATE_SIGNAL_TYPES.has(e.type));
+    const states = events.filter((e) => STATE_SIGNAL_TYPES.has(e.type));
+    const inserted = changes.length
+      ? await db.insert(signals).values(changes.map(row)).onConflictDoNothing({ target: [signals.evidenceUrl, signals.type] }).returning({ type: signals.type })
+      : [];
     for (const s of inserted) res.signals[s.type] = (res.signals[s.type] ?? 0) + 1;
+    // states (still two CRMs this week): first detection keeps observed_at, every detection moves last_seen_at;
+    // the current wording replaces the old ("3 GTM tools" -> "4 GTM tools")
+    for (const e of states) {
+      const [r] = await db.insert(signals).values({ ...row(e), lastSeenAt: now })
+        .onConflictDoUpdate({ target: [signals.evidenceUrl, signals.type], set: { lastSeenAt: now, evidenceQuote: e.quote.slice(0, 500) } })
+        .returning({ isNew: sql<boolean>`(xmax = 0)` });
+      if (r?.isNew) res.signals[e.type] = (res.signals[e.type] ?? 0) + 1;
+    }
   };
   // compare the fields that matter (Postgres jsonb reorders keys, so whole-object text comparison always differs)
   const sameSite = (a: SiteState, b: SiteState) =>

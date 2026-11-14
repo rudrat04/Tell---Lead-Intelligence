@@ -9,14 +9,14 @@ import { buildMime } from "./gmail.js";
 const pack = await loadFixturePack();
 const ev = (o: Partial<Evidence>): Evidence => ({ type: "core_role_open_45d", class: "implicit", ageDays: 0, current: true, openDays: 120, quote: "GTM Engineer", url: "https://jobs.example/1", ref: { kind: "job", id: "j1" }, ...o });
 const score = (o: Partial<AccountScore> = {}): AccountScore => ({
-  intent: 0.5, fit: 0.9, timing: 1, priority: 0.45, lane: "combined", eligible: true,
+  intent: 0.5, fit: 0.9, timing: 1, priority: 0.45, baseRate: 0.02, lane: "combined", eligible: true,
   evidence: [ev({})], drivers: [ev({}), ev({ type: "first_role", quote: "Founding <AE>", openDays: 5 })],
   plays: [{ id: "struggling_to_hire", title: "Struggling to hire ops", angle: "Bridge while they hire.", evidence: [ev({})] }], ...o,
 });
 const result = (leads: number): ScoreRunResult => ({
   configVersion: "example-gtm@abc", scored: 10, eligible: 9, playsMatched: 3, criticDropped: {}, personLeads: [],
   ranking: {
-    leads: Array.from({ length: leads }, (_, i) => ({ account: { id: `a${i}`, domain: `acme${i}.com`, name: `Acme ${i}`, sizeBand: "2-10", region: "India", segment: "b2b" }, score: score(), incomplete: false, recentlyDelivered: false, newPlaySinceDelivery: false })),
+    leads: Array.from({ length: leads }, (_, i) => ({ account: { id: `a${i}`, domain: `acme${i}.com`, name: `Acme ${i}`, sizeBand: "2-10", region: "India", segment: "b2b" }, score: score(), incomplete: false, recentlyDelivered: false, newSinceDelivery: false })),
     watchlist: [], held: { incomplete: 0, recentlyDelivered: 0 },
   },
 });
