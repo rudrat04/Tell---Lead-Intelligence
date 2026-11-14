@@ -9,9 +9,18 @@ export async function politeGet(url: string, minGapMs = 1000): Promise<string> {
   const wait = (lastHit.get(host) ?? 0) + minGapMs - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastHit.set(host, Date.now());
-  const res = await fetch(url, { headers: { "user-agent": userAgent(), accept: "*/*" }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
-  return res.text();
+  // 429/503 are the host asking us to slow down: honour Retry-After (capped) and try again, twice
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, { headers: { "user-agent": userAgent(), accept: "*/*" }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
+    if (res.ok) return res.text();
+    if ((res.status === 429 || res.status === 503) && attempt < 2) {
+      const ra = Number(res.headers.get("retry-after"));
+      await new Promise((r) => setTimeout(r, Math.min(Number.isFinite(ra) && ra > 0 ? ra * 1000 : 5_000 * 2 ** attempt, 60_000)));
+      lastHit.set(host, Date.now());
+      continue;
+    }
+    throw new Error(`GET ${url} -> ${res.status}`);
+  }
 }
 
 export async function getJson<T = unknown>(url: string, minGapMs?: number): Promise<T> {

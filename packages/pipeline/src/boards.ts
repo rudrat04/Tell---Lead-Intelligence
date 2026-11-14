@@ -137,6 +137,8 @@ export interface BoardCheckResult {
   boards: number;
   checked: number;
   failed: number;
+  /** boards not checked because their host kept failing (blocked or down): not counted as failures */
+  hostDown: number;
   suspect: number;
   baselines: number;
   newRoles: number;
@@ -182,17 +184,21 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
   const closedByBoard = new Map<string, { title: string; closedAt: Date }[]>();
   for (const r of closedRows) (closedByBoard.get(r.boardId) ?? closedByBoard.set(r.boardId, []).get(r.boardId)!).push({ title: r.title, closedAt: r.closedAt! });
 
-  const res: BoardCheckResult = { boards: boards.length, checked: 0, failed: 0, suspect: 0, baselines: 0, newRoles: 0, closedRoles: 0, signals: {} };
+  const res: BoardCheckResult = { boards: boards.length, checked: 0, failed: 0, hostDown: 0, suspect: 0, baselines: 0, newRoles: 0, closedRoles: 0, signals: {} };
 
-  async function checkOne(b: BoardRow) {
+  async function recordFailure(b: BoardRow) {
+    res.failed++;
+    const failCount = b.failCount + 1;
+    await db.update(jobBoards).set({ failCount, lastCheckedAt: now, status: failCount >= 7 ? "dead" : "active" }).where(eq(jobBoards.id, b.id));
+  }
+
+  /** returns the board when its fetch failed, nothing otherwise */
+  async function checkOne(b: BoardRow): Promise<BoardRow | void> {
     let postings: JobPosting[];
     try {
       postings = await fetchPostings(b);
     } catch {
-      res.failed++;
-      const failCount = b.failCount + 1;
-      await db.update(jobBoards).set({ failCount, lastCheckedAt: now, status: failCount >= 7 ? "dead" : "active" }).where(eq(jobBoards.id, b.id));
-      return;
+      return b; // the caller decides whether this counts against the board (one bad board) or not (the host is down)
     }
     const fetched: FetchedJob[] = postings.flatMap((p) => {
       const cls = classifyJob(p.title, p.employmentType, roles);
@@ -233,6 +239,18 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
 
   // YC pages share one host: one at a time (politeGet spaces them). ATS APIs are other hosts: separate lane.
   const lanes = [boards.filter((b) => b.source === "yc"), boards.filter((b) => b.source !== "yc")];
-  await Promise.all(lanes.map(async (lane) => { for (const b of lane) await checkOne(b); }));
+  // A run of consecutive failures means the host is blocking or down, not that those boards died: stop the lane and
+  // leave them unpenalised (they stay first in line next run, oldest check first) instead of counting 700 failures.
+  const HOST_DOWN_STREAK = 5;
+  await Promise.all(lanes.map(async (lane) => {
+    let pending: BoardRow[] = [];
+    for (const b of lane) {
+      const failed = await checkOne(b);
+      if (!failed) { for (const f of pending) await recordFailure(f); pending = []; continue; }
+      pending.push(failed);
+      if (pending.length >= HOST_DOWN_STREAK) { res.hostDown += lane.length - lane.indexOf(b) - 1 + pending.length; return; }
+    }
+    for (const f of pending) await recordFailure(f);
+  }));
   return res;
 }
