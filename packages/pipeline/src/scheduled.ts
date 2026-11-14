@@ -1,12 +1,12 @@
 import type { Pack } from "@tell/config";
-import { makeHn, makeReddit, makeForhire, isSourceEnabled, setBotIdentity, type Watcher, type RawItem } from "@tell/watchers";
+import { makeHn, makeReddit, makeForhire, makeWebSearch, isSourceEnabled, setBotIdentity, type Watcher, type RawItem } from "@tell/watchers";
 import { HaikuClient, type PostExtraction } from "@tell/extract";
 import { gate2Decide, featurize, type Exemplar } from "@tell/intel";
 import { getDb, exemplars } from "@tell/db";
 import { gate1, gate1Rules } from "@tell/intel";
 import {
   resolveItem, recordConfirmed, domainLists, neonLeadStore,
-  checkHomepage, expandShortUrl, fetchHnAbout, type ResolverNet, type Resolution, type LeadStore,
+  checkHomepage, expandShortUrl, fetchHnAbout, authorPlatform, type ResolverNet, type Resolution, type LeadStore,
 } from "@tell/people";
 import { runTick, type Store, type TickSummary } from "./ingest.js";
 import { neonStore } from "./neon-store.js";
@@ -17,12 +17,20 @@ export function applyPackIdentity(pack: Pack): void {
   setBotIdentity(pack.meta.operator.bot_name, pack.meta.operator.contact_url);
 }
 
-/** Watchers for the 30-minute tick: enabled in the pack AND allowed by source policy (terms of use). */
-export function tickWatchers(pack: Pack): Watcher[] {
+/** Watchers for the 30-minute tick: enabled in the pack AND allowed by source policy (terms of use).
+ *  Web search also needs SERPER_API_KEY and a usage store (its daily search budget); without either it is left out. */
+export function tickWatchers(pack: Pack, usage?: UsageStore, env: NodeJS.ProcessEnv = process.env): Watcher[] {
   const s = pack.sources;
   const all: Watcher[] = [];
   if (s.reddit.enabled) all.push(makeReddit(s.reddit.subs), makeForhire(s.reddit.hiring_subs));
   if (s.hn.enabled) all.push(makeHn(s.hn.queries));
+  const ws = s.web_search;
+  if (ws.enabled && ws.queries.length && usage && env.SERPER_API_KEY) {
+    all.push(makeWebSearch({
+      queries: ws.queries, perDay: ws.per_day, perTick: ws.per_tick, timeRange: ws.time_range, country: ws.country, maxAgeDays: ws.max_age_days,
+      budget: { used: () => usage.spentToday("serper"), add: (n) => usage.addSpend("serper", n, ws.per_day) },
+    }));
+  }
   return all.filter((w) => isSourceEnabled(w.id));
 }
 
@@ -49,7 +57,7 @@ export function makeOnConfirmed(pack: Pack, leads: LeadStore, net: ResolverNet) 
     try {
       res = await resolveItem(item, x, lists, net);
     } catch {
-      const platform = item.sourceId.startsWith("hn") ? "hn" : "reddit";
+      const platform = authorPlatform(item) ?? item.sourceId;
       res = item.author ? { kind: "person", platform, handle: item.author, reason: "resolution failed" } : { kind: "unresolved", reason: "resolution failed" };
     }
     return recordConfirmed(item, x, res, specs, leads);
@@ -92,7 +100,7 @@ export async function runScheduledTick(opts: {
         llm, gate1: (t) => gate1(t, rules.never, rules.required), extractor: pack.extractor, minStrength: pack.signals.min_post_strength,
         gate2: async (t) => gate2Decide(t, bank, g2),
       },
-      watchers: opts.watchers ?? tickWatchers(pack),
+      watchers: opts.watchers ?? tickWatchers(pack, usage),
       maxPerSource: opts.maxPerSource ?? 50,
       onConfirmed: makeOnConfirmed(pack, opts.leads ?? neonLeadStore(), opts.net ?? liveNet),
     });

@@ -13,7 +13,7 @@ const [cmd, a, b] = process.argv.slice(2);
 function summary(p: Pack) {
   const s = Object.keys(p.signals.signals).length, plays = Object.keys(p.plays.plays).length;
   return `pack "${p.meta.name}" is valid: ${s} signal types, ${plays} plays, ${p.roles.core.length} core role patterns, ` +
-    `sources: ${[p.sources.hn.enabled && "hn", p.sources.reddit.enabled && "reddit", p.sources.yc.enabled && "yc"].filter(Boolean).join(", ")}` +
+    `sources: ${[p.sources.hn.enabled && "hn", p.sources.reddit.enabled && "reddit", p.sources.yc.enabled && "yc", p.sources.web_search.enabled && `web_search (${p.sources.web_search.queries.length} queries, ${p.sources.web_search.per_day}/day)`].filter(Boolean).join(", ")}` +
     `${p.delivery.digest.to ? "" : " (warning: delivery.digest.to not set)"}`;
 }
 

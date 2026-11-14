@@ -45,6 +45,9 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   // Tool forums checked Nov 2026 and NOT used: n8n and Make community terms forbid automated access and monitoring.
   n8n_forum: { enabled: false, allowedMappings: [], note: "terms: no automated access or monitoring" },
   make_forum: { enabled: false, allowedMappings: [], note: "terms: no automated access or monitoring" },
+  // Web search (Serper API, Google results): only the result's title + snippet is read; LinkedIn / X pages are never
+  // fetched (terms + robots). Authors map from the post text only, never via their profiles.
+  web_search: { enabled: true, allowedMappings: ["explicit"], note: "search API snippets only; result pages never fetched" },
   hubspot_community: { enabled: false, allowedMappings: [], note: "terms page needs JS; HubSpot site terms bar robots" },
 };
 

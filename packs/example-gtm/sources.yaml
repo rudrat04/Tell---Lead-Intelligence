@@ -14,3 +14,18 @@ workable:
   location: India
   queries: ["sales", "business development", "marketing", "revenue operations", "account executive", "growth", "customer success"]
   day_range: 30
+# Web search (Serper, needs SERPER_API_KEY): public posts asking for help. Only titles + snippets are read; LinkedIn
+# and X pages are never fetched. per_day searches max (Serper's free 2,500 last ~10 months at 8/day).
+web_search:
+  enabled: true
+  per_day: 8
+  per_tick: 1
+  time_range: w
+  country: in
+  queries:
+    - 'site:linkedin.com/posts "looking for" (freelancer OR consultant) (hubspot OR salesforce OR crm)'
+    - 'site:linkedin.com/posts "need help" (outbound OR "lead generation") (SaaS OR startup)'
+    - 'site:linkedin.com/posts "recommend" ("revops" OR "gtm engineer" OR "clay expert")'
+    - 'site:linkedin.com/posts "looking for" ("n8n" OR "zapier" OR "make.com") (expert OR freelancer)'
+    - 'site:x.com "looking for" ("hubspot" OR "revops") (freelancer OR consultant)'
+    - 'site:linkedin.com/posts "anyone know" ("crm setup" OR "sales automation")'

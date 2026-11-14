@@ -21,6 +21,11 @@ export type Resolution =
 /** Map item source -> author platform for person leads and author mappings. */
 const PLATFORM: Record<string, string> = { hn: "hn", reddit: "reddit", "forhire-subs": "reddit" };
 
+/** The author's platform: the source's own, or (web search) the one the post URL is on. */
+export function authorPlatform(item: Pick<RawItem, "sourceId" | "meta">): string | undefined {
+  return PLATFORM[item.sourceId] ?? (typeof item.meta.platform === "string" ? item.meta.platform : undefined);
+}
+
 async function expand(shortened: Candidate[], net: ResolverNet): Promise<Candidate[]> {
   const out: Candidate[] = [];
   for (const s of shortened.slice(0, 3)) {
@@ -31,9 +36,9 @@ async function expand(shortened: Candidate[], net: ResolverNet): Promise<Candida
   return out;
 }
 
-async function domainFromText(text: string, companyName: string | null, lists: DomainLists, net: ResolverNet) {
+async function domainFromText(text: string, companyName: string | null, lists: DomainLists, net: ResolverNet, expandShort = true) {
   const { company, shortened } = filterCandidates(rawCandidates(text), lists);
-  const all = shortened.length ? filterCandidates([...company, ...(await expand(shortened, net))], lists).company : company;
+  const all = expandShort && shortened.length ? filterCandidates([...company, ...(await expand(shortened, net))], lists).company : company;
   return chooseDomain(all, companyName);
 }
 
@@ -48,14 +53,15 @@ export async function resolveItem(item: RawItem, x: PostExtraction, lists: Domai
 
   // 1. The post itself: a linked site, an email address, or a bare domain
   if (isMappingAllowed(item.sourceId, "explicit")) {
-    const pick = await domainFromText(`${item.title ?? ""}\n${item.text}`, x.company_name, lists, net);
+    // web search results are LinkedIn/X snippets: their short links (lnkd.in, t.co) lead back to those sites, never fetched
+    const pick = await domainFromText(`${item.title ?? ""}\n${item.text}`, x.company_name, lists, net, item.sourceId !== "web_search");
     if (pick) {
       const home = await net.checkHomepage(pick.domain);
       if (home.ok) return { kind: "account", domain: home.finalDomain ?? pick.domain, confidence: "explicit", method: `post:${pick.via}`, evidenceUrl: item.url };
     }
   }
 
-  const platform = PLATFORM[item.sourceId];
+  const platform = authorPlatform(item);
   if (!item.author || !platform) return { kind: "unresolved", reason: "no confident domain in post and no author" };
 
   // 2. The author's own profile (HN "about"). Gated per source: Reddit authors are never followed off the post.

@@ -177,6 +177,19 @@ export const SourcesSchema = z.object({
     hiring_subs: z.array(z.string()).default([]),
   }).default({ enabled: false, subs: [], hiring_subs: [] }),
   yc: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+  /** Web search (Serper, SERPER_API_KEY) for public posts asking for help, e.g. `site:linkedin.com/posts "looking for" hubspot`.
+   *  Runs in the tick; `per_day` searches max (persisted), `per_tick` per tick; queries rotate across days. */
+  web_search: z.object({
+    enabled: z.boolean().default(false),
+    queries: z.array(z.string()).default([]),
+    per_day: z.number().int().min(1).max(100).default(8),
+    per_tick: z.number().int().min(1).max(10).default(1),
+    time_range: z.enum(["d", "w", "m"]).default("w"),
+    /** Google country code for results */
+    country: z.string().default("in"),
+    /** results older than this (when the search shows a date) are dropped */
+    max_age_days: z.number().int().min(1).default(14),
+  }).default({ enabled: false, queries: [], per_day: 8, per_tick: 1, time_range: "w", country: "in", max_age_days: 14 }),
   /** Workable job search (weekly discovery): companies hiring these roles in `location` become accounts + boards */
   workable: z.object({
     enabled: z.boolean().default(false),

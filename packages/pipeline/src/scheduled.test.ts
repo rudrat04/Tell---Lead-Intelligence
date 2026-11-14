@@ -20,6 +20,14 @@ describe("runScheduledTick", () => {
     const redditOn = { ...pack, sources: { ...pack.sources, reddit: { ...pack.sources.reddit, enabled: true } } };
     expect(tickWatchers(redditOn).map((w) => w.id)).toEqual(["hn"]);
   });
+  it("web search runs only when enabled, with queries, a budget store and SERPER_API_KEY", () => {
+    const usage: UsageStore = { spentToday: async () => 0, addSpend: async () => {} };
+    const on = { ...pack, sources: { ...pack.sources, web_search: { ...pack.sources.web_search, enabled: true, queries: ["q"] } } };
+    expect(tickWatchers(pack, usage, { SERPER_API_KEY: "k" }).map((w) => w.id)).toEqual(["hn"]);
+    expect(tickWatchers(on, usage, {}).map((w) => w.id)).toEqual(["hn"]);
+    expect(tickWatchers(on, undefined, { SERPER_API_KEY: "k" }).map((w) => w.id)).toEqual(["hn"]);
+    expect(tickWatchers(on, usage, { SERPER_API_KEY: "k" }).map((w) => w.id)).toEqual(["hn", "web_search"]);
+  });
 });
 
 describe("cost + day helpers", () => {

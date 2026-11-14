@@ -2,7 +2,7 @@ import type { Pack } from "@tell/config";
 import type { RawItem } from "@tell/watchers";
 import type { PostExtraction } from "@tell/extract";
 import { getDb, accounts, signals, authorMappings, personLeads, and, eq, sql } from "@tell/db";
-import { signalTypeFor, type Resolution } from "./resolve.js";
+import { signalTypeFor, authorPlatform, type Resolution } from "./resolve.js";
 
 export type SignalSpec = Pack["signals"]["signals"][string];
 
@@ -37,7 +37,7 @@ export async function recordConfirmed(item: RawItem, x: PostExtraction, res: Res
 
   if (res.kind === "account") {
     if (item.author && res.method !== "source") {
-      const platform = item.sourceId.startsWith("hn") ? "hn" : item.sourceId.includes("reddit") || item.sourceId === "forhire-subs" ? "reddit" : item.sourceId;
+      const platform = authorPlatform(item) ?? item.sourceId;
       await store.addAuthorMapping({ platform, handle: item.author, accountId: accountId!, confidence: res.confidence, evidenceUrl: res.evidenceUrl });
     }
     return "account";
