@@ -34,13 +34,15 @@ export class HaikuClient implements LlmClient {
 
   get spent() { return this.spentUsd; }
 
-  async complete({ system, user }: { system: string; user: string }): Promise<string> {
+  async complete({ system, user, think = false }: { system: string; user: string; think?: boolean }): Promise<string> {
     if (this.spentUsd >= this.opts.capUsd) throw new Error("Haiku spend cap reached");
     const res = await this.client.messages.create({
       model: HAIKU_MODEL,
-      max_tokens: 1024,
-      // Short structured classification: thinking adds cost and can eat the max_tokens budget.
-      thinking: { type: "disabled" },
+      // Classification: no thinking (disabled is accepted at effort high or below; Haiku 5.5's default is medium).
+      // Writing (the opening email): adaptive thinking at medium effort, with room so thinking can't eat the answer.
+      ...(think
+        ? { max_tokens: 8000, thinking: { type: "adaptive" as const }, output_config: { effort: "medium" as const } }
+        : { max_tokens: 1024, thinking: { type: "disabled" as const } }),
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: user }],
     });

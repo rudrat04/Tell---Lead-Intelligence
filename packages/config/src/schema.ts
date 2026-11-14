@@ -310,6 +310,29 @@ export const CriticSchema = z.object({
   solved_max_age_days: z.number().int().min(1).default(60),
 });
 
+/**
+ * How the opening email is written (copy.yaml, optional): the copywriter brief the analyst follows, checked in code
+ * where it can be (never_say, no durations). The plays' `angle` says what the need is; this says how to talk about it.
+ */
+export const CopySchema = z.object({
+  /** voice and tone: who's writing, to whom, what good sounds like */
+  voice: z.string().default(""),
+  /** how to bring up what you noticed (e.g. lightly, as context, never as surveillance) */
+  mention: z.string().default(""),
+  /** offer framings to choose from and adapt; `plays` limits one to leads with those plays (empty = any lead) */
+  offers: z.array(z.object({ plays: z.array(z.string()).default([]), idea: z.string().min(5) })).default([]),
+  /** closing-question styles to vary between (the model writes its own in this spirit); empty = delivery.email.next_step */
+  ctas: z.array(z.string().min(5)).default([]),
+  /** phrases the email must never contain (case-insensitive); a draft that uses one is rewritten or dropped */
+  never_say: z.array(z.string().min(2)).default([]),
+  /** false: no "open 121 days" / "for months" in the email (default) */
+  allow_durations: z.boolean().default(false),
+  /** a few emails in the voice you want: patterns to learn from, never to copy */
+  examples: z.array(z.object({ situation: z.string(), subject: z.string(), body: z.string() })).default([]),
+});
+export type Copy = z.infer<typeof CopySchema>;
+const COPY_DEFAULT: Copy = { voice: "", mention: "", offers: [], ctas: [], never_say: [], allow_durations: false, examples: [] };
+
 export const PackSchema = z.object({
   meta: PackMetaSchema,
   icp: IcpSchema,
@@ -321,12 +344,16 @@ export const PackSchema = z.object({
   domains: DomainsSchema,
   delivery: DeliverySchema,
   tools: ToolsSchema.default({ sprawl_min: 4, sprawl_exclude_categories: [], overlap_categories: [], tools: {} }),
+  copy: CopySchema.default(COPY_DEFAULT),
   critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60 }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
 }).superRefine((p, ctx) => {
   for (const t of CODE_SIGNAL_TYPES) {
     if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["signals", "signals", t], message: `signal type "${t}" is emitted by the code and must be defined` });
   }
+  p.copy.offers.forEach((o, i) => o.plays.forEach((id) => {
+    if (!p.plays.plays[id]) ctx.addIssue({ code: "custom", path: ["copy", "offers", i, "plays"], message: `unknown play "${id}"` });
+  }));
   for (const [name, play] of Object.entries(p.plays.plays)) {
     for (const r of play.absent) {
       if (!p.signals.signals[r]) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "absent"], message: `unknown signal type "${r}"` });
@@ -341,4 +368,4 @@ export const PackSchema = z.object({
 });
 
 export type Pack = z.infer<typeof PackSchema>;
-export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic"] as const;
+export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;

@@ -1,0 +1,22 @@
+# Copywriter brief for the opening email (optional). The analyst follows it; code checks never_say and durations.
+
+voice: >
+  A consultant writing one-to-one to a founder or GTM leader. Peer to peer, warm, plain language, short sentences.
+  Write about their business, not your task list. No claims about clients or results.
+
+mention: >
+  Mention what you noticed in half a sentence ("saw you're hiring for a RevOps lead"). Never say how long a role has
+  been open or how you found out; say what it usually means for a company at their stage.
+
+offers:
+  - idea: "One GTM system the whole company runs on, so growth doesn't depend on who remembers what."
+  - idea: "The next hire walks into a working system instead of a cleanup job."
+    plays: [struggling_to_hire, first_gtm_hire]
+
+ctas:
+  - "Offer to share a couple of ideas, and ask if that would be useful."
+  - "Ask what the team is running into most as it grows."
+
+never_say: [audit, diagnostic, still open, quick question]
+
+allow_durations: false

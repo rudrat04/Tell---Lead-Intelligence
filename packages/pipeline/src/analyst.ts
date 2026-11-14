@@ -23,7 +23,7 @@ function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefin
       company: a.name ?? a.domain, domain: a.domain,
       facts: [a.sizeBand && `${a.sizeBand} people`, a.segment?.toUpperCase(), a.region].filter(Boolean).join(", "),
       contactRole: contact?.person.role ?? contact?.persona ?? null,
-      plays: s.plays.map((p) => ({ title: p.title, angle: p.angle })),
+      plays: s.plays.map((p) => ({ id: p.id, title: p.title, angle: p.angle })),
       evidence: ev.map((e) => ({ type: e.type, ageDays: e.ageDays, current: e.current, quote: e.quote, url: e.url, openDays: e.openDays })),
     },
   };
