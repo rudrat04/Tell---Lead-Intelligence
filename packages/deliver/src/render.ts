@@ -223,7 +223,8 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   ].filter(Boolean).join(" · ");
   const alerts = [
     health.ticks24h < 40 ? `Only ${health.ticks24h} ticks in 24h (expected about 48: check the schedule)` : "",
-    health.tickErrors24h ? `${health.tickErrors24h} ticks with errors in 24h` : "",
+    // a stray timeout is retried and caught up by the next tick: warn only when it is a pattern (10% or more of ticks)
+    health.tickErrors24h && health.tickErrors24h >= Math.max(1, 0.1 * (health.ticks24h || 1)) ? `${health.tickErrors24h} ticks with errors in 24h` : "",
     health.boardsFailing && health.boardsTotal && health.boardsFailing / health.boardsTotal >= 0.05 ? `${health.boardsFailing} job boards failing` : "",
     r.ranking.held.incomplete ? `${r.ranking.held.incomplete} accounts held back (a source is down)` : "",
     ...(health.usage ?? []).filter((u) => u.pct >= 0.8).map((u) => `${u.service.replace(/_/g, " ")} at ${Math.round(u.pct * 100)}% of the free tier (retention tightened)`),
