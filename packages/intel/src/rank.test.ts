@@ -35,6 +35,10 @@ describe("job roles are state, not events", () => {
     const e = buildEvidence([job("SDR", 200)], [], pack, roles, now)[0]!;
     expect(e.ageDays).toBe(45);
   });
+  it("a placeholder posting date (year 1) is no date: the role ages from when we first saw it", () => {
+    const e = buildEvidence([job("RevOps Lead", null, { postedAt: new Date("0001-01-01T00:00:00Z"), firstSeenAt: ago(2) })], [], pack, roles, now)[0]!;
+    expect(e).toMatchObject({ type: "core_role_open", openDays: 2 });
+  });
   it("a closed role ages from when it closed", () => {
     const e = buildEvidence([job("RevOps Lead", 100, { closedAt: ago(10) })], [], pack, roles, now)[0]!;
     expect(e).toMatchObject({ current: false, ageDays: 10 });

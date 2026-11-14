@@ -1,5 +1,5 @@
 import { getJson } from "./http.js";
-import { RawItemSchema, type RawItem } from "./types.js";
+import { RawItemSchema, postedDate, type RawItem } from "./types.js";
 import type { JobPosting } from "./yc.js";
 import { fetchKekaPostings, fetchFreshteamPostings } from "./india-ats.js";
 import { fetchWorkablePostings } from "./workable.js";
@@ -20,14 +20,14 @@ export async function fetchBoardPostings(ats: Ats, slug: string): Promise<JobPos
   if (ats === "workable") return fetchWorkablePostings(slug);
   if (ats === "greenhouse") {
     const d = await getJson<{ jobs: (GhJob & { first_published?: string })[] }>(`https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=true`);
-    return d.jobs.map((j) => ({ externalId: String(j.id), title: j.title, url: j.absolute_url, postedAt: j.first_published ? new Date(j.first_published) : undefined, text: htmlText(j.content) }));
+    return d.jobs.map((j) => ({ externalId: String(j.id), title: j.title, url: j.absolute_url, postedAt: postedDate(j.first_published), text: htmlText(j.content) }));
   }
   if (ats === "lever") {
     const d = await getJson<LeverJob[]>(`https://api.lever.co/v0/postings/${slug}?mode=json`);
-    return d.map((j) => ({ externalId: j.id, title: j.text, url: j.hostedUrl, employmentType: j.categories?.commitment, postedAt: new Date(j.createdAt), text: j.descriptionPlain }));
+    return d.map((j) => ({ externalId: j.id, title: j.text, url: j.hostedUrl, employmentType: j.categories?.commitment, postedAt: postedDate(j.createdAt), text: j.descriptionPlain }));
   }
   const d = await getJson<AshbyResp>(`https://api.ashbyhq.com/posting-api/job-board/${slug}`);
-  return d.jobs.map((j) => ({ externalId: j.id, title: j.title, url: j.jobUrl, employmentType: j.employmentType, postedAt: j.publishedAt ? new Date(j.publishedAt) : undefined, text: j.descriptionPlain }));
+  return d.jobs.map((j) => ({ externalId: j.id, title: j.title, url: j.jobUrl, employmentType: j.employmentType, postedAt: postedDate(j.publishedAt), text: j.descriptionPlain }));
 }
 
 /** Greenhouse returns escaped HTML: unescape, drop tags, collapse spaces. */

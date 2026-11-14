@@ -1,5 +1,6 @@
 import { politeGet, getJson } from "./http.js";
 import type { JobPosting } from "./yc.js";
+import { postedDate } from "./types.js";
 
 /**
  * Job boards on ATS products common with Indian companies, found through Common Crawl (no public directory).
@@ -35,7 +36,7 @@ export function kekaPostings(tenant: string, jobs: KekaJob[]): JobPosting[] {
       externalId: String(j.id),
       title: j.title,
       url: `https://${tenant}.keka.com/careers/jobdetails/${j.id}`,
-      postedAt: j.publishedOn ? new Date(j.publishedOn) : undefined,
+      postedAt: postedDate(j.publishedOn),
       location: locs.map((l) => [l.city, l.countryName].filter(Boolean).join(", ")).join("; ") || undefined,
       countryCodes: locs.map((l) => l.countryCode).filter((c): c is string => !!c),
       text: j.excerpt,

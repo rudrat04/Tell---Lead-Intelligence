@@ -94,7 +94,9 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
     const cls = classifyJob(j.title, j.employmentType ?? undefined, roles);
     if (!cls) continue;
     const open = !j.closedAt;
-    const since = j.postedAt ?? j.firstSeenAt;
+    // a stored placeholder date (year 1, or after we first saw it) is no date: fall back to when we first saw the role
+    const posted = j.postedAt && j.postedAt.getUTCFullYear() >= 2000 && j.postedAt <= j.firstSeenAt ? j.postedAt : null;
+    const since = posted ?? j.firstSeenAt;
     const daysOpen = Math.max(0, (now.getTime() - since.getTime()) / DAY);
     let type: string;
     // a contract *core* role means they want outside help for exactly what you do; a contract sales hire does not

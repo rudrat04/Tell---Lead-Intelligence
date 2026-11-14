@@ -40,3 +40,15 @@ export async function runWatcher(w: Watcher, since: Date): Promise<WatcherResult
     }
   }
 }
+
+/**
+ * A posting date only if it's believable: ATS APIs send placeholders for "no date" (Keka: 0001-01-01, .NET's
+ * DateTime.MinValue), and an epoch or future date would make a role look years old or not yet posted.
+ */
+export function postedDate(v: string | number | Date | null | undefined, now = new Date()): Date | undefined {
+  if (v == null || v === "") return undefined;
+  const d = v instanceof Date ? v : new Date(v);
+  const t = d.getTime();
+  if (Number.isNaN(t) || d.getUTCFullYear() < 2000 || t > now.getTime() + 86_400_000) return undefined;
+  return d;
+}

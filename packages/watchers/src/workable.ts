@@ -1,5 +1,6 @@
 import { getJson } from "./http.js";
 import type { JobPosting } from "./yc.js";
+import { postedDate } from "./types.js";
 
 /**
  * Workable (India coverage). Terms checked Nov 2026: robots.txt on jobs.workable.com and apply.workable.com does not
@@ -82,7 +83,7 @@ export function workablePostings(subdomain: string, jobs: WidgetJob[]): JobPosti
       title: j.title.trim(),
       url: j.url ?? `https://apply.workable.com/${subdomain}/j/${j.shortcode}/`,
       employmentType: j.employment_type,
-      postedAt: date ? new Date(`${date}T00:00:00Z`) : undefined,
+      postedAt: date ? postedDate(`${date}T00:00:00Z`) : undefined,
       location: (locs.length ? locs.map((l) => [l.city, l.country].filter(Boolean).join(", ")) : [[j.city, j.country].filter(Boolean).join(", ")]).filter(Boolean).join(" / ") || undefined,
       countryCodes: locs.map((l) => l.countryCode).filter((c): c is string => !!c),
       text: j.description ? j.description.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim().slice(0, 20000) : undefined,
