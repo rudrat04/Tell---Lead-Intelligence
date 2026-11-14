@@ -176,7 +176,7 @@ export async function runJSearch(opts: {
   return res;
 
   async function resolve(e: Employer): Promise<{ reason: string; domain?: string | null }> {
-    if (looksLikeStaffing(e.name, e.hits.map((h) => h.description))) return { reason: "staffing" };
+    if (looksLikeStaffing(e.name, e.hits.map((h) => h.description), e.hits.map((h) => h.title))) return { reason: "staffing" };
     const region = regionFromPostings(e.hits.map((h) => ({ location: h.location, countryCodes: h.countryCodes })));
     if (cfg.location.toLowerCase() === "india" && region !== "India") return { reason: "not-region" };
     const site = e.hits.map((h) => employerDomain(h, lists)).find(Boolean) ?? null;

@@ -98,7 +98,7 @@ export async function runWorkableDiscovery(opts: { pack: Pack; recheckDays?: num
   type Verdict = { reason: string; domain?: string; region?: string | null; gtmRoles?: boolean; boardNew?: boolean };
 
   async function check(c: Company): Promise<Verdict> {
-    if (looksLikeStaffing(c.name, [])) return { reason: "staffing" };
+    if (looksLikeStaffing(c.name, [], c.hits.map((h) => h.title))) return { reason: "staffing" };
     const site = c.website ? registrableDomain(c.website) : null;
     if (!site || lists.neverCompany.has(site) || lists.freeMail.has(site)) return { reason: "no-website" };
     const home = await checkHomepage(site);

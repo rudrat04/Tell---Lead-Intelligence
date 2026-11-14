@@ -4,7 +4,12 @@ sprawl_min: 4
 tools:
   hubspot:     { label: HubSpot, category: crm, site: ["(?i)js\\.hs-scripts\\.com|js\\.hsforms\\.net|js\\.hs-analytics\\.net|js\\.hubspot\\.com"], dns: ["(?i)hubspot-developer-verification|include:[\\w.]*hubspotemail\\.net"] }
   salesforce:  { label: Salesforce, category: crm, site: ["(?i)\\.force\\.com/|salesforceliveagent|\\.my\\.salesforce\\.com"], dns: ["(?i)include:_spf\\.salesforce\\.com|salesforce-domain-verification"] }
-  zoho:        { label: Zoho, category: crm, site: ["(?i)salesiq\\.zoho\\.(com|in)|zohopublic\\.(com|in)|forms\\.zohopublic"], dns: ["(?i)include:(zoho\\.(com|in|eu)|zcsend\\.net)|zoho-verification"] }
+  # Zoho is many products. Zoho Mail (include:zoho.*, spf.zohomail.com, zoho-verification / zmverify) is email hosting,
+  # used by most Indian SMEs: not a GTM tool, so it has no entry. Only a CRM web-to-lead form proves Zoho CRM.
+  zoho:        { label: Zoho CRM, category: crm, site: ["(?i)crm\\.zoho(public)?\\.(com|in|eu)|zcrmforms|WebToLeadForm"], dns: [] }
+  zoho_campaigns: { label: Zoho Campaigns, category: email, site: ["(?i)campaigns\\.zoho\\.(com|in|eu)|maillist-manage\\.(com|in|eu)"], dns: ["(?i)include:zcsend\\.(net|in)"] }
+  zoho_salesiq: { label: Zoho SalesIQ, category: chat, site: ["(?i)salesiq\\.zoho(public)?\\.(com|in|eu)"], dns: [] }
+  zoho_forms:  { label: Zoho Forms, category: forms, site: ["(?i)forms\\.zoho(public)?\\.(com|in|eu)"], dns: [] }
   pipedrive:   { label: Pipedrive, category: crm, site: ["(?i)leadbooster-chat\\.pipedrive\\.com|webforms\\.pipedrive\\.com"], dns: [] }
   pardot:      { label: Pardot, category: marketing_automation, site: ["(?i)pi\\.pardot\\.com|go\\.pardot\\.com"], dns: ["(?i)include:aspmx\\.pardot\\.com"] }
   marketo:     { label: Marketo, category: marketing_automation, site: ["(?i)munchkin\\.marketo\\.net|mktoForms2|marketo\\.com/js"], dns: ["(?i)include:mktomail\\.com"] }

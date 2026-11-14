@@ -12,4 +12,6 @@ exclude:
   - "(?i)\\b(zoho|salesforce|hubspot|crm)\\b.{0,25}\\bdevelop(er|ment)\\b"   # a developer hire extends an existing CRM: not the ops gap
   - "(?i)\\b(sales engineer|solutions engineer|engineering manager|software engineer|data engineer)\\b"
   - "(?i)\\b(intern|internship|working student|apprentice)\\b"
+  # field / channel / regional sales teams (EV, solar, FMCG, chemicals): they sell on the road, not through a GTM system
+  - "(?i)\\b(area|regional|zonal|territory|field|channel|dealer|distribution|branch|cluster|retail) (sales|business development|bd)\\b"
   - "(?i)\\b(recruit(er|ing)|talent|people (ops|operations|partner)|hr (manager|generalist|business partner))\\b"

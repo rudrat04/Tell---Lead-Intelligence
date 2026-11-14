@@ -20,14 +20,29 @@ export function regionFromPostings(postings: LocatedPosting[]): string | null {
 
 const AGENCY_TEXT = /\b(for (one of )?our clients?\b|on behalf of (our|a|one of our) clients?|our client(,)? (is|a|an)\b|for a leading client|client of ours)/i;
 const AGENCY_NAME = /\b(staffing|recruit\w*|manpower|placements?|hr solutions|talent|headhunt\w*|executive search)\b/i;
+/** A title that names someone else's company: "BD Manager - Hiring for Northwind Hospital", "(hiring for a leading NBFC)". */
+const HIRING_FOR = /(?:^|[-–—|(:,]\s*)hiring for (?:a |an |one of (?:our )?)?([^()\-–—|,:]+)/i;
+const CLIENT_WORDS = /^(leading|reputed|top|large|well[- ]known|fast[- ]growing|mnc|clients?)\b/i;
+// "Hiring for" a place, a team or a shift is a normal company ("Hiring for Mumbai", "Hiring for Sales Team")
+const NOT_A_CLIENT = /^(our|my|the|this|multiple|various|several|many|all|both|immediate|urgent|night|day|sales|marketing|growth|tech|team|india|remote|us|uk|usa|mumbai|bombay|bengaluru|bangalore|delhi|new delhi|ncr|gurgaon|gurugram|noida|pune|hyderabad|chennai|kolkata|ahmedabad|jaipur|kochi|indore|chandigarh|lucknow)\b/i;
 
 /**
  * Recruiting/staffing firms post their clients' roles on their own board: the company hiring isn't them.
- * A board counts as an agency when its name says so, or a third of its role texts say "for our client".
+ * A board counts as an agency when its name says so, a third of its role texts say "for our client", or any role
+ * title says who it is hiring for ("- Hiring for Northwind Hospital"): a company never names itself that way.
  */
-export function looksLikeStaffing(name: string | null, texts: (string | undefined)[]): boolean {
+export function looksLikeStaffing(name: string | null, texts: (string | undefined)[], titles: string[] = []): boolean {
   if (name && AGENCY_NAME.test(name)) return true;
+  if (titles.some(agencyTitle)) return true;
   const t = texts.filter((x): x is string => !!x && x.length > 20);
   if (!t.length) return false;
   return t.filter((x) => AGENCY_TEXT.test(x)).length / t.length >= 1 / 3;
+}
+
+/** "Sales Manager - Hiring for Northwind Hospital (Mumbai)": the title names the client. */
+export function agencyTitle(title: string): boolean {
+  const who = title.match(HIRING_FOR)?.[1]?.trim();
+  if (!who) return false;
+  if (CLIENT_WORDS.test(who)) return true;
+  return !NOT_A_CLIENT.test(who) && /^[A-Z0-9]/.test(who);
 }

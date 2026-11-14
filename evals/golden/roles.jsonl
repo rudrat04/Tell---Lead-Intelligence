@@ -23,3 +23,10 @@
 {"title":"Salesforce Developer","type":null,"expect":null,"note":"false positive: developer hire extends an existing CRM"}
 {"title":"Senior Zoho CRM Developer","type":null,"expect":null,"note":"false positive: developer hire extends an existing CRM"}
 {"title":"Salesforce Administrator","type":null,"expect":"core","note":"admin still core"}
+{"title":"Area Sales Manager","type":null,"expect":null,"note":"field sales team (EV/FMCG): sells on the road, not the GTM-system gap"}
+{"title":"Regional Sales Manager","type":null,"expect":null,"note":"field sales team"}
+{"title":"Regional Business Development Manager-Asia (Beauty & Personal care)","type":null,"expect":null,"note":"regional BD for a manufacturer"}
+{"title":"Channel Sales Executive","type":null,"expect":null,"note":"dealer/channel sales"}
+{"title":"Territory Sales Officer","type":null,"expect":null,"note":"field sales"}
+{"title":"Sales Manager","type":null,"expect":"adjacent","note":"plain sales manager stays adjacent"}
+{"title":"Sales Development Representative","type":null,"expect":"adjacent","note":"SDR stays adjacent"}

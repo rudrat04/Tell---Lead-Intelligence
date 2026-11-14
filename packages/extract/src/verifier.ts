@@ -3,10 +3,23 @@ import type { LlmClient, PostExtraction } from "./post.js";
 
 /** Gate 4: separate skeptical call. Must agree with Gate 3, else the item goes to the uncertain queue. */
 
+const DISQUALIFIERS = ["none", "vendor", "recruiter", "student", "enterprise", "already_solved", "job_seeker"] as const;
+/** the model's near-misses ("Job seeker", "self_promotion", "solved") mapped onto the enum */
+const DISQ_ALIASES: Record<string, (typeof DISQUALIFIERS)[number]> = {
+  self_promotion: "vendor", agency: "vendor", seller: "vendor", recruiting: "recruiter", staffing: "recruiter",
+  solved: "already_solved", jobseeker: "job_seeker", job_search: "job_seeker", null: "none", n_a: "none",
+};
+const normDisq = (v: unknown) => {
+  if (typeof v !== "string") return v ?? "none";
+  const k = v.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return (DISQUALIFIERS as readonly string[]).includes(k) ? k : DISQ_ALIASES[k] ?? k;
+};
+
 export const VerdictSchema = z.object({
-  genuine_need: z.boolean(),
-  disqualifier: z.enum(["none", "vendor", "recruiter", "student", "enterprise", "already_solved", "job_seeker"]),
-  reason: z.string().max(300),
+  genuine_need: z.preprocess((v) => (v === "true" ? true : v === "false" ? false : v), z.boolean()),
+  disqualifier: z.preprocess(normDisq, z.enum(DISQUALIFIERS)),
+  // a long reason is still a reason: cut it instead of throwing the verdict away
+  reason: z.preprocess((v) => (typeof v === "string" ? v.slice(0, 300) : ""), z.string()),
 });
 export type Verdict = z.infer<typeof VerdictSchema>;
 
@@ -30,7 +43,7 @@ export async function verifyPost(llm: LlmClient, text: string, extraction: PostE
     return { decision: "uncertain", reason: "verifier returned invalid JSON" };
   }
   const p = VerdictSchema.safeParse(json);
-  if (!p.success) return { decision: "uncertain", reason: "verifier schema mismatch" };
+  if (!p.success) return { decision: "uncertain", reason: `verifier schema mismatch (${p.error.issues.map((i) => i.path.join(".") || "root").join(", ")})` };
   const v = p.data;
   const g3Positive = !extraction.self_promotion && extraction.author_role !== "vendor";
   const g4Positive = v.genuine_need && v.disqualifier === "none";

@@ -133,7 +133,7 @@ export async function runCcDiscovery(opts: { pack: Pack; maxTenants?: number; re
     const t = await s.fetchTenant(tenant);
     if (!t) return { reason: "no-portal" };
     if (!t.postings.length) return { reason: "no-roles" };
-    if (looksLikeStaffing(t.name, t.postings.map((p) => p.text))) return { reason: "staffing" };
+    if (looksLikeStaffing(t.name, t.postings.map((p) => p.text), t.postings.map((p) => p.title))) return { reason: "staffing" };
 
     let proof: { domain: string; url: string } | null = null;
     const tried = new Set<string>();

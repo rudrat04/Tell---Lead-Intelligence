@@ -3,7 +3,7 @@ import {
   fetchYcCompanies, fetchYcJobs, fetchBoardPostings, findBoardLinks, robotsAllows,
   userAgent, type YcCompany, type JobPosting, type Ats,
 } from "@tell/watchers";
-import { classifyJob, compileRoles, diffBoard, repostedRoles, jdMentions, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
+import { classifyJob, compileRoles, diffBoard, looksLikeStaffing, repostedRoles, jdMentions, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
 import { registrableDomain } from "@tell/people";
 import { applyPackIdentity } from "./scheduled.js";
 import { getDb, accounts, jobBoards, jobs, signals, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -140,6 +140,8 @@ export interface BoardCheckResult {
   /** boards not checked because their host kept failing (blocked or down): not counted as failures */
   hostDown: number;
   suspect: number;
+  /** boards found to be a recruiter posting clients' roles: open roles closed, board no longer checked */
+  staffing: number;
   baselines: number;
   newRoles: number;
   closedRoles: number;
@@ -184,7 +186,7 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
   const closedByBoard = new Map<string, { title: string; closedAt: Date }[]>();
   for (const r of closedRows) (closedByBoard.get(r.boardId) ?? closedByBoard.set(r.boardId, []).get(r.boardId)!).push({ title: r.title, closedAt: r.closedAt! });
 
-  const res: BoardCheckResult = { boards: boards.length, checked: 0, failed: 0, hostDown: 0, suspect: 0, baselines: 0, newRoles: 0, closedRoles: 0, signals: {} };
+  const res: BoardCheckResult = { boards: boards.length, checked: 0, failed: 0, hostDown: 0, suspect: 0, staffing: 0, baselines: 0, newRoles: 0, closedRoles: 0, signals: {} };
 
   async function recordFailure(b: BoardRow) {
     res.failed++;
@@ -199,6 +201,15 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
       postings = await fetchPostings(b);
     } catch {
       return b; // the caller decides whether this counts against the board (one bad board) or not (the host is down)
+    }
+    // a recruiter's board found before the title rule existed ("Hiring for Northwind Hospital"): its roles aren't theirs
+    if (b.source !== "yc" && looksLikeStaffing(null, postings.map((p) => p.text), postings.map((p) => p.title))) {
+      await db.batch([
+        db.update(jobs).set({ closedAt: now }).where(and(eq(jobs.boardId, b.id), sql`${jobs.closedAt} is null`)),
+        db.update(jobBoards).set({ status: "staffing", lastCheckedAt: now }).where(eq(jobBoards.id, b.id)),
+      ]);
+      res.staffing++;
+      return;
     }
     const fetched: FetchedJob[] = postings.flatMap((p) => {
       const cls = classifyJob(p.title, p.employmentType, roles);
