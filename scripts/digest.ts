@@ -3,6 +3,7 @@
  *   pnpm digest            score + send (counts only in the log: safe for public Actions logs)
  *   pnpm digest --dry      score without writing, save the email to digest-preview.html (local only)
  *   pnpm digest --test     send today's digest now with a [TEST] subject; records nothing (local only)
+ *   pnpm digest --sheet    no email: record today's leads as delivered and append them to the Sheet (local only)
  */
 import "dotenv/config";
 import { writeFileSync } from "node:fs";
@@ -11,13 +12,14 @@ import { runDigest, gmailSender } from "@tell/deliver";
 
 const dry = process.argv.includes("--dry");
 const test = process.argv.includes("--test");
-if ((dry || test) && process.env.CI) {
+const sheetOnly = process.argv.includes("--sheet");
+if ((dry || test || sheetOnly) && process.env.CI) {
   console.error("--dry/--test are for local use (lead details); refused in CI");
   process.exit(1);
 }
 
 const gmailReady = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GMAIL_REFRESH_TOKEN);
-const r = await runDigest({ pack: await loadPack(), sender: gmailReady ? gmailSender : null, dryRun: dry, test });
+const r = await runDigest({ pack: await loadPack(), sender: gmailReady ? gmailSender : null, dryRun: dry, test, sheetOnly });
 if (dry && r.email) {
   writeFileSync("digest-preview.html", r.email.html);
   console.log(`dry run: "${r.email.subject}" saved to digest-preview.html`);

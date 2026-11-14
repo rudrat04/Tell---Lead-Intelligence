@@ -8,7 +8,7 @@ import { appendRows } from "./sheets.js";
 import type { Sender } from "./gmail.js";
 
 export interface DigestResult {
-  status: "sent" | "skipped" | "dry-run";
+  status: "sent" | "skipped" | "dry-run" | "recorded";
   reason?: string;
   /** Sheet outcome after a real send: rows appended, or why not (never fails the digest) */
   sheet?: string;
@@ -52,15 +52,16 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
  * Score, render and send the daily digest. Sends at most once per IST day (runs.idempotency_key = digest:<day>);
  * a failed send leaves the day open for a retry.
  */
-/** `test`: send now with a [TEST] subject but record nothing (no scores, no deliveries, the day stays open). */
-export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRun?: boolean; test?: boolean; haikuCapUsd?: number }): Promise<DigestResult> {
+/** `test`: send now with a [TEST] subject but record nothing (no scores, no deliveries, the day stays open).
+ *  `sheetOnly`: no email and no run record (works after today's digest went out): record today's leads as delivered and append them to the Sheet. */
+export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRun?: boolean; test?: boolean; sheetOnly?: boolean; haikuCapUsd?: number }): Promise<DigestResult> {
   const { pack } = opts;
   const db = getDb();
   const day = istDay();
   const key = `digest:${day}`;
   const to = pack.delivery.digest.to, from = pack.delivery.digest.from;
 
-  if (!opts.dryRun && !opts.test) {
+  if (!opts.dryRun && !opts.test && !opts.sheetOnly) {
     if (!to || !from) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
     const prior = await db.select({ status: runs.status }).from(runs).where(eq(runs.idempotencyKey, key)).limit(1);
     if (prior[0]?.status === "ok") return { status: "skipped", reason: `already sent for ${day}`, leads: 0, watchlist: 0, personLeads: 0 };
@@ -99,6 +100,15 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const email = renderDigest(score, pack, h, day, contacts, gigList, notes, taps);
   const counts = { enrich: enrich.join("; "), leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
+  const deliveryRows = (at: Date) => score.ranking.leads.map((l) => ({
+    id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: at, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
+    sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature),
+  }));
+  if (opts.sheetOnly) {
+    if (score.ranking.leads.length) await db.insert(deliveries).values(deliveryRows(new Date()));
+    const n = pack.delivery.sheet.spreadsheet_id ? await appendPendingLeads(pack) : 0;
+    return { status: "recorded", reason: "sheet only: no email sent", email, score, sheet: `appended ${n} lead${n === 1 ? "" : "s"}`, ...counts };
+  }
   // no sender configured yet: scores are written, nothing is sent, the day stays open
   if (!opts.sender) return { status: "skipped", reason: "Gmail not configured (run pnpm gmail:auth, then add the GitHub secrets)", email, score, ...counts };
 
@@ -121,12 +131,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     db.insert(runs).values({ task: "digest", idempotencyKey: key, status: "ok", yieldCount: counts.leads, startedAt: started, finishedAt: now })
       .onConflictDoUpdate({ target: runs.idempotencyKey, set: { status: "ok", error: null, yieldCount: counts.leads, finishedAt: now } }),
   ];
-  if (score.ranking.leads.length) {
-    batch.push(db.insert(deliveries).values(score.ranking.leads.map((l) => ({
-      id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: now, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
-      sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature),
-    }))));
-  }
+  if (score.ranking.leads.length) batch.push(db.insert(deliveries).values(deliveryRows(now)));
   await db.batch(batch as unknown as Parameters<typeof db.batch>[0]);
   await markGigsDelivered(gigList.map((g) => g.id), now);
 
