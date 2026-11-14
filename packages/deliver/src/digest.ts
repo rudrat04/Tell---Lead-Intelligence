@@ -28,7 +28,7 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
     select count(*)::int as total,
            count(*) filter (where ${jobBoards.lastCheckedAt} > ${since})::int as checked,
            count(*) filter (where ${jobBoards.failCount} > 0)::int as failing
-    from ${jobBoards} where ${jobBoards.status} = 'active'`)).rows as { total: number; checked: number; failing: number }[];
+    from ${jobBoards} where ${jobBoards.status} = 'active' and ${jobBoards.source} <> 'jsearch'`)).rows as { total: number; checked: number; failing: number }[];
   const [t] = (await db.execute(sql`
     select count(*)::int as n, count(*) filter (where ${runs.status} <> 'ok')::int as errors
     from ${runs} where ${runs.task} like 'tick:%' and ${runs.startedAt} > ${since}`)).rows as { n: number; errors: number }[];

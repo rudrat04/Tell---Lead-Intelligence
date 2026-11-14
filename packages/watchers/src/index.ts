@@ -19,3 +19,4 @@ export * from "./portfolio.js";
 export * from "./infra.js";
 export * from "./formd.js";
 export * from "./web-search.js";
+export * from "./jsearch.js";

@@ -29,3 +29,12 @@ web_search:
     - 'site:linkedin.com/posts "looking for" ("n8n" OR "zapier" OR "make.com") (expert OR freelancer)'
     - 'site:x.com "looking for" ("hubspot" OR "revops") (freelancer OR consultant)'
     - 'site:linkedin.com/posts "anyone know" ("crm setup" OR "sales automation")'
+# JSearch (RapidAPI, needs RAPIDAPI_KEY; free Basic plan = 200 requests/month): Google for Jobs listings from
+# LinkedIn, Naukri, Indeed and company sites, daily. Companies hiring these roles become accounts; their roles are state.
+jsearch:
+  enabled: true
+  location: India
+  date_posted: week
+  per_run: 6
+  per_month: 180
+  queries: ["revenue operations", "sales operations", "marketing operations", "crm manager", "hubspot", "growth marketing manager"]

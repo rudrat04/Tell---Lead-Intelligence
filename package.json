@@ -21,6 +21,7 @@
     "digest": "tsx scripts/digest.ts",
     "gmail:auth": "tsx scripts/gmail-auth.ts",
     "gigs": "tsx scripts/gigs.ts",
+    "jsearch": "tsx scripts/jsearch.ts",
     "sheet:setup": "tsx scripts/sheet.ts setup",
     "sheet:sync": "tsx scripts/sheet.ts sync",
     "google:auth": "tsx scripts/gmail-auth.ts",

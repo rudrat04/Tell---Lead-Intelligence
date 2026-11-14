@@ -163,7 +163,7 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
 
   const boards: BoardRow[] = await db.select({
     id: jobBoards.id, accountId: jobBoards.accountId, source: jobBoards.source, slug: jobBoards.slug, baselineDone: jobBoards.baselineDone, failCount: jobBoards.failCount,
-  }).from(jobBoards).where(eq(jobBoards.status, "active"))
+  }).from(jobBoards).where(and(eq(jobBoards.status, "active"), sql`${jobBoards.source} <> 'jsearch'`)) // JSearch roles age out in runJSearch
     .orderBy(sql`${jobBoards.lastCheckedAt} asc nulls first`).limit(opts.maxBoards ?? 2000);
 
   const openRows = boards.length

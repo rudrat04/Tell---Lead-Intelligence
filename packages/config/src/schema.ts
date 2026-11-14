@@ -200,6 +200,20 @@ export const SourcesSchema = z.object({
     /** companies checked per run (each costs a few requests) */
     max_companies: z.number().int().min(1).default(150),
   }).default({ enabled: false, location: "India", queries: [], day_range: 30, max_pages: 5, max_companies: 150 }),
+  /** JSearch (RapidAPI, RAPIDAPI_KEY; Google for Jobs: LinkedIn, Naukri, Indeed listings), daily: companies hiring the
+   *  pack's roles become accounts, their roles tracked as state. Free Basic plan = 200 requests/month. */
+  jsearch: z.object({
+    enabled: z.boolean().default(false),
+    queries: z.array(z.string()).default([]),
+    location: z.string().default("India"),
+    country: z.string().default("in"),
+    date_posted: z.enum(["today", "3days", "week", "month"]).default("week"),
+    /** requests per daily run, and per calendar month (persisted, counted before each request; paced over the month) */
+    per_run: z.number().int().min(1).max(50).default(6),
+    per_month: z.number().int().min(1).default(180),
+    /** roles found only through JSearch close when no search has seen them for this long */
+    close_after_days: z.number().int().min(7).default(21),
+  }).default({ enabled: false, queries: [], location: "India", country: "in", date_posted: "week", per_run: 6, per_month: 180, close_after_days: 21 }),
   /** VC / accelerator portfolio pages (weekly): each company page's "Website" link becomes an account; job boards
    *  are found on that site. Region comes from job locations, never from the investor. */
   portfolios: z.array(z.object({

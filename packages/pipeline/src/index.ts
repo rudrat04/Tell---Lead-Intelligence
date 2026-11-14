@@ -16,3 +16,4 @@ export * from "./discover-portfolios.js";
 export * from "./reach.js";
 export * from "./infra-watch.js";
 export * from "./backfill.js";
+export * from "./discover-jsearch.js";
