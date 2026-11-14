@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
 import {
-  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, type CriticVerdict, type DeliveryHistory, timing as timingScore,
+  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, type DeliveryHistory, timing as timingScore,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
 import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, eq, and, inArray, sql } from "@tell/db";
@@ -75,7 +75,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   for (const part of chunk(ids, 500)) {
     const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, sizeBand: accounts.sizeBand, region: accounts.region, segment: accounts.segment, status: accounts.status })
       .from(accounts).where(inArray(accounts.id, part));
-    for (const r of rows) if (r.status === "active" && (regionsAny.length === 0 || (r.region != null && regionsAny.includes(r.region)))) accts.set(r.id, r);
+    for (const r of rows) if (r.status === "active" && regionInScope(r.region, pack.icp)) accts.set(r.id, r);
   }
 
   // Evidence is incomplete when a board covering the account failed on its last check (plan 8d-2: outages are not evidence)

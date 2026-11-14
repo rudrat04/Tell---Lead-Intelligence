@@ -37,3 +37,13 @@ export function segmentFor(industries: string[], icp: IcpConfig): string | null 
   for (const i of industries) if (icp.segment_map[i]) return icp.segment_map[i]!;
   return null;
 }
+
+/**
+ * Can an account in this region ever be scored? With `regions_any` set, only a known region on that list (scoring's own
+ * rule); empty = every region. Boards and the account watch skip the rest: fetching pages for accounts that can never
+ * become leads only gets the crawler throttled (YC began refusing ~270 pages into a 1,060-page run).
+ */
+export function regionInScope(region: string | null | undefined, icp: IcpConfig): boolean {
+  const any = icp.hard_filters.regions_any;
+  return any.length === 0 || (region != null && any.includes(region));
+}

@@ -3,6 +3,7 @@ import { fetchYcCompanyProfile, fetchHomepage, fetchTxtRecords, extractSiteFacts
 import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, leakyCapture, agencyCredited, eventsFromYcProfile, STATE_SIGNAL_TYPES, type SiteState, type WatchEvent } from "@tell/intel";
 import { getDb, accounts, jobBoards, snapshots, signals, and, eq, inArray, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
+import { regionInScopeSql } from "./scope.js";
 import { saveYcFounders } from "./contacts.js";
 
 /**
@@ -40,7 +41,7 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
   // tracked accounts: those with an active job board (YC slug when there is one)
   const rows = await db.select({ id: accounts.id, domain: accounts.domain, source: jobBoards.source, slug: jobBoards.slug })
     .from(accounts).innerJoin(jobBoards, eq(jobBoards.accountId, accounts.id))
-    .where(and(eq(accounts.status, "active"), eq(jobBoards.status, "active")));
+    .where(and(eq(accounts.status, "active"), eq(jobBoards.status, "active"), regionInScopeSql(pack, accounts.region)));
   const byId = new Map<string, Acc>();
   for (const r of rows) {
     const a = byId.get(r.id) ?? { id: r.id, domain: r.domain, ycSlug: null };

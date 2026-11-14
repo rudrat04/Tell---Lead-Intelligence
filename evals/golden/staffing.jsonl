@@ -7,3 +7,5 @@
 {"name":"Brightpath Advisory","texts":[],"titles":["Regional Sales Head (Hiring for a leading NBFC)"],"expect":true,"note":"recruiter: 'hiring for a leading ...' in the title"}
 {"name":"Acme Pay","texts":[],"titles":["Inside Sales Executive - Hiring for Mumbai","SDR | Hiring for Sales Team","Account Executive - Hiring for multiple roles"],"expect":false,"note":"'hiring for' a city, team or 'multiple roles' is a normal company"}
 {"name":"Acme Pay","texts":[],"titles":["RevOps Manager","Head of Growth"],"expect":false,"note":"plain titles"}
+{"name":"Ledgerline Research","texts":["We build execution algorithms that significantly reduce transaction costs for our clients across asset classes","Our products help our clients trade more efficiently","Join a team that serves our clients globally"],"expect":false,"note":"a company describing what it does for its clients is not hiring for clients"}
+{"name":"Brightpath Advisory","texts":["We are hiring a Regional Sales Head for one of our clients, a fast-growing NBFC","Recruiting a CFO for our client in Pune","Seeking an AE for a client in fintech"],"expect":true,"note":"recruiter: hiring for one of our clients"}

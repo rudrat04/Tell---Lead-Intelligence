@@ -6,6 +6,7 @@ import {
 import { classifyJob, compileRoles, diffBoard, looksLikeStaffing, repostedRoles, jdMentions, passesHardFilters, segmentFor, sizeBand, type OpenJobRow, type FetchedJob, type JobFamily } from "@tell/intel";
 import { registrableDomain } from "@tell/people";
 import { applyPackIdentity } from "./scheduled.js";
+import { regionInScopeSql } from "./scope.js";
 import { getDb, accounts, jobBoards, jobs, signals, companySeeds, eq, and, inArray, sql } from "@tell/db";
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
@@ -165,7 +166,9 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
 
   const boards: BoardRow[] = await db.select({
     id: jobBoards.id, accountId: jobBoards.accountId, source: jobBoards.source, slug: jobBoards.slug, baselineDone: jobBoards.baselineDone, failCount: jobBoards.failCount,
-  }).from(jobBoards).where(and(eq(jobBoards.status, "active"), sql`${jobBoards.source} <> 'jsearch'`)) // JSearch roles age out in runJSearch
+  }).from(jobBoards).innerJoin(accounts, eq(accounts.id, jobBoards.accountId))
+    // JSearch roles age out in runJSearch; boards of accounts the pack can never score (out of regions_any) aren't fetched
+    .where(and(eq(jobBoards.status, "active"), sql`${jobBoards.source} <> 'jsearch'`, regionInScopeSql(opts.pack, accounts.region)))
     .orderBy(sql`${jobBoards.lastCheckedAt} asc nulls first`).limit(opts.maxBoards ?? 2000);
 
   const openRows = boards.length

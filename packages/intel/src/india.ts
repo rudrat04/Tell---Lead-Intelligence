@@ -18,7 +18,9 @@ export function regionFromPostings(postings: LocatedPosting[]): string | null {
   return withLoc.filter(inIndia).length / withLoc.length >= 0.5 ? "India" : null;
 }
 
-const AGENCY_TEXT = /\b(for (one of )?our clients?\b|on behalf of (our|a|one of our) clients?|our client(,)? (is|a|an)\b|for a leading client|client of ours)/i;
+// hiring *for* a client, not serving clients: "we are hiring a sales head for our client" / "on behalf of our client", never
+// "our algorithms reduce costs for our clients" (a company describing its own business)
+const AGENCY_TEXT = /\b(hiring|recruiting|looking for|seeking)\b[^.]{0,60}?\bfor (one of )?(our|a|an) ([\w-]+ )?clients?\b|\bon behalf of (our|a|one of our) clients?|\bour client(,)? (is|a|an)\b|\bfor a leading client|\bclient of ours/i;
 const AGENCY_NAME = /\b(staffing|recruit\w*|manpower|placements?|hr solutions|talent|headhunt\w*|executive search)\b/i;
 /** A title that names someone else's company: "BD Manager - Hiring for Northwind Hospital", "(hiring for a leading NBFC)". */
 const HIRING_FOR = /(?:^|[-–—|(:,]\s*)hiring for (?:a |an |one of (?:our )?)?([^()\-–—|,:]+)/i;

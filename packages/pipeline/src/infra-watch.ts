@@ -2,6 +2,7 @@ import type { Pack } from "@tell/config";
 import { fetchCtSubdomains, newGtmSubdomains, provenLookalikes, fetchFormDFilings, normCompany } from "@tell/watchers";
 import { getDb, accounts, jobBoards, snapshots, signals, and, eq, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
+import { regionInScopeSql } from "./scope.js";
 
 export interface InfraWatchResult {
   ct: { checked: number; baselines: number; failed: number };
@@ -37,7 +38,7 @@ export async function runInfraWatch(opts: { pack: Pack; now?: Date; ctPerRun?: n
     select a.id, a.domain, s.extracted from ${accounts} a
     join (select distinct account_id from ${jobBoards} where status = 'active') b on b.account_id = a.id
     left join lateral (select extracted, taken_at from ${snapshots} where account_id = a.id and kind = ${kind} order by taken_at desc limit 1) s on true
-    where a.status = 'active'
+    where a.status = 'active' and ${regionInScopeSql(pack, sql`a.region`)}
     order by s.taken_at asc nulls first, a.id limit ${limit}`)).rows as { id: string; domain: string; extracted: { items?: string[] } | null }[];
 
   if (specs.marketing_subdomain) {
@@ -75,7 +76,7 @@ export async function runInfraWatch(opts: { pack: Pack; now?: Date; ctPerRun?: n
       const filings = await fetchFormDFilings(7, now);
       res.formD.filings = filings.length;
       const names = new Map<string, string[]>();
-      for (const r of await db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(eq(accounts.status, "active"))) {
+      for (const r of await db.select({ id: accounts.id, name: accounts.name }).from(accounts).where(and(eq(accounts.status, "active"), regionInScopeSql(pack, accounts.region)))) {
         if (!r.name) continue;
         const k = normCompany(r.name);
         if (k.length >= 4) names.set(k, [...(names.get(k) ?? []), r.id]);

@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { runScoring, istDay, contactsFor, attachEmails, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, type ScoreRunResult } from "@tell/pipeline";
+import { runScoring, istDay, contactsFor, attachEmails, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql, type ScoreRunResult } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
 import { appendPendingLeads } from "./sheet-sync.js";
@@ -28,7 +28,8 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
     select count(*)::int as total,
            count(*) filter (where ${jobBoards.lastCheckedAt} > ${since})::int as checked,
            count(*) filter (where ${jobBoards.failCount} > 0)::int as failing
-    from ${jobBoards} where ${jobBoards.status} = 'active' and ${jobBoards.source} <> 'jsearch'`)).rows as { total: number; checked: number; failing: number }[];
+    from ${jobBoards} join ${accounts} on ${accounts.id} = ${jobBoards.accountId}
+    where ${jobBoards.status} = 'active' and ${jobBoards.source} <> 'jsearch' and ${regionInScopeSql(pack, accounts.region)}`)).rows as { total: number; checked: number; failing: number }[];
   const [t] = (await db.execute(sql`
     select count(*)::int as n, count(*) filter (where ${runs.status} <> 'ok')::int as errors
     from ${runs} where ${runs.task} like 'tick:%' and ${runs.startedAt} > ${since}`)).rows as { n: number; errors: number }[];
@@ -41,7 +42,6 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
   const [tp] = (await db.execute(sql`select count(*)::int as n from tuning_actions where status = 'proposed' and created_at > now() - interval '8 days'`)).rows as { n: number }[];
   const metrics = Object.fromEntries(((await db.execute(sql`select distinct on (metric) metric, value from eval_results
     where computed_at > now() - interval '3 days' order by metric, computed_at desc`)).rows as { metric: string; value: number }[]).map((r) => [r.metric, Number(r.value)]));
-  void pack;
   return {
     boardsTotal: b?.total ?? 0, boardsChecked24h: b?.checked ?? 0, boardsFailing: b?.failing ?? 0,
     ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd, indiaTracked: india?.n ?? 0, usage, metrics, tuningPending: tp?.n ?? 0,
