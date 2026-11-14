@@ -35,6 +35,9 @@ export const IcpSchema = z.object({
     industries_any: z.array(z.string()).min(1),
     statuses: z.array(z.string()).min(1),
     exclude_domains: z.array(z.string()).default([]),
+    /** only accounts whose region is one of these (e.g. ["India"]); empty = any region. Unknown region fails, and person leads
+     *  (no account, no region) are dropped while this is set. Applied when scoring, so existing accounts are filtered too. */
+    regions_any: z.array(z.string()).default([]),
     /** sources other than YC rarely give team size / industry / status: "pass" admits them with a neutral fit score */
     unknown_facts: z.enum(["pass", "fail"]).default("fail"),
   }),

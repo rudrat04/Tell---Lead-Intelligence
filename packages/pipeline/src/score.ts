@@ -67,12 +67,13 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   const known = await db.select({ id: peopleTable.id, a: peopleTable.accountId, role: peopleTable.role, url: peopleTable.sourceUrl, fetchedAt: peopleTable.fetchedAt }).from(peopleTable);
   for (const p of known) byAccount.get(p.a)?.people.push({ id: p.id, role: p.role, url: p.url, fetchedAt: p.fetchedAt });
 
+  const regionsAny = pack.icp.hard_filters.regions_any;
   const ids = [...byAccount.keys()];
   const accts = new Map<string, ScoredAccount>();
   for (const part of chunk(ids, 500)) {
     const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, sizeBand: accounts.sizeBand, region: accounts.region, segment: accounts.segment, status: accounts.status })
       .from(accounts).where(inArray(accounts.id, part));
-    for (const r of rows) if (r.status === "active") accts.set(r.id, r);
+    for (const r of rows) if (r.status === "active" && (regionsAny.length === 0 || (r.region != null && regionsAny.includes(r.region)))) accts.set(r.id, r);
   }
 
   // Evidence is incomplete when a board covering the account failed on its last check (plan 8d-2: outages are not evidence)
@@ -131,7 +132,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     strength: signals.strength, observedAt: signals.observedAt,
   }).from(personLeads).innerJoin(signals, eq(personLeads.signalId, signals.id))
     .where(and(sql`${personLeads.mappedAccountId} is null`, sql`${signals.observedAt} > ${new Date(now.getTime() - 30 * DAY)}`));
-  const personRanked = pl.map((p) => ({ ...p, score: (p.strength / 5) * timingScore((now.getTime() - p.observedAt.getTime()) / DAY) }))
+  const personRanked = (regionsAny.length ? [] : pl).map((p) => ({ ...p, score: (p.strength / 5) * timingScore((now.getTime() - p.observedAt.getTime()) / DAY) }))
     .sort((a, b) => b.score - a.score).slice(0, 5)
     .map(({ observedAt: _o, ...rest }) => rest);
 

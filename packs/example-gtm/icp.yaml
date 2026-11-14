@@ -4,6 +4,7 @@ hard_filters:
   industries_any: ["B2B"]        # YC dataset industry labels
   statuses: ["Active"]
   exclude_domains: []            # competitors, existing clients
+  regions_any: []                # e.g. ["India"] = only accounts in these regions (unknown region fails); [] = any
 size_bands:
   - { band: "2-10", max: 10 }
   - { band: "11-50", max: 50 }
