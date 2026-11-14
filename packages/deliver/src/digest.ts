@@ -68,8 +68,8 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
 
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
   const max = pack.delivery.digest.max_leads;
-  // score a pool of 2x the leads, find who to contact there, drop leads with nobody to contact, re-rank by reach
-  const score = await runScoring({ pack, write: !opts.dryRun && !opts.test, maxLeads: max * 2 });
+  // score a pool of pool_multiplier x the leads, find who to contact there, drop leads with nobody to contact, re-rank by reach
+  const score = await runScoring({ pack, write: !opts.dryRun && !opts.test, maxLeads: max * pack.delivery.digest.pool_multiplier });
   const preferred = preferredPersonas([...score.ranking.leads, ...score.ranking.watchlist]);
   // people search only for the leads (not the watchlist) to stay inside the search API's free tier
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {

@@ -60,6 +60,14 @@ jobs:
           # SEC asks for a contact email in the User-Agent (Form D); unset = skipped. Cert Spotter key optional.
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           CERTSPOTTER_API_KEY: ${{ secrets.CERTSPOTTER_API_KEY }}
+      # Weekly: people search for the best eligible accounts, so the daily digest can name a contact for more of them
+      - name: Contact backfill
+        if: always()
+        continue-on-error: true
+        run: pnpm contacts:backfill
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
       # Weekly self-tuning proposals from your labels (never applied automatically; counts only in this log)
       - name: Tuning proposals
         if: always()

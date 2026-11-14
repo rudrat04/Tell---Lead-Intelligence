@@ -17,6 +17,7 @@
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:generate": "pnpm --filter @tell/db generate",
     "score": "tsx scripts/score.ts",
+    "contacts:backfill": "tsx scripts/backfill-contacts.ts",
     "digest": "tsx scripts/digest.ts",
     "gmail:auth": "tsx scripts/gmail-auth.ts",
     "gigs": "tsx scripts/gigs.ts",

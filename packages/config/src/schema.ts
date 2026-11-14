@@ -252,10 +252,13 @@ export const DeliverySchema = z.object({
     from: z.string().email().optional(),
     from_name: z.string().default("Lead digest"),
     max_leads: z.number().int().min(1).max(25).default(10),
+    /** candidates scored, searched for contacts and checked for email = max_leads x this; leads with no named contact drop out
+     *  and the next candidate takes the slot, so a larger pool fills the digest at the cost of more people searches */
+    pool_multiplier: z.number().int().min(1).max(5).default(3),
     /** slots kept for companies that qualify through non-hiring signals (funding, launches, tools, site changes, posts) */
     reserved_non_hiring: z.number().int().min(0).default(0),
     send_hour_local: z.number().int().min(0).max(23).default(9),
-  }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9, reserved_non_hiring: 0 }),
+  }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9, reserved_non_hiring: 0, pool_multiplier: 3 }),
   redeliver_after_days: z.number().int().min(1).default(90),
   /** Google Sheet for leads + your labels (created by `pnpm sheet:setup`; private: it holds lead names) */
   sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),
