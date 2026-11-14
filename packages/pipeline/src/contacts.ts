@@ -56,7 +56,7 @@ export async function contactsFor(
   // Cached per account + persona for PEOPLE_REFRESH_DAYS; capped per run to stay inside the free tier.
   const search = opts.search === undefined ? (process.env.EXA_API_KEY ? exaPeopleSearch() : null) : opts.search;
   if (search) {
-    let budget = opts.maxSearches ?? 25;
+    let budget = opts.maxSearches ?? 40;
     const opsRx = pack.roles.core.map(toRegex);
     const targets = new Set(opts.searchFor ?? accountIds);
     const memo = new Set((await db.select({ a: peopleSearches.accountId, p: peopleSearches.persona }).from(peopleSearches)

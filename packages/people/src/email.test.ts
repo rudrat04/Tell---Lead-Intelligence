@@ -48,17 +48,16 @@ describe("emailFor", () => {
     const g = emailFor("Mila Osk", "acme.test", { ...mailOk, pattern: { pattern: "flast", confidence: 1, support: 2 } }, [], "51-200")!;
     expect(g).toMatchObject({ address: "mosk@acme.test", status: "likely" });
   });
-  it("falls back to a size-based guess only when the domain takes mail", () => {
-    expect(emailFor("Mila Osk", "acme.test", mailOk, [], "1-10")).toMatchObject({ address: "mila@acme.test", status: "guessed" });
-    expect(emailFor("Mila Osk", "acme.test", mailOk, [], "201-500")).toMatchObject({ address: "mila.osk@acme.test", status: "guessed" });
+  it("shows no email (never a default-format guess) without an observed address or a learned pattern", () => {
+    expect(emailFor("Mila Osk", "acme.test", mailOk, [], "1-10")).toBeNull();
+    expect(emailFor("Mila Osk", "acme.test", mailOk, [], "201-500")).toBeNull();
     expect(emailFor("Mila Osk", "acme.test", { ...mailOk, acceptsMail: null }, [], "1-10")).toBeNull();
   });
   it("is invalid when the domain does not receive mail", () => {
     expect(emailFor("Mila Osk", "acme.test", { ...mailOk, acceptsMail: false }, [], "1-10")!.status).toBe("invalid");
   });
   it("a weak pattern is not 'likely'", () => {
-    const g = emailFor("Mila Osk", "acme.test", { ...mailOk, pattern: { pattern: "flast", confidence: 0.5, support: 2 } }, [], "1-10")!;
-    expect(g.status).toBe("guessed");
+    expect(emailFor("Mila Osk", "acme.test", { ...mailOk, pattern: { pattern: "flast", confidence: 0.5, support: 2 } }, [], "1-10")).toBeNull();
   });
 });
 

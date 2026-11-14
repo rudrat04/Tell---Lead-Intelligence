@@ -14,4 +14,8 @@ describe("portfolio pages", () => {
     expect(parseCompanyPage(`<h1>Orrin</h1><a href="https://orrin.test/">site</a>`).website).toBeNull();
     expect(parseCompanyPage(`<h1>Orrin</h1><div>Get to know them</div><a href="https://orrin.test/">↗</a>`, ["website", "get to know them"]).website).toBe("https://orrin.test/");
   });
+  it("reads the link from an aria-label anchor, skipping the site's own relative 'Website Logo' link", () => {
+    const html = `<h1>Orrin</h1><a aria-label="Acme Website Logo" href="/">x</a><a aria-label="Visit Orrin Website" href="https://orrin.test/">y</a>`;
+    expect(parseCompanyPage(html, ["website"]).website).toBe("https://orrin.test/");
+  });
 });

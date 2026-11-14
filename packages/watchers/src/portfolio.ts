@@ -30,8 +30,13 @@ export function parseCompanyPage(html: string, labels: string[] = ["website", "v
   const name = html.match(/<h1[^>]*>([^<]{2,80})<\/h1>/i)?.[1]?.trim() ?? html.match(/<title>([^<|–-]{2,80})/i)?.[1]?.trim() ?? null;
   // the first external link after a "Website" label, within a short window (no guessing from other links)
   const alt = labels.map((l) => l.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")).join("|");
-  const label = html.search(new RegExp(`>\\s*(?:${alt})\\s*<`, "i"));
+  // an anchor whose aria-label carries it ("Visit Acme Website") names its own link: most exact, so first
   let website: string | null = null;
+  for (const a of html.matchAll(new RegExp(`<a\\b[^>]*aria-label="[^"]*(?:${alt})[^"]*"[^>]*>`, "gi"))) {
+    const h = a[0].match(/href="(https?:\/\/[^"]+)"/i); // the site's own "Website Logo" link is relative: skipped
+    if (h) { website = h[1]!; break; }
+  }
+  const label = website ? -1 : html.search(new RegExp(`>\\s*(?:${alt})\\s*<`, "i"));
   if (label >= 0) {
     const m = html.slice(label, label + 1500).match(/href="(https?:\/\/[^"]+)"/i);
     if (m) website = m[1]!;

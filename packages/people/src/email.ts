@@ -5,7 +5,7 @@
  * Status, strongest first:
  *   observed: this exact address was seen in public for this person
  *   likely:   built from a pattern learned from at least one name-matched address at this domain
- *   guessed:  the domain receives mail but no pattern is known; built from the common default for the company size
+ *   (no guessed tier: without an observed address or a learned pattern, no email is shown)
  *   invalid:  the domain does not receive mail (no MX or a null MX), or a bounce came back
  * No SMTP probing: it is unreliable (catch-alls, greylisting) and looks like abuse.
  */
@@ -119,10 +119,8 @@ export function emailFor(
     const local = localPart(p.pattern, fullName);
     if (local) return { address: `${local}@${d}`, status: "likely", source: "pattern", note: `${p.pattern}@ pattern from ${p.support} public address${p.support === 1 ? "" : "es"}` };
   }
-  if (mail.acceptsMail === null) return null; // can't even confirm the domain takes mail: don't guess
-  const fallback = defaultPattern(sizeBand);
-  const local = localPart(fallback, fullName) ?? localPart("first", fullName);
-  return local ? { address: `${local}@${d}`, status: "guessed", source: "default", note: `common ${fallback}@ format, unverified` } : null;
+  // No default-format guess: without an observed address or a learned pattern there is no email to show
+  return null;
 }
 
 /** A shared mailbox seen on the site (founders@ beats hello@ beats info@), as a fallback channel. */

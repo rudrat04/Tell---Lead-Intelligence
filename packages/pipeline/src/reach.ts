@@ -25,15 +25,19 @@ export function reachFactor(contact: Contact | null | undefined, owners: string[
   return f;
 }
 
-/** Re-rank the pool (2x max_leads) by priority x reach, keeping the usual guarantees (fast lane, reserved slots). */
-export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string, Contact | null>, pack: Pack, max: number): { ranking: Ranking<ScoredAccount>; factors: Map<string, number> } {
+/**
+ * Re-rank the pool (2x max_leads) by priority x reach, keeping the usual guarantees (fast lane, reserved slots).
+ * A lead with no named contact is dropped, not shown: its slot goes to the next one in the pool.
+ */
+export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string, Contact | null>, pack: Pack, max: number): { ranking: Ranking<ScoredAccount>; factors: Map<string, number>; noContact: number } {
   const owners = preferredPersonas([...pool.leads, ...pool.watchlist]);
   const factors = new Map<string, number>();
-  const rows = [...pool.leads, ...pool.watchlist].map((r) => {
+  const rows = [...pool.leads, ...pool.watchlist].filter((r) => contacts.get(r.account.id)).map((r) => {
     const f = reachFactor(contacts.get(r.account.id), owners.get(r.account.id) ?? [], pack.icp.reach);
     factors.set(r.account.id, f);
     return { ...r, score: { ...r.score, priority: r.score.priority * f } };
   });
   const ranking = rankAccounts(rows, max, 5, { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days });
-  return { ranking: { ...ranking, held: pool.held }, factors };
+  const noContact = [...pool.leads, ...pool.watchlist].filter((r) => !contacts.get(r.account.id)).length;
+  return { ranking: { ...ranking, held: pool.held }, factors, noContact };
 }

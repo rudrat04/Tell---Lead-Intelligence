@@ -120,6 +120,7 @@ function reachHtml(c: Contact): string {
   const parts = [
     e && `${A(`mailto:${e.address}`, esc(e.address))} <span style="color:${C.faint}">${EMAIL_LABEL[e.status]}</span>`,
     !e && c.generic && `${A(`mailto:${c.generic}`, esc(c.generic))} <span style="color:${C.faint}">shared inbox</span>`,
+    !e && !c.generic && `<span style="color:${C.faint}">No email found</span>`,
     c.person.linkedin && A(c.person.linkedin, "LinkedIn"),
     c.person.twitter && A(c.person.twitter, "X"),
   ].filter(Boolean);
@@ -183,7 +184,7 @@ function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   const angle = n?.angle ?? s.plays[0]?.angle;
   return [
     c ? `${i + 1}. ${c.person.name}, ${c.person.role ?? c.persona ?? ""} at ${company} (${a.domain}${facts ? `, ${facts}` : ""})` : `${i + 1}. ${company} (${a.domain}${facts ? `, ${facts}` : ""}), no contact found yet`,
-    c ? `   ${[emailText(c.person) ?? (c.generic ? `${c.generic} (shared inbox)` : null), c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}` : "",
+    c ? `   ${[emailText(c.person) ?? (c.generic ? `${c.generic} (shared inbox)` : "No email found"), c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}` : "",
     ...(c?.others ?? []).map((o) => `   Also: ${o.person.name}, ${o.person.role ?? o.persona}${o.person.linkedin ? ` ${o.person.linkedin}` : ""}`),
     ...(c ? [] : personaSearchLinks(personas, a.sizeBand, company, null).slice(0, 2).map((x) => `   Search ${x.persona}: ${x.url}`)),
     n ? `   Why now: ${n.hypothesis}` : "",
