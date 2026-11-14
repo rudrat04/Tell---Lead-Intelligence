@@ -20,3 +20,6 @@
 {"title":"Founding GTM Recruiter","type":null,"expect":null,"note":"false positive: recruiter"}
 {"title":"Talent Partner, GTM","type":null,"expect":null,"note":"false positive: recruiter"}
 {"title":"Office Manager","type":null,"expect":null}
+{"title":"Salesforce Developer","type":null,"expect":null,"note":"false positive: developer hire extends an existing CRM"}
+{"title":"Senior Zoho CRM Developer","type":null,"expect":null,"note":"false positive: developer hire extends an existing CRM"}
+{"title":"Salesforce Administrator","type":null,"expect":"core","note":"admin still core"}
