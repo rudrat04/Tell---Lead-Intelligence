@@ -9,7 +9,9 @@ export interface BackfillDraftsResult {
   deliveries: number;
   scored: number;
   analyst: { fresh: number; cached: number; failed: number; spentUsd: number; skipped?: string };
-  drafts: { email: number; linkedin: number };
+  drafts: { email: number; linkedin: number; cleared: number };
+  /** why drafts were dropped after every rewrite, by kind of problem (counts only) */
+  failures: Record<string, number>;
   sheet: { email: number; opener: number; linkedin: number } | null;
   /** local review only (never printed in CI) */
   samples: { company: string; email: string; linkedin: string }[];
@@ -29,7 +31,7 @@ export async function backfillDrafts(opts: { pack: Pack; dryRun?: boolean; capUs
   const db = getDb();
   const rows = await db.select({ id: deliveries.id, accountId: deliveries.accountId, row: deliveries.sheetRow }).from(deliveries)
     .where(sql`${deliveries.sheetRow} is not null and ${deliveries.accountId} is not null`);
-  const res: BackfillDraftsResult = { deliveries: rows.length, scored: 0, analyst: { fresh: 0, cached: 0, failed: 0, spentUsd: 0 }, drafts: { email: 0, linkedin: 0 }, sheet: null, samples: [] };
+  const res: BackfillDraftsResult = { deliveries: rows.length, scored: 0, analyst: { fresh: 0, cached: 0, failed: 0, spentUsd: 0 }, drafts: { email: 0, linkedin: 0, cleared: 0 }, failures: {}, sheet: null, samples: [] };
   if (!rows.length) return res;
 
   // latest delivery per account (an account delivered twice gets the same drafts on both rows)
@@ -48,21 +50,28 @@ export async function backfillDrafts(opts: { pack: Pack; dryRun?: boolean; capUs
 
   const email = new Map<string, string>(), opener = new Map<string, string>(), linkedin = new Map<string, string>();
   const leadOf = new Map(leads.map((l) => [l.account.id, l]));
+  const kind = (p: string) => p.replace(/\s*\(.*$/, "").replace(/"[^"]*"/g, "…").slice(0, 50);
+  for (const n of an.analyses.values()) {
+    for (const p of [...(n.emailProblems ?? []), ...(n.linkedinProblems ?? [])]) res.failures[kind(p)] = (res.failures[kind(p)] ?? 0) + 1;
+  }
   for (const r of rows) {
     const l = leadOf.get(r.accountId!), n = an.analyses.get(r.accountId!);
-    if (!l || !n) continue;
+    if (!l) continue; // out of scope now (e.g. region): its old drafts stay as they were
     const c = contacts.get(r.accountId!);
-    const e = emailDraft(c, n, pack.delivery.email.signature, pack.copy.greeting);
-    const li = linkedinDraft(c, n, pack.copy.linkedin.greeting);
+    const e = n ? emailDraft(c, n, pack.delivery.email.signature, pack.copy.greeting) : "";
+    const li = n ? linkedinDraft(c, n, pack.copy.linkedin.greeting) : "";
     const op = leadOpener(c, l.account.name ?? l.account.domain, l.score.drivers[0], n) ?? "";
-    if (e) { email.set(r.id, e); res.drafts.email++; }
-    if (li) { linkedin.set(r.id, li); res.drafts.linkedin++; }
+    // a draft that doesn't pass today's checks clears the old one: an empty cell beats a draft in the old voice
+    email.set(r.id, e); linkedin.set(r.id, li);
+    if (e) res.drafts.email++;
+    if (li) res.drafts.linkedin++;
+    if (!e || !li) res.drafts.cleared++;
     if (op) opener.set(r.id, op);
     if (res.samples.length < 5 && (e || li)) res.samples.push({ company: l.account.name ?? l.account.domain, email: e, linkedin: li });
     if (opts.dryRun) continue;
     const stored = [...((r.row as string[]) ?? [])];
-    const put = (col: (typeof LEAD_COLUMNS)[number], v: string | undefined) => { if (!v) return; const i = storedIndex(col); while (stored.length < i) stored.push(""); stored[i] = v; };
-    put("Email draft", e); put("LinkedIn message", li); put("Opener", op);
+    const put = (col: (typeof LEAD_COLUMNS)[number], v: string | undefined) => { if (v === undefined) return; const i = storedIndex(col); while (stored.length < i) stored.push(""); stored[i] = v; };
+    put("Email draft", e); put("LinkedIn message", li); put("Opener", op || undefined);
     await db.update(deliveries).set({ sheetRow: stored }).where(eq(deliveries.id, r.id));
   }
 

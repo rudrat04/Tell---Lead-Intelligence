@@ -121,7 +121,8 @@ export async function ensureLeadHeaders(spreadsheetId: string): Promise<string[]
 
 /**
  * Fill one column (found by header name) for rows matched by hidden ID. Only empty cells are written unless
- * `overwrite` (for a column the code owns, e.g. Priority after a scale change; never your Label/Notes). Returns cells written.
+ * `overwrite` (for a column the code owns, e.g. Priority after a scale change; never your Label/Notes), where an empty
+ * value clears the cell. Returns cells written.
  */
 export async function fillColumnById(spreadsheetId: string, column: string, values: Map<string, string>, overwrite = false): Promise<number> {
   const j = await call<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!A:AZ")}`);
@@ -131,7 +132,10 @@ export async function fillColumnById(spreadsheetId: string, column: string, valu
   if (idCol < 0 || col < 0) throw new Error(`Leads tab needs "ID" and "${column}" columns`);
   const data = rows.flatMap((r, i) => {
     const v = values.get((r[idCol] ?? "").trim());
-    return v && (overwrite ? (r[col] ?? "").trim() !== v : !(r[col] ?? "").trim()) ? [{ range: `Leads!${a1Col(col)}${i + 2}`, values: [[v]] }] : [];
+    // with overwrite, "" clears a code-owned cell (a draft that no longer passes the checks); without it, only empty cells are filled
+    const cur = (r[col] ?? "").trim();
+    const write = v !== undefined && (overwrite ? cur !== v : !!v && !cur);
+    return write ? [{ range: `Leads!${a1Col(col)}${i + 2}`, values: [[v]] }] : [];
   });
   if (data.length) await call(`/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) });
   return data.length;

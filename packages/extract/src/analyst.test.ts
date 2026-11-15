@@ -145,3 +145,37 @@ describe("analyst: research-based rules and the LinkedIn message", () => {
     expect(a!.linkedin).toBe(li.linkedin_message);
   });
 });
+
+describe("analyst: first line says what you noticed (copy.opening_patterns)", () => {
+  const openings = [/\b(saw|noticed)\b/i];
+  const email = { email_subject: "sales hires", email_body: "saw you're hiring a head of sales and a BDM.\n\nusually the founder hands over deals soon.\n\nis the process already written down?" };
+  const check = (o: object) => validateAnalysis(JSON.stringify({ ...good, ...email, linkedin_message: "noticed the head of sales and BDM openings. who sets up the process?", ...o }), input, { maxWords: 75, linkedinMaxWords: 50, openings })!;
+  it("keeps drafts that open with what you noticed", () => {
+    const a = check({});
+    expect(a.email).not.toBeNull();
+    expect(a.linkedin).not.toBeNull();
+  });
+  it("drops a LinkedIn message or email that opens with a bare fragment", () => {
+    expect(check({ linkedin_message: "a head of sales and a bdm in one go, that's a big stage.\n\nwho owns the process?" }).linkedinProblems!.join()).toMatch(/fragment/);
+    expect(check({ email_body: "running a few overlapping tools is pretty normal.\n\nusually it gets messy.\n\nis it biting yet?" }).emailProblems!.join()).toMatch(/fragment/);
+  });
+});
+
+describe("analyst: tool names and casing", () => {
+  const tools = { ...input, evidence: [{ type: "tool_overlap", ageDays: 0, current: true, quote: "2 crm tools: HubSpot, Salesforce; 2 email tools: SendGrid, Zoho Campaigns", url: "u" }, { type: "adjacent_role_open", ageDays: 3, current: true, quote: "Senior BDM", url: "u2" }] };
+  const names = ["HubSpot", "Salesforce", "SendGrid", "Zoho Campaigns", "Drift", "Qualified"];
+  const base = { ...good, opener: "saw the two CRMs side by side.", citations: [0], email_subject: "two crms", linkedin_message: "noticed HubSpot and Salesforce side by side. how do they play together?" };
+  const check = (body: string) => validateAnalysis(JSON.stringify({ ...base, email_body: body }), tools, { maxWords: 75, linkedinMaxWords: 50, toolNames: names })!;
+  it("drops a draft naming more than two of the lead's tools", () => {
+    expect(check("saw you're on hubspot, salesforce, sendgrid and zoho campaigns.\n\nthat gets messy.\n\nis it biting yet?").emailProblems!.join()).toMatch(/names 4 tools/);
+  });
+  it("tool names that are ordinary words don't count unless the evidence names them", () => {
+    expect(check("saw you're on hubspot and salesforce.\n\nqualified leads drift between them.\n\nis it biting yet?").email).not.toBeNull();
+  });
+  it("puts brand and role casing back in a lowercase draft, leaves ordinary words alone", () => {
+    const a = check("saw you're on hubspot and salesforce and hiring a senior bdm.\n\nqualified leads drift.\n\nis it biting yet?");
+    expect(a.email!.body).toContain("saw you're on HubSpot and Salesforce and hiring a senior BDM.");
+    expect(a.email!.body).toContain("qualified leads drift.");
+    expect(a.linkedin).toContain("HubSpot and Salesforce");
+  });
+});

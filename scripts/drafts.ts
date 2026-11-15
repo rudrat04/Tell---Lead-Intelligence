@@ -15,5 +15,6 @@ const capAt = args.indexOf("--cap");
 const r = await backfillDrafts({ pack: await loadPack(), dryRun: args.includes("--dry"), capUsd: capAt >= 0 ? Number(args[capAt + 1]) : 3 });
 const a = r.analyst;
 console.log(`drafts: deliveries=${r.deliveries} scored=${r.scored} analyst fresh=${a.fresh} cached=${a.cached} failed=${a.failed} spent_usd=${a.spentUsd.toFixed(3)}${a.skipped ? ` (${a.skipped})` : ""}`);
-console.log(`checked drafts: email=${r.drafts.email} linkedin=${r.drafts.linkedin}${r.sheet ? ` | sheet cells written: email=${r.sheet.email} opener=${r.sheet.opener} linkedin=${r.sheet.linkedin}` : ""}`);
+console.log(`checked drafts: email=${r.drafts.email} linkedin=${r.drafts.linkedin} rows_with_a_cleared_cell=${r.drafts.cleared}${r.sheet ? ` | sheet cells written: email=${r.sheet.email} opener=${r.sheet.opener} linkedin=${r.sheet.linkedin}` : ""}`);
+if (Object.keys(r.failures).length) console.log(`dropped after rewrites: ${Object.entries(r.failures).map(([k, v]) => `${k}=${v}`).join("; ")}`);
 if (show) for (const s of r.samples) console.log(`\n=== ${s.company}\n--- email\n${s.email || "(none)"}\n--- linkedin\n${s.linkedin || "(none)"}`);

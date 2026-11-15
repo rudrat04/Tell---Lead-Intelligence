@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Pack } from "@tell/config";
+import { toRegex, type Pack } from "@tell/config";
 import type { LlmClient } from "./post.js";
 
 /**
@@ -138,7 +138,7 @@ const norm = (s: string) => s.toLowerCase().replace(/[‘’]/g, "'").replace(/\
 
 /** Validate the model's JSON against the evidence. Null when it can't be trusted. */
 /** Email copy rules checked in code: words you never want sent, and "open 121 days"-style counting. */
-export interface CopyChecks { neverSay?: string[]; noDurations?: boolean; linkedinMaxWords?: number; /** the brief's own text: an email that copies COPIED_RUN words in a row from it reads like a template */ briefText?: string[] }
+export interface CopyChecks { neverSay?: string[]; noDurations?: boolean; linkedinMaxWords?: number; /** the first sentence must match one */ openings?: RegExp[]; /** tool names (pack tools.yaml labels): a draft names at most two */ toolNames?: string[]; /** the brief's own text: an email that copies COPIED_RUN words in a row from it reads like a template */ briefText?: string[] }
 
 /** consecutive words shared with the brief that count as pasted (short common phrases like "one picture of every customer" don't) */
 export const COPIED_RUN = 9;
@@ -178,6 +178,8 @@ export function validateAnalysis(raw: string, input: AnalystInput, opts: { allow
   if (opener.length < 10) return null;
   // the email and the LinkedIn message are checked the same way; if one fails, the analysis stands without it
   const lower = (t: string) => t.toLowerCase();
+  // only tools this lead's evidence names: "Drift", "Qualified", "Segment" are ordinary words everywhere else
+  const leadTools = (opts.toolNames ?? []).filter((t) => input.evidence.some((e) => e.quote.includes(t)));
   const common = (raw: string, body: string, maxWords: number): string[] => {
     const out: string[] = [];
     const words = body.split(/\s+/).filter(Boolean).length;
@@ -200,6 +202,10 @@ export function validateAnalysis(raw: string, input: AnalystInput, opts: { allow
     const intro = raw.match(SELF_INTRO);
     if (intro) out.push(`talks about yourself ("${intro[0]}"): lead with them`);
     if (!/\?\s*$/.test(body)) out.push("doesn't end on a question");
+    const tools = leadTools.filter((t) => new RegExp(`(^|[^a-z0-9])${t.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9])`).test(lower(body)));
+    if (tools.length > 2) out.push(`names ${tools.length} tools (${tools.join(", ")}): name only the two doing the same job`);
+    const first = body.split(/(?<=[.?!])\s|\n/)[0] ?? "";
+    if (opts.openings?.length && !opts.openings.some((r) => r.test(first))) out.push(`opens with a fragment ("${first.slice(0, 60)}"): the first sentence must say what you noticed ("saw you're hiring...", "noticed you're running...")`);
     return out;
   };
   const greet = /^(hi|hey|hello|dear)\b[^,\n]{0,40}[,—-]\s*/i;
@@ -211,7 +217,7 @@ export function validateAnalysis(raw: string, input: AnalystInput, opts: { allow
     problems.push(...common(`${r.email_subject} ${r.email_body}`, body, opts.maxWords ?? 110));
     if (subject.split(/\s+/).length > 6) problems.push("subject is too long (2 to 4 words)");
     if (!numbersOk(subject) || !quotesOk(subject)) problems.push("subject uses a number or quote that is not in the evidence");
-    if (!problems.length) email = { subject, body };
+    if (!problems.length) email = { subject, body: restoreCase(body, caseNames(input, leadTools)) };
   } else problems.push("email missing");
   let linkedin: string | null = null;
   const liProblems: string[] = [];
@@ -222,7 +228,7 @@ export function validateAnalysis(raw: string, input: AnalystInput, opts: { allow
     const pitch = li.match(LINKEDIN_PITCH);
     if (pitch) liProblems.push(`pitches in the first message ("${pitch[0]}"): start a conversation, no offer yet`);
     if (body && norm(li).slice(0, 40) === norm(body).slice(0, 40)) liProblems.push("repeats the email: write it fresh for LinkedIn");
-    if (!liProblems.length) linkedin = li;
+    if (!liProblems.length) linkedin = restoreCase(li, caseNames(input, leadTools));
   } else liProblems.push("linkedin message missing");
   return {
     hypothesis: r.hypothesis.trim(), angle: r.angle.trim(), opener,
@@ -230,6 +236,24 @@ export function validateAnalysis(raw: string, input: AnalystInput, opts: { allow
     ...(email ? {} : { emailProblems: problems }),
     ...(linkedin ? {} : { linkedinProblems: liProblems }),
   };
+}
+
+/**
+ * Names whose casing matters in a lowercase voice: tool names, the company, and words in the evidence written with
+ * capitals inside (HubSpot) or all caps (BDM, CRM). Capitalised ordinary words ("Senior", "Manager") are left alone.
+ */
+export function caseNames(input: AnalystInput, toolNames: string[] = []): string[] {
+  const fromEvidence = input.evidence.flatMap((e) => e.quote.match(/\b(?:[A-Z]{2,}[a-z]?s?|[A-Za-z]*[a-z][A-Z][A-Za-z]*)\b/g) ?? []);
+  return [...new Set([...toolNames, input.company, ...fromEvidence])].filter((n) => n.length >= 2 && /[A-Z]/.test(n));
+}
+
+/** Put those names back in their own casing ("salesforce admin" -> "Salesforce admin", "bdm" -> "BDM"). */
+export function restoreCase(text: string, names: string[]): string {
+  let out = text;
+  for (const n of [...names].sort((a, b) => b.length - a.length)) {
+    out = out.replace(new RegExp(`(?<![A-Za-z0-9])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`, "gi"), n);
+  }
+  return out;
 }
 
 const HYPE = /\b(hope (this|you)[^.?]{0,30}(finds|well|doing)|synerg\w*|game[- ]chang\w*|revolutioni[sz]e|unlock\w*|supercharg\w*|skyrocket\w*|seamless\w*|cutting[- ]edge|world[- ]class|best[- ]in[- ]class)/i;
@@ -254,6 +278,8 @@ export async function analyzeLead(llm: LlmClient, pack: Pack, input: AnalystInpu
   const opts = {
     allowedText: [pack.meta.offer, pack.delivery.email.next_step, ...c.offers.map((o) => o.idea), ...c.ctas].join("\n"),
     maxWords: pack.delivery.email.max_words, linkedinMaxWords: c.linkedin.max_words, neverSay: c.never_say, noDurations: !c.allow_durations,
+    openings: (c.opening_patterns ?? []).map(toRegex),
+    toolNames: Object.values(pack.tools.tools).map((t) => t.label),
     briefText: [...c.offers.map((o) => o.idea), ...c.ctas, ...c.examples.map((e) => e.body), ...c.linkedin.examples.map((e) => e.body)],
   };
   // each lead gets the offers its plays fit (general ones when none do) and a closing style picked by its domain,
