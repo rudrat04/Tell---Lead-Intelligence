@@ -31,9 +31,18 @@ async function readR2(prefix: string): Promise<Record<string, string>> {
   const { aws, base } = r2Client();
   const out: Record<string, string> = {};
   await Promise.all(PACK_FILES.map(async (f) => {
-    const res = await aws.fetch(objectUrl(base, prefix, f));
-    if (res.ok) out[f] = await res.text();
-    else if (res.status !== 404) throw new PackError(`R2 ${f}.yaml -> HTTP ${res.status}`);
+    // network blips ("fetch failed") and 5xx are retried; a 404 means the optional file isn't there
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await aws.fetch(objectUrl(base, prefix, f));
+        if (res.ok) { out[f] = await res.text(); return; }
+        if (res.status === 404) return;
+        if (res.status < 500 || attempt >= 3) throw new PackError(`R2 ${f}.yaml -> HTTP ${res.status}`);
+      } catch (e) {
+        if (e instanceof PackError || attempt >= 3) throw e;
+      }
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
   }));
   return out;
 }

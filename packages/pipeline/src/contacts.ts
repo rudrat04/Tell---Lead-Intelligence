@@ -78,8 +78,10 @@ export async function contactsFor(
         let found: Person[] = [];
         try {
           const hits = await search.search(`${persona.search ?? persona.title.split("/")[0]!.trim()} at ${company}`, 5);
-          found = hits.map((h) => { const p = acceptPeopleHit(h, company, acct.domain, rx); return p ? { ...p, workHistory: h.roles.map((r) => ({ title: r.title, company: r.company, from: r.from ?? null, to: r.to ?? null })) } : null; })
-            .filter((x): x is Person => !!x).slice(0, 2);
+          found = hits.flatMap((h): Person[] => {
+            const p = acceptPeopleHit(h, company, acct.domain, rx);
+            return p ? [{ ...p, workHistory: h.roles.map((r) => ({ title: r.title, company: r.company, from: r.from ?? null, to: r.to ?? null })) }] : [];
+          }).slice(0, 2);
           // dated roles in the same results: a new GTM leader, or an ops person who left (only types the pack defines)
           const evs = hits.flatMap((h) => peopleEvents(h, company, acct.domain, opsRx, new Date())).filter((e) => pack.signals.signals[e.type]);
           if (write && evs.length) {

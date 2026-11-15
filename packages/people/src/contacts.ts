@@ -9,7 +9,7 @@ export interface Person {
   source: string;
   sourceUrl?: string | null;
   /** past roles from people search (warm path: a shared past employer) */
-  workHistory?: { company: string }[] | null;
+  workHistory?: { company: string; title?: string; from?: string | null; to?: string | null }[] | null;
   /** best address from the email engine (plan 9b), with how sure we are */
   email?: { address: string; status: "observed" | "likely" | "guessed" | "invalid"; note: string } | null;
 }

@@ -14,7 +14,7 @@ export interface NetworkRow {
 }
 
 export interface WarmPath {
-  kind: "connected" | "client_there" | "connection_there" | "shared_employer";
+  kind: "connected" | "client_there" | "connection_there" | "shared_employer" | "champion";
   /** shown in the digest and the Sheet */
   text: string;
 }

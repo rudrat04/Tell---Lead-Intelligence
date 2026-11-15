@@ -36,5 +36,13 @@ for (const s of res.summaries) {
 }
 console.log(`haiku: run=$${res.spentThisRunUsd.toFixed(4)} today=$${res.spentTodayUsd.toFixed(4)} cap=$${res.dailyCapUsd}`);
 
-// Fail the job (visible in the Actions tab) when every source errored.
-if (res.summaries.length && res.summaries.every((s) => s.error)) process.exit(1);
+// Fail the job (visible in the Actions tab, and an email) when every source errored two ticks in a row. One failed tick
+// is usually a network blip (a source timing out); the next tick catches up because lastRunAt only moves on a clean run.
+if (res.summaries.length && res.summaries.every((s) => s.error)) {
+  const prev = await getDb().execute(sql`
+    select status from (select status, row_number() over (partition by task order by started_at desc) as n
+      from ${runs} where task in (${sql.join(res.summaries.map((s) => sql`${`tick:${s.sourceId}`}`), sql`, `)})) r where n = 2`);
+  const prevOk = (prev.rows as { status: string }[]).some((r) => r.status === "ok");
+  if (prevOk) console.log("every source errored this tick, but the previous tick was fine: treating it as a blip");
+  else process.exit(1);
+}
