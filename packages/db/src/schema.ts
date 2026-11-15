@@ -176,6 +176,8 @@ export const analyses = pgTable("analyses", {
   /** opening email drafted with the analysis (subject + body without greeting/signature) */
   emailSubject: text("email_subject"),
   emailBody: text("email_body"),
+  /** first LinkedIn message after they accept (without the greeting the code writes) */
+  linkedinMessage: text("linkedin_message"),
   createdAt: ts("created_at").defaultNow(),
 }, (t) => [uniqueIndex("analyses_account_evidence_uq").on(t.accountId, t.evidenceKey)]);
 

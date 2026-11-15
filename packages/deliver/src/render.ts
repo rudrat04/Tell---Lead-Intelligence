@@ -84,13 +84,23 @@ export function opener(c: Contact | null | undefined, company: string, e: Eviden
 }
 
 /** Analyst output for a lead (cited, validated in code); absent when Haiku was unavailable or failed validation. */
-export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number; email?: { subject: string; body: string } | null }
+export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number; email?: { subject: string; body: string } | null; linkedin?: string | null }
+
+/** The pack's greeting with the contact's first name ("hey {first}," -> "hey Asha,"); without a contact the name goes. */
+export function greeting(template: string, c: Contact | null | undefined): string {
+  return c ? template.replaceAll("{first}", firstName(c.person.name)) : template.replace(/\s*\{first\}/g, "");
+}
 
 /** The opening email as it goes in the Sheet: subject, greeting written by code, body, your signature. Empty without a draft. */
-export function emailDraft(c: Contact | null | undefined, n: LeadNote | undefined, signature = ""): string {
+export function emailDraft(c: Contact | null | undefined, n: LeadNote | undefined, signature = "", hello = "Hi {first},"): string {
   if (!n?.email) return "";
-  const hi = c ? `Hi ${firstName(c.person.name)},` : "Hi,";
-  return [`Subject: ${n.email.subject}`, "", hi, "", n.email.body.trim(), ...(signature.trim() ? ["", signature.trim()] : [])].join("\n");
+  return [`Subject: ${n.email.subject}`, "", greeting(hello, c), "", n.email.body.trim(), ...(signature.trim() ? ["", signature.trim()] : [])].join("\n");
+}
+
+/** The first LinkedIn message (after they accept), greeting written by code. Empty without a checked draft. */
+export function linkedinDraft(c: Contact | null | undefined, n: LeadNote | undefined, hello = "Hi {first},"): string {
+  if (!n?.linkedin) return "";
+  return `${greeting(hello, c)}\n\n${n.linkedin.trim()}`;
 }
 export type Notes = Map<string, LeadNote>;
 
@@ -286,7 +296,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 }
 
 /** The Sheet row for a delivered lead, in LEAD_COLUMNS order minus ID (appended when the delivery id exists). */
-export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = ""): string[] {
+export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }): string[] {
   const a = l.account, s = l.score;
   const company = a.name ?? a.domain;
   return [
@@ -306,8 +316,9 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     String(displayScore(s)), // 0-100: how far above the base rate
     "", "", "", "", // Label, Reason, Outcome, Notes: yours
     // (the hidden ID column is inserted here when the row is appended)
-    emailDraft(contact, note, signature),
+    emailDraft(contact, note, signature, copy?.greeting),
     signalSummary(s.evidence),
+    linkedinDraft(contact, note, copy?.linkedin.greeting),
   ];
 }
 

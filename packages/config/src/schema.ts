@@ -337,9 +337,19 @@ export const CopySchema = z.object({
   allow_durations: z.boolean().default(false),
   /** a few emails in the voice you want: patterns to learn from, never to copy */
   examples: z.array(z.object({ situation: z.string(), subject: z.string(), body: z.string() })).default([]),
+  /** the greeting the code writes above every email ({first} = first name; without a contact the name part is dropped) */
+  greeting: z.string().default("Hi {first},"),
+  /** the first LinkedIn message after they accept your connection (not the connection note): Sheet "LinkedIn message" */
+  linkedin: z.object({
+    /** extra voice notes for LinkedIn (the email voice applies too) */
+    voice: z.string().default(""),
+    greeting: z.string().default("Hi {first},"),
+    max_words: z.number().int().min(15).max(120).default(50),
+    examples: z.array(z.object({ situation: z.string(), body: z.string() })).default([]),
+  }).default({ voice: "", greeting: "Hi {first},", max_words: 50, examples: [] }),
 });
 export type Copy = z.infer<typeof CopySchema>;
-const COPY_DEFAULT: Copy = { voice: "", mention: "", offers: [], ctas: [], never_say: [], allow_durations: false, examples: [] };
+const COPY_DEFAULT: Copy = { voice: "", mention: "", offers: [], ctas: [], never_say: [], allow_durations: false, examples: [], greeting: "Hi {first},", linkedin: { voice: "", greeting: "Hi {first},", max_words: 50, examples: [] } };
 
 export const PackSchema = z.object({
   meta: PackMetaSchema,

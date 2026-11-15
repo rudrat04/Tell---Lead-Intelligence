@@ -53,7 +53,7 @@ describe("analyst: invented numbers", () => {
 });
 
 describe("analyst: opening email", () => {
-  const email = { email_subject: "your founding AE role", email_body: "Saw the \"Founding Account Executive\" role is still open.\n\nI can set up your CRM stages and routing now, so the hire sells from day one.\n\nOpen to a free 30-minute diagnostic call?" };
+  const email = { email_subject: "your founding AE role", email_body: "saw the \"Founding Account Executive\" role.\n\ni can set up your CRM stages and routing now, so the hire sells from day one.\n\nwant the plan, or not a priority yet?" };
   const opts = { allowedText: "a free 30-minute diagnostic call", maxWords: 110 };
   it("keeps a checked email", () => {
     expect(validateAnalysis(JSON.stringify({ ...good, ...email }), input, opts)!.email).toMatchObject({ subject: "your founding AE role" });
@@ -73,7 +73,7 @@ describe("analyst: opening email", () => {
 });
 
 describe("analyst: copy rules from the pack (copy.yaml)", () => {
-  const email = { email_subject: "your sales team", email_body: "Saw you're building out the sales team, which usually means the way leads move is about to get busier.\n\nI help teams put one GTM system in place before the new hires land, so they walk into something that works.\n\nWould it help if I shared a few ideas on how teams at your stage set this up?" };
+  const email = { email_subject: "your sales team", email_body: "saw you're building out the sales team, which usually means the way leads move is about to get busier.\n\ni put one GTM system in place before the new hires land, so they walk into something that works.\n\nwould it help if i shared a few ideas on how teams at your stage set this up?" };
   const opts = { maxWords: 110, neverSay: ["audit", "freelance bridge"], noDurations: true };
   it("keeps an email that follows the brief", () => {
     expect(validateAnalysis(JSON.stringify({ ...good, ...email }), input, opts)!.email).not.toBeNull();
@@ -90,15 +90,15 @@ describe("analyst: copy rules from the pack (copy.yaml)", () => {
     expect(a.emailProblems!.join()).toMatch(/mid-thought/);
   });
   it("drops banned words as whole words only", () => {
-    const bad = validateAnalysis(JSON.stringify({ ...good, ...email, email_body: email.email_body.replace("I help teams", "A quick audit helps teams") }), input, opts)!;
+    const bad = validateAnalysis(JSON.stringify({ ...good, ...email, email_body: email.email_body.replace("i put one", "a quick audit puts one") }), input, opts)!;
     expect(bad.emailProblems!.join()).toMatch(/"audit"/);
-    expect(validateAnalysis(JSON.stringify({ ...good, ...email, email_body: email.email_body.replace("I help teams", "Auditors aside, I help teams") }), input, opts)!.email).not.toBeNull();
+    expect(validateAnalysis(JSON.stringify({ ...good, ...email, email_body: email.email_body.replace("i put one", "auditors aside, i put one") }), input, opts)!.email).not.toBeNull();
   });
   it("rewrites with the reasons, and thinks before writing", async () => {
     const calls: { user: string; think?: boolean }[] = [];
     const replies = [
-      JSON.stringify({ ...good, ...email, email_body: "Your role has been open 52 days.\n\nI help.\n\nIdeas?" }),
-      JSON.stringify({ ...good, ...email }),
+      JSON.stringify({ ...good, ...email, linkedin_message: "saw the sales team's growing. how's it going?", email_body: "Your role has been open 52 days.\n\nI help.\n\nIdeas?" }),
+      JSON.stringify({ ...good, ...email, linkedin_message: "saw the sales team's growing. how's it going?" }),
     ];
     const llm = { complete: async (a: { system: string; user: string; think?: boolean }) => { calls.push(a); return replies[calls.length - 1]!; } };
     const p = { ...pack, copy: { ...pack.copy, never_say: ["audit"], allow_durations: false } };
@@ -112,5 +112,36 @@ describe("analyst: copy rules from the pack (copy.yaml)", () => {
     const p = { ...pack, copy: { ...pack.copy, voice: "Peer to peer, warm.", ctas: ["Share a few ideas?"], never_say: ["audit"], offers: [{ plays: [], idea: "One GTM system the whole company runs on" }] } };
     const sys = analystSystemPrompt(p);
     for (const s of ["Peer to peer, warm.", "Share a few ideas?", '"audit"', "One GTM system the whole company runs on"]) expect(sys).toContain(s);
+  });
+});
+
+describe("analyst: research-based rules and the LinkedIn message", () => {
+  const email = { email_subject: "your sales team", email_body: "saw you're building out the sales team.\n\nusually the way leads move gets messy right after.\n\nwant a few ideas on fixing that early, or not a priority?" };
+  const li = { linkedin_message: "thanks for connecting. saw the sales team's growing, fun stage.\n\nare the new folks picking up your deals or starting fresh?" };
+  const opts = { maxWords: 75, linkedinMaxWords: 45 };
+  const check = (o: object) => validateAnalysis(JSON.stringify({ ...good, ...email, ...li, ...o }), input, opts)!;
+  it("keeps a short email and a no-pitch LinkedIn message that both end on a question", () => {
+    const a = check({});
+    expect(a.email).not.toBeNull();
+    expect(a.linkedin).toBe(li.linkedin_message);
+  });
+  it("drops an email that asks for time, introduces itself, or ends without a question", () => {
+    expect(check({ email_body: email.email_body.replace("want a few ideas on fixing that early, or not a priority?", "can we hop on a call this week?") }).emailProblems!.join()).toMatch(/asks for time/);
+    expect(check({ email_body: email.email_body.replace("saw you're", "i help founders who are") }).emailProblems!.join()).toMatch(/talks about yourself/);
+    expect(check({ email_body: email.email_body.replace(", or not a priority?", ".") }).emailProblems!.join()).toMatch(/question/);
+  });
+  it("drops a LinkedIn message that pitches, links or runs long; keeps the email", () => {
+    for (const bad of ["i help founders like you fix their CRM. interested?", "saw the launch. check f1rstword.example.com?", Array(70).fill("word").join(" ") + "?"]) {
+      const a = check({ linkedin_message: bad });
+      expect(a.linkedin).toBeNull();
+      expect(a.email).not.toBeNull();
+    }
+  });
+  it("keeps a good email from one try and a good LinkedIn message from another", async () => {
+    const replies = [JSON.stringify({ ...good, ...email, linkedin_message: "i help teams like yours. open to it?" }), JSON.stringify({ ...good, ...email, ...li, email_body: "hop on a call?" })];
+    let i = 0;
+    const a = await analyzeLead({ complete: async () => replies[i++]! }, pack, input);
+    expect(a!.email).not.toBeNull();
+    expect(a!.linkedin).toBe(li.linkedin_message);
   });
 });

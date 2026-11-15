@@ -5,3 +5,4 @@ export * from "./sheets.js";
 export * from "./sheet-sync.js";
 export * from "./bounces.js";
 export * from "./label-links.js";
+export * from "./backfill-drafts.js";

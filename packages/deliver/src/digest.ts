@@ -116,7 +116,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   const deliveryRows = (at: Date) => score.ranking.leads.map((l) => ({
     id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: at, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
-    sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature),
+    sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature, pack.copy),
   }));
   if (opts.sheetOnly) {
     if (score.ranking.leads.length) await db.insert(deliveries).values(deliveryRows(new Date()));
