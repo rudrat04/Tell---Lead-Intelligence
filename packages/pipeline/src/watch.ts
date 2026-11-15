@@ -1,7 +1,10 @@
 import type { Pack } from "@tell/config";
-import { fetchYcCompanyProfile, fetchHomepage, fetchTxtRecords, extractSiteFacts } from "@tell/watchers";
-import { compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, leakyCapture, agencyCredited, eventsFromYcProfile, STATE_SIGNAL_TYPES, type SiteState, type WatchEvent } from "@tell/intel";
-import { getDb, accounts, jobBoards, snapshots, signals, and, eq, inArray, sql } from "@tell/db";
+import { fetchYcCompanyProfile, fetchHomepage, fetchTxtRecords, extractSiteFacts, extractForms, fetchSitePage } from "@tell/watchers";
+import {
+  compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, leakyCapture, agencyCredited, eventsFromYcProfile, emailAuthGap, attributionGap,
+  toolsInCategories, OUTBOUND_TITLE, STATE_SIGNAL_TYPES, type SiteState, type WatchEvent,
+} from "@tell/intel";
+import { getDb, accounts, jobBoards, jobs, snapshots, signals, and, eq, inArray, isNull, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
 import { regionInScopeSql } from "./scope.js";
 import { saveYcFounders } from "./contacts.js";
@@ -10,7 +13,8 @@ import { saveYcFounders } from "./contacts.js";
  * Weekly account watch (plan 5b/5c): non-hiring signals for every tracked account.
  *  - YC page: founders (people), funding headlines, launches (dated facts)
  *  - homepage: sales-led CTA, pricing page, GTM tools in scripts (diffed against the last snapshot)
- *  - DNS TXT: GTM tools from SPF includes / verification tokens (diffed)
+ *  - DNS TXT: GTM tools from SPF includes / verification tokens (diffed); SPF + DMARC for accounts that send cold email
+ *  - the demo page behind a sales-led call to action: does its form ask how the visitor heard about them
  * First snapshot per account and kind = baseline (state only). Snapshots are stored only when they change.
  */
 
@@ -61,6 +65,16 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
     for (const s of snaps.rows as { account_id: string; kind: string; extracted: unknown }[]) latest.set(`${s.account_id}:${s.kind}`, s.extracted);
   }
 
+  // open SDR/BDR roles per account: they're about to send cold email (email_auth_gap)
+  const sdrRoles = new Map<string, number>();
+  if (specs.email_auth_gap) {
+    for (const part of chunk(list.map((a) => a.id), 500)) {
+      const open = await db.select({ a: jobBoards.accountId, title: jobs.title }).from(jobs).innerJoin(jobBoards, eq(jobs.boardId, jobBoards.id))
+        .where(and(inArray(jobBoards.accountId, part), isNull(jobs.closedAt)));
+      for (const r of open) if (OUTBOUND_TITLE.test(r.title)) sdrRoles.set(r.a, (sdrRoles.get(r.a) ?? 0) + 1);
+    }
+  }
+
   const emit = async (accountId: string, all: WatchEvent[]) => {
     const events = all.filter((e) => specs[e.type]); // a type the pack doesn't define is not emitted
     if (!events.length) return;
@@ -85,7 +99,8 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
   };
   // compare the fields that matter (Postgres jsonb reorders keys, so whole-object text comparison always differs)
   const sameSite = (a: SiteState, b: SiteState) =>
-    a.salesLed === b.salesLed && a.selfServe === b.selfServe && a.pricing === b.pricing && [...a.tools].sort().join() === [...b.tools].sort().join();
+    a.salesLed === b.salesLed && a.selfServe === b.selfServe && a.pricing === b.pricing && [...a.tools].sort().join() === [...b.tools].sort().join()
+    && (a.contentLinks ?? []).join() === (b.contentLinks ?? []).join() && !!a.contentLinks === !!b.contentLinks;
   const sameTools = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
 
   // Lane 1: YC pages (one host, one at a time via politeGet)
@@ -116,7 +131,7 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
         if (page) {
           res.sites++;
           const f = extractSiteFacts(page.html, rules.tools);
-          const cur: SiteState = { salesLed: f.salesLed, selfServe: f.selfServe, pricing: f.pricing, tools: f.tools, ctas: f.ctas, leakyForms: f.leakyForms, partnerBadge: f.partnerBadge, agencyCredit: f.agencyCredit };
+          const cur: SiteState = { salesLed: f.salesLed, selfServe: f.selfServe, pricing: f.pricing, tools: f.tools, ctas: f.ctas, leakyForms: f.leakyForms, partnerBadge: f.partnerBadge, agencyCredit: f.agencyCredit, contentLinks: f.contentLinks };
           site = cur;
           const prev = latest.get(`${a.id}:site`) as SiteState | undefined;
           if (!prev) res.baselines.site++;
@@ -125,6 +140,13 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
             await db.insert(snapshots).values({ accountId: a.id, kind: "site", extracted: cur, takenAt: now });
           }
           siteTools = cur.tools;
+          // the demo form: on the page the sales-led button points to (their own site only), else on the homepage
+          if (specs.attribution_gap && f.salesLed) {
+            const demo = f.demoUrl ? await fetchSitePage(f.demoUrl, a.domain) : null;
+            const forms = demo ? extractForms(demo.html) : [];
+            const gap = forms.length ? attributionGap(a.domain, true, forms, demo!.url, now) : attributionGap(a.domain, true, extractForms(page.html), page.url, now);
+            if (gap) events.push(gap);
+          }
         } else res.failures.site++;
 
         const txt = await fetchTxtRecords(a.domain);
@@ -136,6 +158,15 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
           events.push(...diffDnsTools(a.domain, prev?.tools ?? null, cur, rules, now));
           if (!prev || !sameTools(prev.tools, cur)) await db.insert(snapshots).values({ accountId: a.id, kind: "dns", extracted: { tools: cur }, takenAt: now });
           dnsTools = cur;
+          if (specs.email_auth_gap) {
+            const sdr = sdrRoles.get(a.id) ?? 0;
+            const outTools = toolsInCategories([...siteTools, ...cur], rules.outbound ?? [], rules);
+            const why = sdr ? `Hiring ${sdr === 1 ? "an SDR/BDR" : `${sdr} SDRs/BDRs`}` : outTools.length ? `Runs ${outTools.join(", ")}` : null;
+            if (why) {
+              const gap = emailAuthGap(a.domain, txt, await fetchTxtRecords(`_dmarc.${a.domain}`), why, now);
+              if (gap) events.push(gap);
+            }
+          }
         } else res.failures.dns++;
 
         const sprawl = stackSprawl(a.domain, [...siteTools, ...dnsTools], rules, now);

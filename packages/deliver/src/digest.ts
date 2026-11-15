@@ -1,5 +1,8 @@
 import type { Pack } from "@tell/config";
-import { runScoring, istDay, contactsFor, attachEmails, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql, type ScoreRunResult } from "@tell/pipeline";
+import {
+  runScoring, istDay, contactsFor, attachEmails, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, type ScoreRunResult, type ChampionMove,
+} from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
 import { appendPendingLeads } from "./sheet-sync.js";
@@ -79,6 +82,17 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const enrich: string[] = [];
   try { const e = await attachEmails(contacts, { write: !opts.dryRun }); enrich.push(`emails ${JSON.stringify(e.byStatus)} (${e.domains} domains checked)`); }
   catch { enrich.push("emails failed"); /* leads still go out with LinkedIn */ }
+  // warm paths through your own network (pnpm network): shown on the lead, and a reach boost (icp.reach.warm_path)
+  let champions: ChampionMove[] = [];
+  try {
+    const network = await loadNetwork();
+    if (network.length) {
+      const pool = [...score.ranking.leads, ...score.ranking.watchlist];
+      const n = attachWarmPaths(contacts, new Map(pool.map((l) => [l.account.id, l.account])), network);
+      enrich.push(`warm paths ${n}`);
+    }
+    champions = await championsForDigest();
+  } catch { enrich.push("network failed"); }
   const r = rerankByReach(score.ranking, contacts, pack, max);
   score.ranking = r.ranking;
   enrich.push(`reach: ${[...r.factors.values()].filter((f) => f < 1).length} of ${r.factors.size} pool leads down-weighted; ${r.noContact} dropped for no contact`);
@@ -97,7 +111,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const labelUrl = process.env.TELL_LABEL_URL, labelSecret = process.env.LABEL_SECRET;
   const taps = !opts.dryRun && !opts.test && labelUrl && labelSecret
     ? new Map([...ids].map(([a, d]) => [a, labelLinks(labelUrl, labelSecret, d)])) : undefined;
-  const email = renderDigest(score, pack, h, day, contacts, gigList, notes, taps);
+  const email = renderDigest(score, pack, h, day, contacts, gigList, notes, taps, champions);
   const counts = { enrich: enrich.join("; "), leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   const deliveryRows = (at: Date) => score.ranking.leads.map((l) => ({
@@ -134,6 +148,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (score.ranking.leads.length) batch.push(db.insert(deliveries).values(deliveryRows(now)));
   await db.batch(batch as unknown as Parameters<typeof db.batch>[0]);
   await markGigsDelivered(gigList.map((g) => g.id), now);
+  await markChampionsShown(champions.map((c) => c.name), now);
 
   // Sheet: append after the email is out; a Sheet problem never fails the digest (rows are retried next run)
   let sheet = "no sheet configured";

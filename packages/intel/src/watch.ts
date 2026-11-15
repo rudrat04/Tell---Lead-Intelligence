@@ -7,11 +7,12 @@ import { toRegex, type Pack } from "@tell/config";
  *  - evidence URLs are unique per event (the signals table is unique on url + type), e.g. https://acme.com/#tool=hubspot.
  */
 
-export interface ToolRules { sprawlMin: number; sprawlExclude?: string[]; overlap?: string[]; tools: { key: string; label: string; category: string; site: RegExp[]; dns: RegExp[] }[] }
+export interface ToolRules { sprawlMin: number; sprawlExclude?: string[]; overlap?: string[]; outbound?: string[]; analytics?: string[]; tools: { key: string; label: string; category: string; site: RegExp[]; dns: RegExp[] }[] }
 
 export function compileTools(t: Pack["tools"]): ToolRules {
   return {
     sprawlMin: t.sprawl_min, sprawlExclude: t.sprawl_exclude_categories ?? [], overlap: t.overlap_categories ?? [],
+    outbound: t.outbound_categories ?? ["outbound"], analytics: t.analytics_categories ?? ["analytics"],
     tools: Object.entries(t.tools).map(([key, v]) => ({ key, label: v.label, category: v.category, site: v.site.map(toRegex), dns: v.dns.map(toRegex) })),
   };
 }
@@ -21,10 +22,11 @@ export function toolsFromTxt(txt: string[], rules: ToolRules): string[] {
   return rules.tools.filter((t) => t.dns.some((r) => r.test(all))).map((t) => t.key).sort();
 }
 
-export interface SiteState { salesLed: boolean; selfServe: boolean; pricing: boolean; tools: string[]; ctas?: string[]; leakyForms?: string[]; partnerBadge?: boolean; agencyCredit?: string | null }
+export interface SiteState { salesLed: boolean; selfServe: boolean; pricing: boolean; tools: string[]; ctas?: string[]; leakyForms?: string[]; partnerBadge?: boolean; agencyCredit?: string | null; contentLinks?: string[] }
 
 export interface WatchEvent {
-  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "tool_overlap" | "leaky_capture" | "has_gtm_agency" | "funding_raise" | "product_launch";
+  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "tool_overlap" | "leaky_capture" | "has_gtm_agency" | "funding_raise" | "product_launch"
+    | "email_auth_gap" | "attribution_gap" | "site_health_poor" | "content_motion";
   quote: string;
   url: string;
   observedAt: Date;
@@ -42,7 +44,14 @@ export function diffSite(domain: string, prev: SiteState | null, cur: SiteState,
       out.push({ type: "cta_sales_led", quote: `Homepage now says "${cta}"${prev.selfServe ? " (was self-serve)" : ""}`, url: `${base}#cta=sales-led`, observedAt: now });
     }
     if (cur.pricing && !prev.pricing) out.push({ type: "pricing_page_added", quote: "Pricing page now linked from the homepage", url: `${base}#pricing`, observedAt: now });
-    for (const t of cur.tools.filter((t) => !prev.tools.includes(t))) {
+    // a content channel that wasn't linked before (snapshots from before contentLinks existed say nothing: no event)
+    if (prev.contentLinks) {
+      const added = (cur.contentLinks ?? []).filter((c) => !prev.contentLinks!.includes(c));
+      if (added.length) out.push({ type: "content_motion", quote: `Started linking a ${added.join(" and ")} from the homepage`, url: `${base}#content=${added.join("+")}`, observedAt: now });
+    }
+    // analytics tags aren't GTM tools: adding them to the pack must not announce "added Google Analytics" everywhere
+    const quiet = (k: string) => (rules.analytics ?? []).includes(rules.tools.find((t) => t.key === k)?.category ?? "");
+    for (const t of cur.tools.filter((t) => !prev.tools.includes(t) && !quiet(t))) {
       out.push({ type: "gtm_tool_added", quote: `Added ${toolLabel(t, rules)} (website)`, url: `${base}#tool=${t}`, observedAt: now });
     }
   }
@@ -52,7 +61,8 @@ export function diffSite(domain: string, prev: SiteState | null, cur: SiteState,
 /** DNS diff (TXT records): new tool includes / verifications. `prev` null = baseline. */
 export function diffDnsTools(domain: string, prev: string[] | null, cur: string[], rules: ToolRules, now: Date): WatchEvent[] {
   if (!prev) return [];
-  return cur.filter((t) => !prev.includes(t)).map((t) => ({
+  const quiet = (k: string) => (rules.analytics ?? []).includes(rules.tools.find((t) => t.key === k)?.category ?? "");
+  return cur.filter((t) => !prev.includes(t) && !quiet(t)).map((t) => ({
     type: "gtm_tool_added" as const, quote: `Added ${toolLabel(t, rules)} (DNS record)`, url: `https://${domain}/#tool=${t}`, observedAt: now,
   }));
 }
@@ -118,4 +128,58 @@ export function eventsFromYcProfile(
     if (recent(d)) out.push({ type: "product_launch", quote: `Launched: ${l.title}`, url: l.url, observedAt: d });
   }
   return out;
+}
+
+/** SDR/BDR-style titles: someone is about to send a lot of cold email. */
+export const OUTBOUND_TITLE = /\b(sdr|bdr|sales development|business development (rep|representative|executive|associate)|outbound|lead generation (executive|specialist|associate))\b/i;
+
+/**
+ * Email authentication problems on a domain that sends (or is about to send) cold email. Gmail and Yahoo require SPF,
+ * DKIM and a DMARC record from bulk senders since 2024: without them outbound lands in spam. Only definite findings:
+ *  - no DMARC record (`p=none` is a record and meets the requirement, so it isn't flagged);
+ *  - no SPF record, two SPF records (invalid), or SPF ending in `+all` (anyone may send as them).
+ * DKIM isn't checked (selectors can't be listed). `rootTxt` / `dmarcTxt` null = lookup failed: nothing is said.
+ * `outbound` says why sending matters ("Hiring 2 SDRs", "Runs Apollo"); without it there is no signal.
+ */
+export function emailAuthGap(domain: string, rootTxt: string[] | null, dmarcTxt: string[] | null, outbound: string | null, now: Date, url = `https://${domain}/#email-auth`): WatchEvent | null {
+  if (!outbound || !rootTxt || !dmarcTxt) return null;
+  const gaps: string[] = [];
+  if (!dmarcTxt.some((t) => /^v=DMARC1\b/i.test(t.trim()))) gaps.push("no DMARC record");
+  const spf = rootTxt.filter((t) => /^v=spf1\b/i.test(t.trim()));
+  if (!spf.length) gaps.push("no SPF record");
+  else if (spf.length > 1) gaps.push(`${spf.length} SPF records (only one is allowed)`);
+  else if (/\s\+all\b/i.test(spf[0]!)) gaps.push("an SPF record that lets anyone send as them (+all)");
+  if (!gaps.length) return null;
+  return { type: "email_auth_gap", quote: `${outbound}, but ${domain} has ${gaps.join(" and ")}`, url, observedAt: now };
+}
+
+/** Tools (keys) in the given categories, as labels. */
+export function toolsInCategories(tools: string[], categories: string[], rules: ToolRules): string[] {
+  return [...new Set(tools)].filter((k) => categories.includes(rules.tools.find((t) => t.key === k)?.category ?? "")).map((k) => toolLabel(k, rules));
+}
+
+/**
+ * Sales-led site whose demo form doesn't ask how the visitor found them: word of mouth, a colleague's post, a podcast
+ * mention ("dark social") is invisible to their analytics, and asking is the only cheap fix. Only readable plain-HTML
+ * forms with an email field and 3+ fields count (a newsletter box isn't a demo form); an embed we can't read says nothing.
+ */
+export function attributionGap(domain: string, salesLed: boolean, forms: { fields: number; hasEmail: boolean; asksSource: boolean }[], pageUrl: string, now: Date): WatchEvent | null {
+  if (!salesLed) return null;
+  const form = forms.find((f) => f.hasEmail && f.fields >= 3);
+  if (!form || form.asksSource) return null;
+  return { type: "attribution_gap", quote: `Demo form asks for ${form.fields} details but never how the visitor heard about them (${pageUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")})`, url: `https://${domain}/#attribution`, observedAt: now };
+}
+
+/** PageSpeed result for one run (mobile). */
+export interface SpeedRun { score: number; lcpMs: number | null; at: string }
+
+/**
+ * Slow site, from two PageSpeed runs in a row that agree (one run is noisy): mobile performance below `maxScore` both
+ * times. The quote adds "no analytics tag" when the homepage shows none (said only next to the speed finding, never alone).
+ */
+export function siteHealthPoor(domain: string, runs: SpeedRun[], noAnalytics: boolean, now: Date, maxScore = 50): WatchEvent | null {
+  const [cur, prev] = runs;
+  if (!cur || !prev || cur.score >= maxScore || prev.score >= maxScore) return null;
+  const lcp = cur.lcpMs ? `, main content shows after ${(cur.lcpMs / 1000).toFixed(1)}s on mobile` : "";
+  return { type: "site_health_poor", quote: `Mobile PageSpeed ${Math.round(cur.score)}/100${lcp}${noAnalytics ? "; no analytics tag on the homepage" : ""}`, url: `https://${domain}/#speed`, observedAt: now };
 }

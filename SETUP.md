@@ -30,7 +30,9 @@ Start with `pack.yaml` (your offer, bot name, contact URL), `icp.yaml`, `extract
 
 ## 5. GitHub secrets and variables
 Repository **secrets**: `DATABASE_URL`, `ANTHROPIC_API_KEY`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`.
-Optional: `SERPER_API_KEY` (web search source, pack `sources.web_search`), `RAPIDAPI_KEY` (JSearch job listings, pack `sources.jsearch`), `EXA_API_KEY` (people search).
+Optional: `SERPER_API_KEY` (web search source, pack `sources.web_search`), `RAPIDAPI_KEY` (JSearch job listings, pack `sources.jsearch`), `EXA_API_KEY` (people search; also the weekly past-client check), `PAGESPEED_API_KEY` (free Google key: weekly mobile speed check, `site_health_poor`).
+
+Your own network (optional, local only, never committed): `pnpm network connections ~/Downloads/Connections.csv` (LinkedIn: Settings > Data privacy > Get a copy of your data > Connections), `pnpm network clients clients.csv` (columns `name,company[,title,linkedin]`), `pnpm network employers "Contoso:contoso.com, Fabrikam"`. Leads you can reach through them show a warm path and rank higher (`icp.reach.warm_path`); past clients who change jobs appear in the digest.
 Repository **variables**: `TELL_PACK_R2_PREFIX` (e.g. `packs/main`), `HAIKU_DAILY_CAP_USD`.
 
 From the repo folder, each secret can be copied from `.env` without pasting it anywhere:

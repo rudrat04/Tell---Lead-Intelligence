@@ -23,7 +23,58 @@ export interface SiteFacts {
   partnerBadge: boolean;
   /** "marketing by Acme", "growth partner: Acme": an outside GTM agency is credited */
   agencyCredit: string | null;
+  /** where the sales-led call to action points (absolute URL), for reading the demo form */
+  demoUrl: string | null;
+  /** content channels linked from the page: blog, podcast, newsletter, YouTube... (for content_motion) */
+  contentLinks: string[];
 }
+
+/** A lead form we could actually read (plain HTML). Form builders render their fields in JS or iframes: unreadable. */
+export interface FormFacts {
+  /** visible fields (inputs other than hidden/submit, selects, textareas) */
+  fields: number;
+  hasEmail: boolean;
+  /** a "how did you hear about us" / source / referral field */
+  asksSource: boolean;
+}
+
+const SOURCE_FIELD = /\b(hear|heard|found|find) (about )?us\b|\b(source|referr?al|referred|referrer|utm|how did you|lead[_ -]?source|attribution)\b/i;
+
+/** Pure: the readable lead forms on a page (most fields first). Empty = none readable (no form, or only an embed). */
+export function extractForms(html: string): FormFacts[] {
+  const $ = cheerio.load(html);
+  const out: FormFacts[] = [];
+  $("form").each((_, form) => {
+    const f = $(form);
+    const fields = f.find("input, select, textarea").filter((_, el) => {
+      const type = ($(el).attr("type") ?? "text").toLowerCase();
+      return !["hidden", "submit", "button", "reset", "image", "checkbox", "radio"].includes(type);
+    });
+    if (!fields.length) return;
+    const describe = (el: Parameters<typeof $>[0]) => {
+      const e = $(el);
+      const id = e.attr("id");
+      const label = id ? $(`label[for="${id}"]`).text() : "";
+      return [e.attr("name"), id, e.attr("placeholder"), e.attr("aria-label"), label, e.closest("label").text(), e.is("select") ? e.find("option").map((_, o) => $(o).text()).get().join(" ") : ""].filter(Boolean).join(" ");
+    };
+    const texts = fields.map((_, el) => describe(el)).get();
+    // radio groups and hidden utm fields count as asking for the source too
+    const extra = f.find("input[type=radio], input[type=checkbox], input[type=hidden]").map((_, el) => `${$(el).attr("name") ?? ""} ${$(el).attr("value") ?? ""}`).get().join(" ") + " " + f.find("legend, label").text();
+    out.push({
+      fields: fields.length,
+      hasEmail: fields.toArray().some((el) => ($(el).attr("type") ?? "").toLowerCase() === "email") || texts.some((t) => /e-?mail/i.test(t)),
+      // field names use _ and - ("utm_source", "hs-lead-source"): read them as words
+      asksSource: [...texts, extra].some((t) => SOURCE_FIELD.test(t.replace(/[_-]+/g, " "))),
+    });
+  });
+  return out.sort((a, b) => b.fields - a.fields);
+}
+
+const CONTENT_LINK: [string, RegExp][] = [
+  ["blog", /\/(blog|insights|articles|resources\/blog)(\/|$|\?)/i], ["podcast", /\/podcasts?(\/|$|\?)|podcasts\.apple\.com|open\.spotify\.com\/show/i],
+  ["newsletter", /\/newsletter(\/|$|\?)|substack\.com|beehiiv\.com|buttondown\.(email|com)/i], ["youtube", /youtube\.com\/(@|c\/|channel\/)/i],
+  ["webinars", /\/(webinars?|events)(\/|$|\?)/i],
+];
 
 const FORM_SINKS: [string, RegExp][] = [
   ["formspree", /formspree\.io/i], ["getform", /getform\.io/i], ["formsubmit", /formsubmit\.co/i], ["basin", /usebasin\.com/i],
@@ -71,7 +122,27 @@ export function extractSiteFacts(html: string, tools: ToolRule[]): SiteFacts {
     hasForm,
     partnerBadge: PARTNER.test(bodyText) || $("img[alt]").get().some((el) => PARTNER.test($(el).attr("alt") ?? "")),
     agencyCredit: bodyText.slice(-3000).match(AGENCY_CREDIT)?.[1]?.trim() ?? null,
+    demoUrl: $("a[href]").toArray().map((el) => ({ t: $(el).text().replace(/\s+/g, " ").trim(), h: $(el).attr("href") ?? "" }))
+      .find((x) => x.t.length <= 40 && SALES_LED.test(x.t) && !/^(mailto|tel|javascript):|^#/i.test(x.h))?.h ?? null,
+    contentLinks: CONTENT_LINK.filter(([, r]) => hrefs.some((h) => r.test(h))).map(([k]) => k),
   };
+}
+
+/** Fetch another page on a company's own site (robots.txt respected). Null when blocked, off-site or unreachable. */
+export async function fetchSitePage(url: string, domain: string, timeoutMs = 15_000): Promise<{ url: string; html: string } | null> {
+  let u: URL;
+  try { u = new URL(url, `https://${domain}/`); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, "");
+  if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+  if (host !== domain && !host.endsWith(`.${domain}`)) return null; // a Calendly / HubSpot meetings link: not their page
+  if (!(await robotsAllows(u.toString()))) return null;
+  try {
+    const res = await fetch(u, { headers: { "user-agent": userAgent(), accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    return { url: res.url, html: (await res.text()).slice(0, 2_000_000) };
+  } catch {
+    return null;
+  }
 }
 
 /** Fetch a company homepage (robots.txt respected). Null when blocked or unreachable. */

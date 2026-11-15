@@ -50,7 +50,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   // Load everything once (small: thousands of rows)
   const jobRows = await db.select({
     id: jobs.id, title: jobs.title, url: jobs.url, employmentType: jobs.employmentType, family: jobs.family,
-    postedAt: jobs.postedAt, firstSeenAt: jobs.firstSeenAt, closedAt: jobs.closedAt, accountId: jobBoards.accountId,
+    postedAt: jobs.postedAt, firstSeenAt: jobs.firstSeenAt, closedAt: jobs.closedAt, accountId: jobBoards.accountId, boardSource: jobBoards.source,
   }).from(jobs).innerJoin(jobBoards, eq(jobs.boardId, jobBoards.id))
     .where(sql`${jobs.closedAt} is null or ${jobs.closedAt} > ${new Date(now.getTime() - 180 * DAY)}`);
 

@@ -58,6 +58,7 @@ Then set the repository variable `TELL_PACK_R2_PREFIX=packs/main`. Without it, j
 | `pnpm digest --dry` / `--test` | render the digest to `digest-preview.html` / send a `[TEST]` copy that records nothing |
 | `pnpm sheet:setup <pack>` / `pnpm sheet:sync` | create the leads Sheet / sync rows and labels |
 | `pnpm tune` / `pnpm ops` / `pnpm forget` | weekly tuning proposals / nightly upkeep / delete a person everywhere |
+| `pnpm network connections\|clients\|employers\|stats\|champions` | import your own network locally (warm paths); weekly past-client job-move check |
 | `pnpm typecheck && pnpm test` | checks (tests use a frozen fixture pack; golden sets in `evals/`) |
 
 Setup for a new copy: see [SETUP.md](SETUP.md). This repo is public: code only, never data, packs or secrets. Commands that print lead details refuse to run in CI.

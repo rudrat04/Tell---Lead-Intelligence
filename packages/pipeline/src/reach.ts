@@ -4,7 +4,7 @@ import type { Contact } from "@tell/people";
 import type { ScoredAccount } from "./score.js";
 
 /** Reach is on when any multiplier in the pack's icp.reach is below 1. */
-export const reachEnabled = (pack: Pack) => Object.values(pack.icp.reach).some((v) => v < 1);
+export const reachEnabled = (pack: Pack) => Object.entries(pack.icp.reach).some(([k, v]) => (k === "warm_path" ? v > 1 : v < 1));
 
 /** Persona titles that own each lead's problem, from its strongest play that names any. */
 export function preferredPersonas(rows: RankInput<ScoredAccount>[]): Map<string, string[]> {
@@ -21,7 +21,9 @@ export function reachFactor(contact: Contact | null | undefined, owners: string[
   const e = contact.person.email;
   if (!e || e.status === "invalid") f *= contact.generic ? r.guessed_email : r.no_email;
   else if (e.status === "guessed") f *= r.guessed_email;
-  if (owners.length && (!contact.persona || !owners.includes(contact.persona))) f *= r.off_persona;
+  // a past client who just joined (source "network") is the right person whatever their title
+  if (owners.length && contact.person.source !== "network" && (!contact.persona || !owners.includes(contact.persona))) f *= r.off_persona;
+  if (contact.warm?.length) f *= r.warm_path ?? 1;
   return f;
 }
 

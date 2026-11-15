@@ -13,7 +13,7 @@ console.log(`signals: ${sig}`);
 try {
   const { runInfraWatch } = await import("@tell/pipeline");
   const i = await runInfraWatch({ pack: await loadPack() });
-  console.log(`infra: ct checked=${i.ct.checked} baselines=${i.ct.baselines} failed=${i.ct.failed} | lookalike checked=${i.lookalike.checked} baselines=${i.lookalike.baselines} | form_d filings=${i.formD.filings} matched=${i.formD.matched}${i.formD.skipped ? ` (${i.formD.skipped})` : ""} | signals: ${Object.entries(i.signals).map(([k, v]) => `${k}=${v}`).join(" ") || "none"}`);
+  console.log(`infra: ct checked=${i.ct.checked} baselines=${i.ct.baselines} failed=${i.ct.failed} | lookalike checked=${i.lookalike.checked} baselines=${i.lookalike.baselines} | form_d filings=${i.formD.filings} matched=${i.formD.matched}${i.formD.skipped ? ` (${i.formD.skipped})` : ""} | speed checked=${i.speed.checked} failed=${i.speed.failed}${i.speed.skipped ? ` (${i.speed.skipped})` : ""} | signals: ${Object.entries(i.signals).map(([k, v]) => `${k}=${v}`).join(" ") || "none"}`);
 } catch (e) {
   console.log(`infra: failed (${(e as Error).name})`);
 }

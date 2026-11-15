@@ -16,3 +16,13 @@ describe("reach factor", () => {
     expect(reachFactor(null, ["RevOps lead"], r)).toBe(0.5);
   });
 });
+
+describe("warm path boost", () => {
+  it("multiplies reach by icp.reach.warm_path when a warm path exists; a past client is never off-persona", () => {
+    const warm = { ...contact("likely"), warm: [{ kind: "connected", text: "x" }] };
+    expect(reachFactor(warm, ["RevOps lead"], { ...r, warm_path: 1.5 })).toBe(1.5);
+    expect(reachFactor(contact("likely"), ["RevOps lead"], { ...r, warm_path: 1.5 })).toBe(1);
+    const champ = { person: { name: "Ana Pell", role: "VP Marketing", source: "network", email: { address: "ana@x.test", status: "likely" as const, note: "" } }, persona: null, note: "" };
+    expect(reachFactor(champ, ["RevOps lead"], { ...r, warm_path: 1 })).toBe(1);
+  });
+});

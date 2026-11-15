@@ -8,6 +8,8 @@ export interface Person {
   twitter?: string | null;
   source: string;
   sourceUrl?: string | null;
+  /** past roles from people search (warm path: a shared past employer) */
+  workHistory?: { company: string }[] | null;
   /** best address from the email engine (plan 9b), with how sure we are */
   email?: { address: string; status: "observed" | "likely" | "guessed" | "invalid"; note: string } | null;
 }
@@ -22,6 +24,8 @@ export interface Contact {
   note: string;
   /** a shared mailbox on the company's site (founders@, hello@), when one was seen */
   generic?: string | null;
+  /** how you can reach them through people you know (pnpm network), strongest first */
+  warm?: { kind: string; text: string }[];
 }
 
 /** Within a persona, prefer the commercial lead: CEO > founder > technical founder. */

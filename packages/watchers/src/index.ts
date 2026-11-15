@@ -20,3 +20,4 @@ export * from "./infra.js";
 export * from "./formd.js";
 export * from "./web-search.js";
 export * from "./jsearch.js";
+export * from "./pagespeed.js";

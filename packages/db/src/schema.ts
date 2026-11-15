@@ -199,8 +199,34 @@ export const people = pgTable("people", {
   sourceUrl: text("source_url"),
   /** public profile links: { linkedin, twitter } */
   profileUrls: jsonb("profile_urls"),
+  /** past roles from the people-search result [{ title, company, from, to }] (warm path: shared past employer) */
+  workHistory: jsonb("work_history"),
   fetchedAt: ts("fetched_at").notNull().defaultNow(),
 }, (t) => [uniqueIndex("people_account_name_source_uq").on(t.accountId, t.fullName, t.source)]);
+
+/**
+ * The operator's own network, imported locally (`pnpm network`), never from a public source and never in the repo:
+ *  - connection: their LinkedIn connections export (name, company, position, profile URL; no emails stored)
+ *  - client: past clients / champions (watched for job moves: champion_moved)
+ *  - employer: the operator's own past employers (shared-employer warm path)
+ * Champion tracking: last company/title seen by people search, when they moved, when the digest showed it.
+ */
+export const networkContacts = pgTable("network_contacts", {
+  id: id(),
+  kind: text("kind").notNull(), // connection | client | employer
+  fullName: text("full_name").notNull(),
+  company: text("company"),
+  position: text("position"),
+  profileUrl: text("profile_url"),
+  connectedOn: date("connected_on"),
+  importedAt: ts("imported_at").notNull().defaultNow(),
+  checkedAt: ts("checked_at"),
+  currentCompany: text("current_company"),
+  currentTitle: text("current_title"),
+  movedAt: ts("moved_at"),
+  moveUrl: text("move_url"),
+  shownAt: ts("shown_at"),
+}, (t) => [uniqueIndex("network_contacts_kind_name_company_uq").on(t.kind, t.fullName, t.company)]);
 
 export const emails = pgTable("emails", {
   id: id(),

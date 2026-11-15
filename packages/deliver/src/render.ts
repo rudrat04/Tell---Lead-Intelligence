@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import type { Evidence } from "@tell/intel";
-import type { ScoreRunResult, DigestGig } from "@tell/pipeline";
+import type { ScoreRunResult, DigestGig, ChampionMove } from "@tell/pipeline";
 import { firstName, personaSearchLinks, type Contact } from "@tell/people";
 import { hasHiring, displayScore } from "@tell/intel";
 
@@ -53,6 +53,7 @@ export function describe(e: Evidence): string {
     case "role_reposted": return `Reposted: "${e.quote}"`;
     case "ops_owner_known": case "ops_team_2plus": case "leaky_capture": case "has_gtm_agency": case "new_gtm_leader": case "ops_person_left": case "marketing_subdomain": case "outbound_domain": return e.quote;
     case "jd_mentions": return `Job ad says: ${e.quote}`;
+    case "champion_moved": case "freeze_to_contract": case "email_auth_gap": case "attribution_gap": case "site_health_poor": case "content_motion": return e.quote;
     default: return `${e.type}: ${t}`;
   }
 }
@@ -140,6 +141,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
     ? `<div style="font-size:17px;font-weight:600;color:${C.ink}">${esc(c.person.name)} <span style="font-weight:400;color:${C.muted};font-size:14px">${esc(c.person.role ?? c.persona ?? "")}</span></div>
        <div style="font-size:14px;margin-top:2px">${companyLine}</div>
        ${reachHtml(c) ? `<div style="font-size:13px;margin-top:6px">${reachHtml(c)}</div>` : ""}
+       ${c.warm?.length ? `<div style="font-size:13px;margin-top:4px;color:${C.ink}">🤝 ${esc(c.warm[0]!.text)}</div>` : ""}
        ${(c.others ?? []).length ? `<div style="font-size:13px;margin-top:4px;color:${C.muted}">Also: ${(c.others ?? []).map((o) => `${o.person.linkedin ? A(o.person.linkedin, esc(o.person.name)) : esc(o.person.name)} (${esc(o.person.role ?? o.persona)})`).join(", ")}</div>` : ""}`
     : `<div style="font-size:17px;font-weight:600">${companyLine}</div>
        <div style="font-size:13px;margin-top:6px;color:${C.muted}">No contact yet. Search: ${personaSearchLinks(personas, a.sizeBand, company, null).slice(0, 2).map((x) => A(x.url, esc(x.persona))).join(", ") || "none"}</div>`;
@@ -186,6 +188,7 @@ function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   return [
     c ? `${i + 1}. ${c.person.name}, ${c.person.role ?? c.persona ?? ""} at ${company} (${a.domain}${facts ? `, ${facts}` : ""})` : `${i + 1}. ${company} (${a.domain}${facts ? `, ${facts}` : ""}), no contact found yet`,
     c ? `   ${[emailText(c.person) ?? (c.generic ? `${c.generic} (shared inbox)` : "No email found"), c.person.linkedin, c.person.twitter].filter(Boolean).join(" | ")}` : "",
+    c?.warm?.length ? `   Warm path: ${c.warm[0]!.text}` : "",
     ...(c?.others ?? []).map((o) => `   Also: ${o.person.name}, ${o.person.role ?? o.persona}${o.person.linkedin ? ` ${o.person.linkedin}` : ""}`),
     ...(c ? [] : personaSearchLinks(personas, a.sizeBand, company, null).slice(0, 2).map((x) => `   Search ${x.persona}: ${x.url}`)),
     l.backReason ? `   Back on your list. ${l.backReason}` : "",
@@ -206,7 +209,7 @@ function gigHtml(g: DigestGig): string {
   return `<div style="margin:8px 0">${A(g.applyUrl ?? g.url, esc(g.title), `color:${C.ink};font-weight:600`)}<div style="font-size:12px;color:${C.muted}">${meta}${meta ? " · " : ""}${via}</div></div>`;
 }
 
-export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes, labels?: Map<string, { good: string; bad: string }>): DigestEmail {
+export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes, labels?: Map<string, { good: string; bad: string }>, champions: ChampionMove[] = []): DigestEmail {
   const leads = r.ranking.leads, watch = r.ranking.watchlist, people = r.personLeads;
   const named = (l: Lead) => { const c = contacts?.get(l.account.id); const co = l.account.name ?? l.account.domain; return c ? `${firstName(c.person.name)} at ${co}` : co; };
   const subject = leads.length
@@ -240,6 +243,10 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   const peopleHtml = people.length ? section("People asking, no company yet", people.map((p) =>
     `<div style="font-size:13px;margin:4px 0">${esc(p.platform)}/${esc(p.handle)}: ${A(p.url, `"${esc(p.quote)}"`)}</div>`).join("")) : "";
 
+  const month = (d: Date) => d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  const championsHtml = champions.length ? section(`Past clients who moved (${champions.length})`, champions.map((m) =>
+    `<div style="font-size:13px;margin:6px 0">${m.url ? A(m.url, `<b>${esc(m.name)}</b>`) : `<b>${esc(m.name)}</b>`}: was at ${esc(m.was)}, now ${esc(m.title)} at <b>${esc(m.company)}</b> (since ${esc(month(m.since))}). New role, new budget, and they already trust you.</div>`).join("")) : "";
+
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(subjectFull)}</title></head>
 <body style="margin:0;padding:0;background:${C.bg}">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${C.bg}"><tr><td align="center" style="padding:24px 12px">
@@ -250,6 +257,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   ${labels?.size ? `<div style="font-size:13px;color:${C.muted};margin-top:4px">Tap 👍&nbsp;or&nbsp;👎 on each lead. It teaches the ranking what you want.</div>` : ""}
 </td></tr>
 <tr><td style="padding:8px 24px 0">
+  ${championsHtml}
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${leads.map((l, i) => leadHtml(l, i, contacts, pack.icp.personas, notes, labels?.get(l.account.id))).join("")}</table>
   ${gigs.length ? section(`Freelance gigs (${gigs.length})`, gigs.map(gigHtml).join("")) : ""}
   ${watchHtml}${peopleHtml}
@@ -265,6 +273,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `${pack.meta.name} · ${date}`,
     leads.length ? `${leads.length} ${leads.length === 1 ? "PERSON" : "PEOPLE"} TO CONTACT` : "NO NEW LEADS TODAY",
     "",
+    champions.length ? `PAST CLIENTS WHO MOVED\n${champions.map((m) => `- ${m.name}: was at ${m.was}, now ${m.title} at ${m.company} (since ${month(m.since)})${m.url ? ` ${m.url}` : ""}`).join("\n")}\n` : "",
     ...leads.map((l, i) => leadText(l, i, contacts, pack.icp.personas, notes) + "\n"),
     gigs.length ? `FREELANCE GIGS\n${gigs.map((g) => `- ${g.title}${g.company ? ` (${g.company})` : ""}: ${g.applyUrl ?? g.url} (via ${SOURCE_NAME[g.source] ?? g.source}: ${g.url})`).join("\n")}\n` : "",
     watch.length ? `WATCHLIST\n${watch.map((w) => `- ${w.account.name ?? w.account.domain} (${w.account.domain})`).join("\n")}\n` : "",
@@ -291,7 +300,7 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     a.segment ?? "",
     a.region ?? "",
     s.plays.map((p) => p.title).join(" + "),
-    [l.backReason ? `Back: ${l.backReason}` : "", ...s.drivers.slice(0, 3).map((e) => `${describe(e)} (${e.url})`)].filter(Boolean).join("\n"),
+    [l.backReason ? `Back: ${l.backReason}` : "", contact?.warm?.length ? `Warm path: ${contact.warm[0]!.text}` : "", ...s.drivers.slice(0, 3).map((e) => `${describe(e)} (${e.url})`)].filter(Boolean).join("\n"),
     leadOpener(contact, company, s.drivers[0], note) ?? "",
     note?.angle ?? s.plays[0]?.angle ?? "",
     String(displayScore(s)), // 0-100: how far above the base rate
@@ -310,6 +319,8 @@ const SIGNAL_LABEL: Record<string, string> = {
   tool_overlap: "Overlapping tools", role_reposted: "Role reposted", ops_owner_known: "Has an ops owner (against)", ops_team_2plus: "Ops team of 2+ (against)",
   jd_mentions: "Job ad names the pain", leaky_capture: "Leaky lead capture", has_gtm_agency: "Credits a GTM agency (against)",
   new_gtm_leader: "New GTM leader", ops_person_left: "Ops person left", marketing_subdomain: "New marketing subdomain", outbound_domain: "Cold-email domain set up",
+  champion_moved: "Past client joined", freeze_to_contract: "Couldn't hire, now contract", email_auth_gap: "Cold email without DMARC/SPF",
+  attribution_gap: "Demo form skips the source", site_health_poor: "Slow site", content_motion: "New content channel",
 };
 
 /** "Core role open 45+ days, Founding GTM hire, Recently raised ×2": every signal type behind a lead, strongest kinds first. */

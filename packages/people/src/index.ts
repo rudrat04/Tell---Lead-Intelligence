@@ -4,3 +4,4 @@ export * from "./resolve.js";
 export * from "./persist.js";
 export * from "./contacts.js";
 export * from "./email.js";
+export * from "./network.js";

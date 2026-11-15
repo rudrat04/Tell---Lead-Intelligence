@@ -29,7 +29,8 @@
     "ops": "tsx scripts/ops.ts",
     "bounces": "tsx scripts/bounces.ts",
     "tune": "tsx scripts/tune.ts",
-    "forget": "tsx scripts/forget.ts"
+    "forget": "tsx scripts/forget.ts",
+    "network": "tsx scripts/network.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { r2, type Pack } from "@tell/config";
-import { getDb, people, emails, deliveries, suppressionList, deletionRequests, accounts, and, eq, inArray, sql } from "@tell/db";
+import { getDb, people, emails, deliveries, suppressionList, deletionRequests, accounts, networkContacts, signals, and, eq, inArray, sql } from "@tell/db";
 import { googleAccessToken } from "@tell/deliver";
 
 /**
@@ -11,7 +11,7 @@ import { googleAccessToken } from "@tell/deliver";
  * keeping their details.
  */
 export interface ForgetRequest { name?: string; email?: string; domain?: string; suppressDomain?: boolean }
-export interface ForgetResult { people: number; emails: number; deliveryRows: number; sheetCells: number; backupFiles: number; suppressed: boolean }
+export interface ForgetResult { people: number; emails: number; deliveryRows: number; sheetCells: number; backupFiles: number; suppressed: boolean; network?: number }
 
 export const hashEmail = (e: string) => createHash("sha256").update(e.trim().toLowerCase()).digest("hex");
 
@@ -42,6 +42,12 @@ export async function forgetPerson(req: ForgetRequest, pack: Pack): Promise<Forg
     res.people = (await db.delete(people).where(inArray(people.id, ids)).returning({ id: people.id })).length;
   }
   if (req.email) res.emails += (await db.delete(emails).where(sql`lower(${emails.address}) = ${req.email.toLowerCase()}`).returning({ id: emails.id })).length;
+
+  // your imported network (connections, past clients) and the champion_moved signals naming them
+  if (allNames.length) {
+    res.network = (await db.delete(networkContacts).where(inArray(networkContacts.fullName, allNames)).returning({ id: networkContacts.id })).length;
+    for (const n of allNames) await db.delete(signals).where(and(eq(signals.type, "champion_moved"), sql`${signals.evidenceQuote} like ${n + ",%"}`));
+  }
 
   // names inside stored Sheet rows
   for (const n of allNames) {

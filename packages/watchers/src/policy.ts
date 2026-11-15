@@ -48,6 +48,15 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   // Web search (Serper API, Google results): only the result's title + snippet is read; LinkedIn / X pages are never
   // fetched (terms + robots). Authors map from the post text only, never via their profiles.
   web_search: { enabled: true, allowedMappings: ["explicit"], note: "search API snippets only; result pages never fetched" },
+  // India-first company lists, checked Nov 2026 and NOT used: Startup India's recognised-startup search needs a login
+  // and the site is "All Rights Reserved" with no data licence or API; data.gov.in and mca.gov.in refused automated
+  // fetches (403, even robots.txt); Karnataka's startup portal didn't resolve. Kerala Startup Mission allows all bots
+  // but its listing lives on another host whose terms weren't checked. Revisit with an official dataset or written consent.
+  startupindia: { enabled: false, allowedMappings: [], note: "listing behind login; all rights reserved, no data licence" },
+  datagovin: { enabled: false, allowedMappings: [], note: "403 to automated fetches" },
+  mca: { enabled: false, allowedMappings: [], note: "403 to automated fetches; no free incorporation list confirmed" },
+  karnataka_startup: { enabled: false, allowedMappings: [], note: "portal did not resolve" },
+  kerala_startup_mission: { enabled: false, allowedMappings: [], note: "robots allows all; listing host's terms unchecked" },
   hubspot_community: { enabled: false, allowedMappings: [], note: "terms page needs JS; HubSpot site terms bar robots" },
 };
 

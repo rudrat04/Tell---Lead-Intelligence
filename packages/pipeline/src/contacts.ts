@@ -29,6 +29,7 @@ export async function contactsFor(
     const urls = (r.profileUrls ?? {}) as { linkedin?: string; twitter?: string };
     (byAccount.get(r.accountId) ?? byAccount.set(r.accountId, []).get(r.accountId)!).push({
       name: r.fullName, role: r.role, linkedin: urls.linkedin ?? null, twitter: urls.twitter ?? null, source: r.source, sourceUrl: r.sourceUrl,
+      workHistory: (r.workHistory as { company: string }[] | null) ?? null,
     });
     if (r.source === "yc" && Date.now() - r.fetchedAt.getTime() < PEOPLE_REFRESH_DAYS * DAY) freshYc.add(r.accountId);
   }
@@ -77,7 +78,8 @@ export async function contactsFor(
         let found: Person[] = [];
         try {
           const hits = await search.search(`${persona.search ?? persona.title.split("/")[0]!.trim()} at ${company}`, 5);
-          found = hits.map((h) => acceptPeopleHit(h, company, acct.domain, rx)).filter((x): x is Person => !!x).slice(0, 2);
+          found = hits.map((h) => { const p = acceptPeopleHit(h, company, acct.domain, rx); return p ? { ...p, workHistory: h.roles.map((r) => ({ title: r.title, company: r.company, from: r.from ?? null, to: r.to ?? null })) } : null; })
+            .filter((x): x is Person => !!x).slice(0, 2);
           // dated roles in the same results: a new GTM leader, or an ops person who left (only types the pack defines)
           const evs = hits.flatMap((h) => peopleEvents(h, company, acct.domain, opsRx, new Date())).filter((e) => pack.signals.signals[e.type]);
           if (write && evs.length) {
@@ -94,8 +96,8 @@ export async function contactsFor(
           if (found.length) {
             await db.insert(people).values(found.map((f) => ({
               accountId: acct.id, fullName: f.name, role: f.role, source: "exa", confidence: 0.7, sourceUrl: f.sourceUrl,
-              profileUrls: { linkedin: f.linkedin ?? undefined }, fetchedAt: new Date(),
-            }))).onConflictDoUpdate({ target: [people.accountId, people.fullName, people.source], set: { role: sql`excluded.role`, fetchedAt: sql`excluded.fetched_at` } });
+              profileUrls: { linkedin: f.linkedin ?? undefined }, workHistory: f.workHistory ?? null, fetchedAt: new Date(),
+            }))).onConflictDoUpdate({ target: [people.accountId, people.fullName, people.source], set: { role: sql`excluded.role`, workHistory: sql`excluded.work_history`, fetchedAt: sql`excluded.fetched_at` } });
           }
           await db.insert(peopleSearches).values({ accountId: acct.id, persona: persona.title, provider: "exa", found: found.length, searchedAt: new Date() })
             .onConflictDoUpdate({ target: [peopleSearches.accountId, peopleSearches.persona, peopleSearches.provider], set: { found: found.length, searchedAt: new Date() } });
@@ -106,7 +108,11 @@ export async function contactsFor(
 
   for (const id of accountIds) {
     const list = byAccount.get(id) ?? [];
-    const contact = pickContact(list, pack.icp.personas, sizes.get(id) ?? null, opts.preferred?.get(id) ?? []);
+    // a past client of yours who just joined (champion_moved) is the contact, whatever their title
+    const champion = list.find((p) => p.source === "network");
+    const contact = champion
+      ? { person: champion, persona: null, note: "your past client, new here" }
+      : pickContact(list, pack.icp.personas, sizes.get(id) ?? null, opts.preferred?.get(id) ?? []);
     if (contact) {
       // other named people matching your personas, for "Also reach"
       contact.others = pack.icp.personas

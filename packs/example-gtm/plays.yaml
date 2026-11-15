@@ -36,3 +36,42 @@ plays:
     requires: [cta_sales_led]
     window_days: 60
     angle: "Their site moved to 'Book a demo': set up CRM, routing and follow-up for the new motion."
+  attention_no_capture:
+    title: Attention with nowhere to land
+    requires: [stack_sprawl]
+    requires_any: [content_motion, product_launch, funding_raise]
+    window_days: 60
+    angle: "New attention (a launch, a raise, new content) on top of a messy stack: offer to make sure every interested visitor is captured and followed up."
+  freeze_to_contract:
+    title: Couldn't hire, now open to outside help
+    requires: [freeze_to_contract]
+    absent: [core_role_filled]
+    window_days: 45
+    qualifies: true
+    angle: "They removed a long-open ops role unfilled and now want contract help: offer to start on the most urgent piece this month."
+  outbound_unprotected:
+    title: Outbound landing in spam
+    requires: [email_auth_gap]
+    window_days: 60
+    qualifies: true
+    angle: "They send cold email without the authentication Gmail and Yahoo require: offer a quick deliverability fix as the first step."
+  attribution_blind:
+    title: Can't see which channel works
+    requires: [attribution_gap]
+    requires_any: [funding_raise, product_launch, content_motion]
+    window_days: 60
+    qualifies: true
+    angle: "Investing in growth with a demo form that never asks how people found them: offer to capture the source on every lead."
+  slow_site:
+    title: Slow site losing visitors
+    requires: [site_health_poor]
+    requires_any: [cta_sales_led, product_launch, funding_raise, content_motion]
+    window_days: 60
+    qualifies: true
+    angle: "Slow on mobile while pushing for attention: offer a faster site starting with the demo pages."
+  champion_moved:
+    title: Past client in a new role
+    requires: [champion_moved]
+    window_days: 90
+    qualifies: true
+    angle: "Someone you've worked with just started here: congratulate them and offer help in their first 90 days."

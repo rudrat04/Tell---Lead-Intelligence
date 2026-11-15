@@ -63,7 +63,9 @@ export const IcpSchema = z.object({
     guessed_email: z.number().min(0).max(1).default(1),
     /** the contact isn't one of the personas the matched play names */
     off_persona: z.number().min(0).max(1).default(1),
-  }).default({ no_contact: 1, no_email: 1, guessed_email: 1, off_persona: 1 }),
+    /** boost when you can reach them through people you know (pnpm network: a connection, a past client there); 1 = off */
+    warm_path: z.number().min(1).max(3).default(1),
+  }).default({ no_contact: 1, no_email: 1, guessed_email: 1, off_persona: 1, warm_path: 1 }),
   /** who to contact at a matching company, in order of preference, by company size */
   personas: z.array(z.object({
     title: z.string(),
@@ -134,6 +136,8 @@ export const PlaysSchema = z.object({
     title: z.string(),
     /** all of these signal types within window_days */
     requires: z.array(z.string()).min(1),
+    /** and at least one of these (e.g. any sign of new attention: launch, funding, new subdomain); empty = no extra condition */
+    requires_any: z.array(z.string()).default([]),
     /** and none of these (current or within the window), e.g. "no RevOps hire yet" */
     absent: z.array(z.string()).default([]),
     window_days: z.number().int().min(1),
@@ -240,6 +244,10 @@ export const ToolsSchema = z.object({
   sprawl_exclude_categories: z.array(z.string()).default([]),
   /** two or more tools in one of these categories = tool_overlap (e.g. two CRMs), if the pack defines that signal */
   overlap_categories: z.array(z.string()).default([]),
+  /** tool categories that mean they send cold email (for email_auth_gap, if the pack defines it) */
+  outbound_categories: z.array(z.string()).default(["outbound"]),
+  /** tool categories that count as web analytics (site_health_poor says "no analytics tag" when none shows) */
+  analytics_categories: z.array(z.string()).default(["analytics"]),
   tools: z.record(z.string().regex(/^[a-z0-9_]+$/), z.object({
     label: z.string(),
     category: z.string(),
@@ -343,7 +351,7 @@ export const PackSchema = z.object({
   sources: SourcesSchema,
   domains: DomainsSchema,
   delivery: DeliverySchema,
-  tools: ToolsSchema.default({ sprawl_min: 4, sprawl_exclude_categories: [], overlap_categories: [], tools: {} }),
+  tools: ToolsSchema.default({ sprawl_min: 4, sprawl_exclude_categories: [], overlap_categories: [], outbound_categories: ["outbound"], analytics_categories: ["analytics"], tools: {} }),
   copy: CopySchema.default(COPY_DEFAULT),
   critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60 }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
@@ -360,6 +368,9 @@ export const PackSchema = z.object({
     }
     for (const r of play.requires) {
       if (!p.signals.signals[r]) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "requires"], message: `unknown signal type "${r}"` });
+    }
+    for (const r of play.requires_any ?? []) {
+      if (!p.signals.signals[r]) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "requires_any"], message: `unknown signal type "${r}"` });
     }
   }
   const w = Object.values(p.icp.soft_fit.weights).reduce((a, b) => a + b, 0);

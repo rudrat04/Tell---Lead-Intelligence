@@ -16,13 +16,16 @@ import { classifyJob, type RoleRules } from "./jobs.js";
 
 const DAY = 86_400_000;
 export const OPEN_ROLE_MAX_AGE_DAYS = 45;
+/** freeze_to_contract: a core role open at least this long before it was removed, then a contract ask within this many days */
+export const FREEZE_MIN_OPEN_DAYS = 45;
+export const FREEZE_CONTRACT_DAYS = 45;
 export const FAST_LANE_MAX_AGE_DAYS = 14;
 /**
  * Website/DNS findings the weekly watch re-checks are states, like open roles: "two CRMs" is still true while the watch
  * keeps seeing it (signals.last_seen_at). Seen within STATE_SEEN_DAYS (a weekly watch plus one missed run) = current, and
  * its age stops at STATE_MAX_AGE_DAYS. Once it stops being seen it ages from the last time it was.
  */
-export const STATE_SIGNAL_TYPES = new Set(["tool_overlap", "stack_sprawl", "leaky_capture", "has_gtm_agency"]);
+export const STATE_SIGNAL_TYPES = new Set(["tool_overlap", "stack_sprawl", "leaky_capture", "has_gtm_agency", "email_auth_gap", "attribution_gap", "site_health_poor"]);
 export const STATE_SEEN_DAYS = 15;
 export const STATE_MAX_AGE_DAYS = 30;
 
@@ -35,6 +38,8 @@ export interface JobRow {
   postedAt: Date | null;
   firstSeenAt: Date;
   closedAt: Date | null;
+  /** the board's source ("greenhouse", "jsearch"...): JSearch roles close when unseen, which proves nothing about removal */
+  boardSource?: string | null;
 }
 
 export interface SignalRow {
@@ -64,7 +69,7 @@ export interface Evidence {
 /** Signal types derived from job state; rows of these types in `signals` are not double-counted. */
 export const JOB_STATE_TYPES = new Set(["contract_role", "first_role", "core_role_open", "core_role_open_45d", "adjacent_role_open"]);
 /** Everything that comes from hiring (job state + the "filled" negative). */
-export const HIRING_TYPES = new Set([...JOB_STATE_TYPES, "core_role_filled"]);
+export const HIRING_TYPES = new Set([...JOB_STATE_TYPES, "core_role_filled", "freeze_to_contract"]);
 
 /** Does this account carry hiring evidence / a fresh non-hiring positive signal? */
 export const hasHiring = (s: { evidence: Evidence[] }) => s.evidence.some((e) => HIRING_TYPES.has(e.type));
@@ -89,6 +94,10 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
     // same role on two boards (YC + Ashby) or a re-post: keep the most current copy
     if (!prev || (e.current && !prev.current) || (e.current === prev.current && e.ageDays < prev.ageDays)) out.set(key, e);
   };
+
+  // for freeze_to_contract: core roles removed after a long time open, and contract asks that came after
+  const longClosed: { title: string; closedAt: Date; openDays: number }[] = [];
+  const contractAsks: { title: string; at: Date; e: Evidence }[] = [];
 
   for (const j of jobs) {
     const cls = classifyJob(j.title, j.employmentType ?? undefined, roles);
@@ -115,9 +124,15 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
       ageDays = openAge(Math.max(0, daysOpen - sinceClosed)) + sinceClosed;
     } else ageDays = openAge(daysOpen);
 
-    keep(`role:${cls.family}:${normTitle(j.title)}`, {
+    const ev: Evidence = {
       type, class: specs[type]!.class, ageDays, current: open, openDays: Math.round(daysOpen), quote: j.title.replace(/\s+/g, " ").trim(), url: j.url, ref: { kind: "job", id: j.id },
-    });
+    };
+    keep(`role:${cls.family}:${normTitle(j.title)}`, ev);
+    if (type === "contract_role") contractAsks.push({ title: ev.quote, at: since, e: ev });
+    if (!open && cls.family === "core" && !cls.contract && !cls.founding && j.boardSource !== "jsearch") {
+      const openDays = (j.closedAt!.getTime() - since.getTime()) / DAY;
+      if (openDays >= FREEZE_MIN_OPEN_DAYS) longClosed.push({ title: ev.quote, closedAt: j.closedAt!, openDays });
+    }
   }
 
   for (const s of signals) {
@@ -133,6 +148,28 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
     keep(`signal:${s.type}:${s.evidenceUrl}`, {
       type: s.type, class: specs[s.type]!.class, ageDays, current, quote: s.evidenceQuote, url: s.evidenceUrl, ref: { kind: "signal", id: s.id },
     });
+  }
+  // Hiring freeze turned contract: a core role removed after a long time open (not filled: a fill is removed fast), then
+  // within FREEZE_CONTRACT_DAYS a contract version of the role or a public ask for outside help. They tried to hire,
+  // couldn't, and are now open to an outside expert. One event per account, dated by the contract ask.
+  if (specs.freeze_to_contract && longClosed.length) {
+    for (const s of signals) if (s.type === "explicit_hire_request") contractAsks.push({ title: s.evidenceQuote.slice(0, 80), at: s.observedAt, e: {
+      type: s.type, class: "explicit", ageDays: Math.max(0, (now.getTime() - s.observedAt.getTime()) / DAY), current: false, quote: s.evidenceQuote, url: s.evidenceUrl, ref: { kind: "signal", id: s.id },
+    } });
+    let best: { c: (typeof longClosed)[number]; a: (typeof contractAsks)[number] } | null = null;
+    for (const c of longClosed) for (const a of contractAsks) {
+      const gap = (a.at.getTime() - c.closedAt.getTime()) / DAY;
+      // the ask comes after the close (a week's slack: boards publish and remove on different days)
+      if (gap >= -7 && gap <= FREEZE_CONTRACT_DAYS && (!best || a.e.ageDays < best.a.e.ageDays)) best = { c, a };
+    }
+    if (best) {
+      const gap = Math.max(0, Math.round((best.a.at.getTime() - best.c.closedAt.getTime()) / DAY));
+      out.set("freeze:contract", {
+        type: "freeze_to_contract", class: specs.freeze_to_contract.class, ageDays: best.a.e.ageDays, current: best.a.e.current,
+        quote: `Removed "${best.c.title}" after ${Math.round(best.c.openDays)} days unfilled; ${gap ? `${gap} days later` : "then"} posted "${best.a.title}"`,
+        url: best.a.e.url, ref: best.a.e.ref,
+      });
+    }
   }
   const ops = people.filter((p) => p.role && roles.core.some((r) => r.test(p.role!)) && !roles.exclude.some((r) => r.test(p.role!)));
   const add = (type: string, p: PersonRow, quote: string) => {
@@ -160,8 +197,8 @@ export function softFit(a: AccountFacts, icp: Pack["icp"]): number {
 export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[]; personas?: string[]; qualifies?: boolean }
 
 /**
- * A play fires when every required signal type is present within its window (current evidence always is) and none
- * of its `absent` types is (e.g. "just raised" + no RevOps role open).
+ * A play fires when every required signal type is present within its window (current evidence always is), at least
+ * one of its `requires_any` types is (when it lists any), and none of its `absent` types is (e.g. "just raised" + no RevOps role open).
  */
 export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayMatch[] {
   const out: PlayMatch[] = [];
@@ -175,7 +212,14 @@ export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayM
       if (hits.length >= need) used.push(...hits.slice(0, need));
       return hits.length >= need;
     });
-    if (ok) out.push({ id, title: p.title, angle: p.angle, evidence: used, personas: p.personas ?? [], qualifies: p.qualifies ?? false });
+    if (!ok) continue;
+    // requires_any: at least one of these types too (the freshest one is cited)
+    if ((p.requires_any ?? []).length) {
+      const any = ev.filter((e) => p.requires_any!.includes(e.type) && inWindow(e)).sort((a, b) => a.ageDays - b.ageDays)[0];
+      if (!any) continue;
+      used.push(any);
+    }
+    out.push({ id, title: p.title, angle: p.angle, evidence: used, personas: p.personas ?? [], qualifies: p.qualifies ?? false });
   }
   return out;
 }

@@ -2,7 +2,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 
 export * from "./schema.js";
-export { eq, inArray, and, desc, sql } from "drizzle-orm";
+export { eq, inArray, and, desc, sql, isNull } from "drizzle-orm";
 export type { SQL } from "drizzle-orm";
 
 export function getDb(url = process.env.DATABASE_URL) {
