@@ -4,7 +4,7 @@ import { displayScore, icpRecheck, sendWindow, sendWindowText } from "@tell/inte
 import { getDb, deliveries, inArray, eq } from "@tell/db";
 import { syncLabels } from "./sheet-sync.js";
 import {
-  sheetsCall, LEAD_COLUMNS, LABEL_VALUES, REASON_VALUES, OUTCOME_VALUES, splitProfile, emailCells, storedRow, a1Col,
+  sheetsCall, LEAD_COLUMNS, splitProfile, emailCells, storedRow, a1Col, formatLeadsTab,
   type LeadRow, type LeadColumn,
 } from "./sheets.js";
 
@@ -32,7 +32,7 @@ function oldEnrichAnswer(cell: string): LeadRow | null {
  * database first, the old tab is kept as a backup tab, columns you added yourself move to the end, and Score /
  * ICP fit / Timing are refreshed. Returns counts only.
  */
-export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; now?: Date } = {}): Promise<SheetRebuildResult> {
+export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; now?: Date; backup?: boolean } = {}): Promise<SheetRebuildResult> {
   const id = pack.delivery.sheet.spreadsheet_id;
   if (!id) throw new Error("delivery.sheet.spreadsheet_id is not set");
   const now = opts.now ?? new Date();
@@ -78,6 +78,8 @@ export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; no
       row.Score = String(displayScore(x.score));
       row["ICP fit"] = String(Math.round(x.score.fit * 100));
       row.Timing = sendWindowText(sendWindow(x.score.evidence, now, pack.icp.calendar));
+      row.Size = x.account.sizeBand ?? ""; // stored facts, filled from the Exa company index when no source gave them
+      row.Segment = x.account.segment ?? "";
     }
     out.push({ row, extra: Object.fromEntries(extra.map((h) => [h, old[h] ?? ""])), id: rid });
     res.kept++;
@@ -88,28 +90,17 @@ export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; no
   const meta = await sheetsCall<{ sheets: { properties: { sheetId: number; title: string } }[] }>(`/${id}?fields=sheets.properties`);
   const leads = meta.sheets.find((s) => s.properties.title === "Leads")?.properties.sheetId;
   if (leads === undefined) throw new Error("no Leads tab");
-  let backup = `Leads backup ${now.toISOString().slice(0, 10)}`;
-  for (let n = 2; meta.sheets.some((s) => s.properties.title === backup); n++) backup = `Leads backup ${now.toISOString().slice(0, 10)} (${n})`;
-  await sheetsCall(`/${id}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ duplicateSheet: { sourceSheetId: leads, newSheetName: backup, insertSheetIndex: meta.sheets.length } }] }) });
-  res.backupTab = backup;
+  if (opts.backup !== false) {
+    let backup = `Leads backup ${now.toISOString().slice(0, 10)}`;
+    for (let n = 2; meta.sheets.some((s) => s.properties.title === backup); n++) backup = `Leads backup ${now.toISOString().slice(0, 10)} (${n})`;
+    await sheetsCall(`/${id}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ duplicateSheet: { sourceSheetId: leads, newSheetName: backup, insertSheetIndex: meta.sheets.length } }] }) });
+    res.backupTab = backup;
+  }
 
   await sheetsCall(`/${id}/values/${encodeURIComponent("Leads!A:AZ")}:clear`, { method: "POST", body: "{}" });
   const grid = [newHeader, ...out.map((o) => newHeader.map((h) => (h === "ID" ? o.id : (o.row[h as LeadColumn] ?? o.extra[h] ?? ""))))];
   await sheetsCall(`/${id}/values/${encodeURIComponent(`Leads!A1:${a1Col(newHeader.length - 1)}${grid.length}`)}?valueInputOption=RAW`, { method: "PUT", body: JSON.stringify({ values: grid }) });
-  const col = (c: LeadColumn) => newHeader.indexOf(c);
-  const dropdown = (c: number, vals: string[]) => ({ setDataValidation: { range: { sheetId: leads, startRowIndex: 1, startColumnIndex: c, endColumnIndex: c + 1 }, rule: { condition: { type: "ONE_OF_LIST", values: vals.map((v) => ({ userEnteredValue: v })) }, strict: false, showCustomUi: true } } });
-  await sheetsCall(`/${id}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({
-      requests: [
-        { setDataValidation: { range: { sheetId: leads } } }, // old dropdowns sat on the old column positions
-        { updateDimensionProperties: { range: { sheetId: leads, dimension: "COLUMNS", startIndex: 0, endIndex: Math.max(newHeader.length, header.length) }, properties: { hiddenByUser: false }, fields: "hiddenByUser" } },
-        dropdown(col("Label"), LABEL_VALUES), dropdown(col("Reason"), REASON_VALUES), dropdown(col("Outcome"), OUTCOME_VALUES),
-        { updateDimensionProperties: { range: { sheetId: leads, dimension: "COLUMNS", startIndex: col("ID"), endIndex: col("ID") + 1 }, properties: { hiddenByUser: true }, fields: "hiddenByUser" } },
-        { repeatCell: { range: { sheetId: leads, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true } } }, fields: "userEnteredFormat.textFormat.bold" } },
-      ],
-    }),
-  });
+  await formatLeadsTab(id); // dropdowns, widths, hidden ID: all by header name
   // stored rows follow the Sheet (by column name), so later appends and fills line up
   const db = getDb();
   for (const o of out) await db.update(deliveries).set({ sheetRow: { ...storedRow(delOf.get(o.id)?.row ?? null), ...o.row } }).where(eq(deliveries.id, o.id));

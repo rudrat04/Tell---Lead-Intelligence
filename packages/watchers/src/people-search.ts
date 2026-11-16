@@ -36,3 +36,31 @@ export const exaPeopleSearch = (apiKey = process.env.EXA_API_KEY): PeopleSearch 
     return (j.results ?? []).map(parseExaPerson).filter((x): x is PeopleHit => !!x);
   },
 });
+
+/** A company record from Exa's company index (headcount, description, website). */
+export interface CompanyHit { name: string; url: string; employees: number | null; description: string; country: string | null }
+
+/** Parse Exa company results. Exported for tests. */
+export function parseExaCompanies(j: unknown): CompanyHit[] {
+  const results = (j as { results?: unknown[] } | null)?.results ?? [];
+  return results.flatMap((x) => {
+    const r = x as { url?: string; title?: string; entities?: { type?: string; properties?: { name?: string; description?: string; workforce?: { total?: number | null }; headquarters?: { country?: string | null } } }[] };
+    const p = (r.entities ?? []).find((e) => e.type === "company")?.properties;
+    if (!r.url || !p) return [];
+    const total = p.workforce?.total;
+    return [{ name: p.name ?? r.title ?? "", url: r.url, employees: typeof total === "number" && total > 0 ? total : null, description: (p.description ?? "").slice(0, 1500), country: p.headquarters?.country ?? null }];
+  });
+}
+
+/** Exa company search for a domain (~1 search credit). The caller must check the result's website is that domain. */
+export async function exaCompanySearch(domain: string, apiKey = process.env.EXA_API_KEY): Promise<CompanyHit[]> {
+  if (!apiKey) throw new Error("EXA_API_KEY is not set");
+  const res = await fetch("https://api.exa.ai/search", {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "content-type": "application/json" },
+    body: JSON.stringify({ query: domain, category: "company", type: "auto", numResults: 3 }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`Exa company search ${res.status}`);
+  return parseExaCompanies(await res.json());
+}

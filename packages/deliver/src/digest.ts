@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import {
-  runScoring, istDay, contactsFor, attachEmails, waterfallContacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  runScoring, istDay, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
@@ -75,13 +75,24 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
   const max = pack.delivery.digest.max_leads;
   // score a pool of pool_multiplier x the leads, find who to contact there, drop leads with nobody to contact, re-rank by reach
-  const score = await runScoring({ pack, write: !opts.dryRun && !opts.test, maxLeads: max * pack.delivery.digest.pool_multiplier });
+  const scoreRun = (write: boolean) => runScoring({ pack, write, maxLeads: max * pack.delivery.digest.pool_multiplier });
+  // first pass without writes (scores are written once, by the final pass)
+  let score = await scoreRun(false);
+  // company size + segment for pool accounts no source gave them for (Exa company index); re-score when any changed,
+  // so an enterprise or an off-ICP segment leaves the pool before contacts are looked up
+  let factsNote = "company facts: none needed";
+  try {
+    const f = await fillCompanyFacts([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, { write: !opts.dryRun });
+    factsNote = f.skipped ? `company facts: ${f.skipped}` : `company facts: ${f.looked} looked up, ${f.sized} sized, ${f.segmented} segmented`;
+    if (f.changed.length) score = await scoreRun(false);
+  } catch { factsNote = "company facts failed"; }
+  if (!opts.dryRun && !opts.test) score = await scoreRun(true);
   const preferred = preferredPersonas([...score.ranking.leads, ...score.ranking.watchlist]);
   // people search only for the leads (not the watchlist) to stay inside the search API's free tier
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id), preferred,
   });
-  const enrich: string[] = [];
+  const enrich: string[] = [factsNote];
   // Air Waterfall lookup: a lead nobody is known for gets one people search there (it would be dropped otherwise)
   try {
     const w = await waterfallContacts(contacts, score.ranking.leads.map((l) => l.account.id), pack, { write: !opts.dryRun, preferred });

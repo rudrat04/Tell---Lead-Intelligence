@@ -73,6 +73,8 @@ export function sendWindow(evidence: Evidence[], now: Date, cal: Calendar): Send
   const band: SendBand = total >= 3 ? "now" : total >= 1 ? "good" : "wait";
   // reasons: what moved it most first (signals before calendar on ties); "against" reasons count too
   const reasons = [...sig, ...calPts].sort((a, b) => Math.abs(b[0]) - Math.abs(a[0])).map(([p, r]) => (p < 0 ? `but ${r}` : r));
+  // every label says why, even when nothing moved it
+  if (!reasons.length) reasons.push(band === "wait" ? "no fresh trigger (no recent ask, stalled role, new leader, raise or launch) and nothing on the calendar" : "no strong trigger either way");
   return { band, label: SEND_LABEL[band], reasons: reasons.slice(0, 3) };
 }
 

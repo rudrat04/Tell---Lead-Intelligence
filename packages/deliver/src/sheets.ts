@@ -117,6 +117,7 @@ export async function createLeadsSheet(title: string): Promise<{ spreadsheetId: 
       ],
     }),
   });
+  await formatLeadsTab(created.spreadsheetId);
   return { spreadsheetId: created.spreadsheetId, url: created.spreadsheetUrl };
 }
 
@@ -163,6 +164,7 @@ export async function ensureLeadHeaders(spreadsheetId: string): Promise<string[]
   await sheetsCall(`/${spreadsheetId}/values/${encodeURIComponent(`Leads!${a1Col(start)}1:${a1Col(start + missing.length - 1)}1`)}?valueInputOption=RAW`, {
     method: "PUT", body: JSON.stringify({ values: [missing] }),
   });
+  await formatLeadsTab(spreadsheetId); // new columns get their dropdowns; nothing stays on an old position
   return [...current, ...missing];
 }
 
@@ -186,4 +188,53 @@ export async function fillColumnById(spreadsheetId: string, column: string, valu
   });
   if (data.length) await sheetsCall(`/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) });
   return data.length;
+}
+
+/** Column widths in pixels (others 140); short yes/no and score columns stay narrow, reading columns wide. */
+const COLUMN_WIDTH: Record<string, number> = {
+  Date: 90, Company: 150, Website: 160, Score: 60, "ICP fit": 60, Timing: 220, Size: 70, Segment: 75, Region: 80,
+  "Why now": 340, Signals: 240, Plays: 180, Person: 140, Role: 200, LinkedIn: 180, Email: 210, Verified: 70, Risky: 60,
+  "Catch-all": 75, "Enrich email": 150, Label: 75, Reason: 110, Outcome: 100, Notes: 200, Opener: 300, Angle: 260,
+  "Email draft": 340, "LinkedIn message": 300,
+};
+/** Columns whose text wraps (the reading columns); the rest clip to one line so rows stay short. */
+const WRAPPED = ["Timing", "Why now", "Signals"];
+
+/**
+ * Formatting of the Leads tab, found by header name (never by position): clears every dropdown on the tab, then puts
+ * Label / Reason / Outcome dropdowns and the yes-no ones on their columns, hides ID, bolds and freezes the header.
+ * Safe to run any time (after columns move). Returns the columns that got a dropdown.
+ */
+export async function formatLeadsTab(spreadsheetId: string): Promise<string[]> {
+  const meta = await sheetsCall<{ sheets: { properties: { sheetId: number; title: string; gridProperties: { rowCount: number; columnCount: number } } }[] }>(`/${spreadsheetId}?fields=sheets.properties`);
+  const tab = meta.sheets.find((s) => s.properties.title === "Leads")?.properties;
+  if (!tab) throw new Error("no Leads tab");
+  const header = (await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!1:1")}`)).values?.[0] ?? [];
+  const at = (c: string) => header.findIndex((h) => h.trim().toLowerCase() === c.toLowerCase());
+  const { rowCount, columnCount } = tab.gridProperties;
+  const whole = { sheetId: tab.sheetId, startRowIndex: 0, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: columnCount };
+  const lists: [string, string[]][] = [["Label", LABEL_VALUES], ["Reason", REASON_VALUES], ["Outcome", OUTCOME_VALUES], ["Verified", ["yes", "no"]], ["Risky", ["yes", "no"]], ["Catch-all", ["yes", "no", "unknown"]]];
+  const placed = lists.filter(([c]) => at(c) >= 0);
+  const id = at("ID");
+  await sheetsCall(`/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({
+      requests: [
+        { setDataValidation: { range: whole } }, // no rule = clear: removes dropdowns left on old column positions
+        { updateDimensionProperties: { range: { sheetId: tab.sheetId, dimension: "COLUMNS", startIndex: 0, endIndex: columnCount }, properties: { hiddenByUser: false }, fields: "hiddenByUser" } },
+        ...placed.map(([c, vals]) => ({ setDataValidation: {
+          range: { sheetId: tab.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: at(c), endColumnIndex: at(c) + 1 },
+          rule: { condition: { type: "ONE_OF_LIST", values: vals.map((v) => ({ userEnteredValue: v })) }, strict: false, showCustomUi: true },
+        } })),
+        ...(id >= 0 ? [{ updateDimensionProperties: { range: { sheetId: tab.sheetId, dimension: "COLUMNS", startIndex: id, endIndex: id + 1 }, properties: { hiddenByUser: true }, fields: "hiddenByUser" } }] : []),
+        // formats left on old column positions (widths, wrapping) are reset, then set per column by name
+        { repeatCell: { range: { ...whole, startRowIndex: 1 }, cell: { userEnteredFormat: { wrapStrategy: "CLIP", verticalAlignment: "TOP" } }, fields: "userEnteredFormat" } },
+        { repeatCell: { range: { sheetId: tab.sheetId, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, wrapStrategy: "WRAP", verticalAlignment: "MIDDLE" } }, fields: "userEnteredFormat" } },
+        ...header.map((h, i) => ({ updateDimensionProperties: { range: { sheetId: tab.sheetId, dimension: "COLUMNS", startIndex: i, endIndex: i + 1 }, properties: { pixelSize: COLUMN_WIDTH[h.trim()] ?? 140 }, fields: "pixelSize" } })),
+        ...WRAPPED.filter((c) => at(c) >= 0).map((c) => ({ repeatCell: { range: { sheetId: tab.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: at(c), endColumnIndex: at(c) + 1 }, cell: { userEnteredFormat: { wrapStrategy: "WRAP" } }, fields: "userEnteredFormat.wrapStrategy" } })),
+        { updateSheetProperties: { properties: { sheetId: tab.sheetId, gridProperties: { frozenRowCount: 1, frozenColumnCount: Math.max(0, at("Company") + 1) } }, fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount" } },
+      ],
+    }),
+  });
+  return placed.map(([c]) => c);
 }

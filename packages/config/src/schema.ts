@@ -44,6 +44,9 @@ export const IcpSchema = z.object({
   size_bands: z.array(z.object({ band: z.string(), max: z.number().int() })).min(1),
   /** source industry label (e.g. YC "B2B", "Consumer") -> your segment name */
   segment_map: z.record(z.string(), z.string()).default({ B2B: "b2b" }),
+  /** segment name -> what a company in it does. When set, a company whose segment no source gave is classified from
+   *  its description (Exa company index) into one of these; a segment not reached from industries_any is out of ICP. */
+  segment_descriptions: z.record(z.string(), z.string()).default({}),
   /** soft fit (0..1 per factor, weights sum to 1) */
   soft_fit: z.object({
     weights: z.record(z.string(), z.number().min(0)),

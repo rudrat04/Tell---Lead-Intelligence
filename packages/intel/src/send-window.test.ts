@@ -15,8 +15,10 @@ describe("good time to message (separate from the score)", () => {
     expect(w.reasons[0]).toContain("asked for outside help 3d ago");
   });
 
-  it("a stale adjacent role and nothing else can wait", () => {
-    expect(sendWindow([ev("adjacent_role_open", 40, { current: true })], day("2026-11-16"), india).band).toBe("wait");
+  it("a stale adjacent role and nothing else can wait, and the label still says why", () => {
+    const w = sendWindow([ev("adjacent_role_open", 40, { current: true })], day("2026-11-16"), india);
+    expect(w.band).toBe("wait");
+    expect(sendWindowText(w)).toMatch(/^Can wait: no fresh trigger/);
   });
 
   it("the Indian financial year: April budgets are fresh, late March is closing, Feb is planning", () => {

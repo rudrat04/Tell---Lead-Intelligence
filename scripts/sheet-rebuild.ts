@@ -3,12 +3,12 @@
  * score threshold (rows with an Outcome always stay). The old tab is kept as "Leads backup <date>".
  * Prints counts only.
  *   pnpm sheet:rebuild --dry   # counts, no writes
- *   pnpm sheet:rebuild
+ *   pnpm sheet:rebuild [--no-backup]   # skip the backup tab (e.g. a second run the same day)
  */
 import "dotenv/config";
 import { loadPack } from "@tell/config";
 import { rebuildLeadsSheet } from "@tell/deliver";
 
 const dry = process.argv.includes("--dry");
-const r = await rebuildLeadsSheet(await loadPack(), { dryRun: dry });
+const r = await rebuildLeadsSheet(await loadPack(), { dryRun: dry, backup: !process.argv.includes("--no-backup") });
 console.log(`sheet rebuild${dry ? " (dry run)" : ""}: rows=${r.rows} kept=${r.kept} (outcome kept ${r.keptForOutcome}) removed=${JSON.stringify(r.removed)}${r.backupTab ? ` backup tab="${r.backupTab}"` : ""}`);
