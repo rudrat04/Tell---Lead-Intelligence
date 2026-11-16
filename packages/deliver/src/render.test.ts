@@ -40,6 +40,14 @@ describe("digest render", () => {
     expect(e.subject).toBe("No new leads for 2026-11-12");
     expect(e.text).toContain("expected about 48: check the schedule");
   });
+  it("warns only for free-tier limits; a spend cap reached is a quiet note", () => {
+    const usage = [{ service: "serper", pct: 1 }, { service: "jsearch", pct: 0.9 }, { service: "neon_storage_gb", pct: 0.85 }];
+    const e = renderDigest(result(0), pack, { ...health, usage }, "2026-11-12");
+    expect(e.text).toContain("neon storage gb at 85% of the free tier (retention tightened)");
+    expect(e.text).not.toContain("serper at");
+    expect(e.text).not.toContain("jsearch");
+    expect(e.text).toContain("serper cap reached");
+  });
 });
 
 describe("people-first digest", () => {

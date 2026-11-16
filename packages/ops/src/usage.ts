@@ -1,5 +1,6 @@
 import { r2 } from "@tell/config";
 import { getDb, usageDaily, sql } from "@tell/db";
+import { FREE_TIER_SERVICES } from "@tell/deliver";
 
 /**
  * Free-tier usage guard (plan section 2). Records today's usage per service in usage_daily; `tight` when any is at
@@ -19,18 +20,18 @@ export async function runUsageGuard(): Promise<UsageResult> {
   const add = (service: string, used: number, limit: number, unit: string) => readings.push({ service, used, limit, unit, pct: limit > 0 ? used / limit : 0 });
 
   const [size] = (await db.execute(sql`select pg_database_size(current_database())::bigint as b`)).rows as { b: string }[];
-  add("neon_storage_gb", Number(size?.b ?? 0) / 1e9, Number(env.NEON_STORAGE_LIMIT_GB ?? 0.5), "GB");
+  add(FREE_TIER_SERVICES.neonStorage, Number(size?.b ?? 0) / 1e9, Number(env.NEON_STORAGE_LIMIT_GB ?? 0.5), "GB");
 
   try {
     const objects = await r2().list("");
-    add("r2_storage_gb", objects.reduce((a, o) => a + o.size, 0) / 1e9, Number(env.R2_STORAGE_LIMIT_GB ?? 10), "GB");
+    add(FREE_TIER_SERVICES.r2Storage, objects.reduce((a, o) => a + o.size, 0) / 1e9, Number(env.R2_STORAGE_LIMIT_GB ?? 10), "GB");
   } catch { /* R2 not configured: skip */ }
 
   const [haiku] = (await db.execute(sql`select coalesce(sum(used), 0)::float as used from usage_daily where service = 'haiku' and day = ${day}`)).rows as { used: number }[];
   add("haiku_usd_today", haiku?.used ?? 0, Number(env.HAIKU_DAILY_CAP_USD ?? 1), "USD");
 
   const [exa] = (await db.execute(sql`select count(*)::int as n from people_searches where provider = 'exa' and searched_at >= date_trunc('month', now())`)).rows as { n: number }[];
-  add("exa_searches_month", exa?.n ?? 0, Number(env.EXA_MONTHLY_SEARCHES ?? 1400), "searches");
+  add(FREE_TIER_SERVICES.exaSearches, exa?.n ?? 0, Number(env.EXA_MONTHLY_SEARCHES ?? 1400), "searches");
 
   for (const r of readings.filter((x) => x.service !== "haiku_usd_today")) {
     await db.insert(usageDaily).values({ day, service: r.service, used: r.used, limit: r.limit })

@@ -6,6 +6,12 @@ import { hasHiring, displayScore } from "@tell/intel";
 
 /** Daily digest (plan section 10). "Why now" is written by code from cited evidence: free and deterministic. */
 
+/** Services the nightly usage guard (ops/usage.ts) measures against a free-tier limit; 80%+ halves retention (janitor).
+ * Every other usage_daily service is a spend cap a job counts against (serper, jsearch, exa_champion): reaching it
+ * is the cap working, not a free-tier problem, and changes no retention. */
+export const FREE_TIER_SERVICES = { neonStorage: "neon_storage_gb", r2Storage: "r2_storage_gb", exaSearches: "exa_searches_month" } as const;
+const FREE_TIER = new Set<string>(Object.values(FREE_TIER_SERVICES));
+
 export interface DigestHealth {
   boardsChecked24h: number;
   boardsTotal: number;
@@ -17,7 +23,7 @@ export interface DigestHealth {
   /** India coverage (eval requirement): tracked Indian accounts, and how many made today's leads */
   indiaTracked?: number;
   indiaInLeads?: number;
-  /** free-tier usage from the nightly usage guard: service -> share of limit */
+  /** usage_daily readings, service -> share of limit: the nightly usage guard (FREE_TIER_SERVICES) and spend caps (serper, jsearch, ...) */
   usage?: { service: string; pct: number }[];
   /** self-tuning proposals waiting for you (weekly; never applied automatically) */
   tuningPending?: number;
@@ -235,6 +241,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `Haiku $${health.haikuTodayUsd.toFixed(3)} of $${health.haikuCapUsd.toFixed(2)}`,
     health.indiaTracked != null ? `India ${health.indiaTracked} tracked, ${health.indiaInLeads ?? 0} today` : "",
     `${m.label_count_30d ?? 0} labelled (30d)${(m.label_count_30d ?? 0) > 0 ? `, ${Math.round((m.precision_30d ?? 0) * 100)}% good` : ""}`,
+    ...(health.usage ?? []).filter((u) => !FREE_TIER.has(u.service) && u.pct >= 1).map((u) => `${u.service.replace(/_/g, " ")} cap reached`),
   ].filter(Boolean).join(" · ");
   const alerts = [
     health.ticks24h < 40 ? `Only ${health.ticks24h} ticks in 24h (expected about 48: check the schedule)` : "",
@@ -242,7 +249,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     health.tickErrors24h && health.tickErrors24h >= Math.max(1, 0.1 * (health.ticks24h || 1)) ? `${health.tickErrors24h} ticks with errors in 24h` : "",
     health.boardsFailing && health.boardsTotal && health.boardsFailing / health.boardsTotal >= 0.05 ? `${health.boardsFailing} job boards failing` : "",
     r.ranking.held.incomplete ? `${r.ranking.held.incomplete} accounts held back (a source is down)` : "",
-    ...(health.usage ?? []).filter((u) => u.pct >= 0.8).map((u) => `${u.service.replace(/_/g, " ")} at ${Math.round(u.pct * 100)}% of the free tier (retention tightened)`),
+    ...(health.usage ?? []).filter((u) => FREE_TIER.has(u.service) && u.pct >= 0.8).map((u) => `${u.service.replace(/_/g, " ")} at ${Math.round(u.pct * 100)}% of the free tier (retention tightened)`),
     health.tuningPending ? `${health.tuningPending} weight change${health.tuningPending === 1 ? "" : "s"} proposed from your labels: run pnpm tune --show --dry` : "",
   ].filter(Boolean);
   const healthLines = [...alerts, summary, `Config ${r.configVersion}`];
