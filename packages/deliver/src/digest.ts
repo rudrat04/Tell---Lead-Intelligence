@@ -1,12 +1,12 @@
 import type { Pack } from "@tell/config";
 import {
-  runScoring, istDay, contactsFor, attachEmails, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  runScoring, istDay, contactsFor, attachEmails, waterfallContacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
 import { appendPendingLeads } from "./sheet-sync.js";
-import { assignDeliveryIds, labelLinks } from "./label-links.js";
+import { assignDeliveryIds, labelLinks, enrichLink } from "./label-links.js";
 import { appendRows } from "./sheets.js";
 import type { Sender } from "./gmail.js";
 
@@ -82,8 +82,14 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id), preferred,
   });
   const enrich: string[] = [];
+  // Air Waterfall lookup: a lead nobody is known for gets one people search there (it would be dropped otherwise)
+  try {
+    const w = await waterfallContacts(contacts, score.ranking.leads.map((l) => l.account.id), pack, { write: !opts.dryRun, preferred });
+    enrich.push(w.skipped ? `air-waterfall lookup: ${w.skipped}` : `air-waterfall lookup ${w.found}/${w.looked}`);
+  } catch { enrich.push("air-waterfall lookup failed"); }
   try { const e = await attachEmails(contacts, { write: !opts.dryRun }); enrich.push(`emails ${JSON.stringify(e.byStatus)} (${e.domains} domains checked)`); }
   catch { enrich.push("emails failed"); /* leads still go out with LinkedIn */ }
+  // Air Waterfall email enrichment runs only when you click "Find email" (digest button / Sheet column): pnpm enrich:requests
   // warm paths through your own network (pnpm network): shown on the lead, and a reach boost (icp.reach.warm_path)
   let champions: ChampionMove[] = [];
   try {
@@ -112,13 +118,13 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const ids = assignDeliveryIds(score.ranking.leads.map((l) => l.account.id));
   const labelUrl = process.env.TELL_LABEL_URL, labelSecret = process.env.LABEL_SECRET;
   const taps = !opts.dryRun && !opts.test && labelUrl && labelSecret
-    ? new Map([...ids].map(([a, d]) => [a, labelLinks(labelUrl, labelSecret, d)])) : undefined;
+    ? new Map([...ids].map(([a, d]) => [a, { ...labelLinks(labelUrl, labelSecret, d), enrich: enrichLink(labelUrl, labelSecret, d) }])) : undefined;
   const email = renderDigest(score, pack, h, day, contacts, gigList, notes, taps, champions);
   const counts = { enrich: enrich.join("; "), leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   const deliveryRows = (at: Date) => score.ranking.leads.map((l) => ({
     id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: at, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
-    sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature, pack.copy, pack.icp.calendar),
+    sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature, pack.copy, pack.icp.calendar, taps?.get(l.account.id)?.enrich),
   }));
   if (opts.sheetOnly) {
     if (score.ranking.leads.length) await db.insert(deliveries).values(deliveryRows(new Date()));

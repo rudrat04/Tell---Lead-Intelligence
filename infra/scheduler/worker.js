@@ -15,6 +15,11 @@
  * One-tap labels: the digest links to /l?d=<delivery id>&v=good|bad&s=<signature>. Opening it shows a confirm page
  * (email link scanners prefetch GETs, so a GET never labels); the button POSTs, and the tap is stored in KV.
  * The daily sync reads /taps with the secret as a bearer token. No database credentials live here.
+ *
+ * Find-email on click: the digest and the Sheet link to /e?d=<delivery id>&s=<signature of "<id>|enrich">. The confirm
+ * page's button POSTs; the request is queued in KV ("enrich:<id>") and enrich.yml is dispatched at once, which runs the
+ * person through Air Waterfall and writes the answer into the Sheet. Nothing is enriched without that click.
+ * The job reads /enrich-requests (and acks them) with the secret as a bearer token.
  */
 
 // cron expression (UTC) -> workflow file to dispatch
@@ -55,8 +60,61 @@ async function valid(env, d, v, s) {
   return !!env.LABEL_SECRET && UUID.test(d ?? "") && LABELS.has(v) && sameText(s, await sign(env.LABEL_SECRET, d, v));
 }
 
-async function labels(request, env) {
+async function validEnrich(env, d, s) {
+  return !!env.LABEL_SECRET && UUID.test(d ?? "") && sameText(s, await sign(env.LABEL_SECRET, d, "enrich"));
+}
+
+/** Read or ack queued requests ("<prefix>:<delivery id>" keys) for a job holding the secret. */
+async function queue(request, env, prefix) {
   const url = new URL(request.url);
+  if (url.pathname.endsWith("/ack")) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
+    const ids = ((await request.json().catch(() => [])) ?? []).filter((d) => typeof d === "string" && UUID.test(d)).slice(0, 1000);
+    for (const d of ids) await env.LABELS.delete(`${prefix}:${d}`);
+    return Response.json({ deleted: ids.length });
+  }
+  const out = [];
+  let cursor;
+  do {
+    const list = await env.LABELS.list({ prefix: `${prefix}:`, cursor });
+    for (const k of list.keys) { const v = await env.LABELS.get(k.name, "json"); if (v) out.push({ d: k.name.slice(prefix.length + 1), ...v }); }
+    cursor = list.list_complete ? undefined : list.cursor;
+  } while (cursor);
+  return Response.json(out, { headers: { "cache-control": "no-store" } });
+}
+
+async function enrich(request, env, ctx) {
+  const url = new URL(request.url);
+  if (request.method === "GET") {
+    const d = url.searchParams.get("d"), s = url.searchParams.get("s");
+    if (!(await validEnrich(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    return page("Find email", `<p>Find this person's work email with Air Waterfall?</p><p style="color:#6b7280;font-size:14px">Runs the email waterfall once (free sources first, then finders that bill only on a find).</p>
+<form method="post" action="/e"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}">
+<button style="font-size:18px;padding:12px 24px;border-radius:8px;border:0;background:#1d4ed8;color:#fff">Find email</button></form>`);
+  }
+  if (request.method === "POST") {
+    const f = await request.formData();
+    const d = f.get("d"), s = f.get("s");
+    if (!(await validEnrich(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    await env.LABELS.put(`enrich:${d}`, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 7 });
+    // one dispatch per minute at most: a run processes every queued request
+    const last = await env.LABELS.get("enrich-dispatched-at");
+    if (!last || Date.now() - Number(last) > 60_000) {
+      await env.LABELS.put("enrich-dispatched-at", String(Date.now()), { expirationTtl: 3600 });
+      ctx?.waitUntil(dispatch(env, "enrich.yml").catch(() => { /* the daily run picks the request up */ }));
+    }
+    return page("Finding email", "<p>Finding the email now. It appears in your Sheet's <b>Enrich email</b> column in about 2 minutes.</p>");
+  }
+  return new Response("method not allowed", { status: 405 });
+}
+
+async function labels(request, env, ctx) {
+  const url = new URL(request.url);
+  if (url.pathname === "/enrich-requests" || url.pathname === "/enrich-requests/ack") {
+    if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
+    return queue(request, env, "enrich");
+  }
+  if (url.pathname === "/e") return enrich(request, env, ctx);
   if (url.pathname === "/taps" || url.pathname === "/taps/ack") {
     if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
     if (url.pathname === "/taps/ack") {
@@ -100,8 +158,8 @@ export default {
     ctx.waitUntil(dispatch(env, workflow));
   },
   // Visiting the Worker URL shows only that it is alive (no dispatch, nothing secret).
-  async fetch(request, env) {
-    const r = request ? await labels(request, env) : null;
+  async fetch(request, env, ctx) {
+    const r = request ? await labels(request, env, ctx) : null;
     if (r) return r;
     return new Response(`tell-scheduler: ${Object.keys(SCHEDULE).length} schedules\n`, { headers: { "content-type": "text/plain" } });
   },

@@ -92,6 +92,20 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
 
+      # Find-email clicks left over (the Worker dispatches enrich.yml at once; this catches any it missed)
+      - name: Find-email clicks
+        continue-on-error: true
+        run: pnpm enrich:requests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
+          LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
+          AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+
       # Hard bounces in the sending mailbox mark those addresses invalid before today's digest (needs gmail.readonly).
       - name: Read bounces
         continue-on-error: true
@@ -109,7 +123,9 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
           WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '1' }}
-          ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'medium' }}
+          ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}
+          AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
+          AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}

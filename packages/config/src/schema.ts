@@ -306,8 +306,11 @@ export const DeliverySchema = z.object({
     pool_multiplier: z.number().int().min(1).max(5).default(3),
     /** slots kept for companies that qualify through non-hiring signals (funding, launches, tools, site changes, posts) */
     reserved_non_hiring: z.number().int().min(0).default(0),
+    /** leads below this display score (0-100; 50 = twice as likely as an average account) never reach the email or the
+     *  Sheet, fast lane included; the next lead above it takes the slot. 0 = off (rank only). */
+    min_score: z.number().int().min(0).max(100).default(0),
     send_hour_local: z.number().int().min(0).max(23).default(9),
-  }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9, reserved_non_hiring: 0, pool_multiplier: 3 }),
+  }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9, reserved_non_hiring: 0, pool_multiplier: 3, min_score: 0 }),
   redeliver_after_days: z.number().int().min(1).default(90),
   /** Google Sheet for leads + your labels (created by `pnpm sheet:setup`; private: it holds lead names) */
   sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),

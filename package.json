@@ -28,6 +28,7 @@
     "watch": "tsx scripts/watch.ts",
     "ops": "tsx scripts/ops.ts",
     "bounces": "tsx scripts/bounces.ts",
+    "enrich:requests": "tsx scripts/enrich-requests.ts",
     "tune": "tsx scripts/tune.ts",
     "forget": "tsx scripts/forget.ts",
     "network": "tsx scripts/network.ts",

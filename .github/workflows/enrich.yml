@@ -1,0 +1,42 @@
+name: Find email (on click)
+
+# Dispatched by the Cloudflare Worker (infra/scheduler) right after you click "Find email" in the digest or the Sheet.
+# Runs each queued contact through Air Waterfall once and writes the answer into the Sheet's "Enrich email" column.
+# Public repo: the script prints counts only.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: enrich
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with: { version: 10 }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: Answer find-email clicks
+        run: pnpm enrich:requests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELL_PACK_R2_PREFIX: ${{ vars.TELL_PACK_R2_PREFIX }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
+          LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
+          AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}

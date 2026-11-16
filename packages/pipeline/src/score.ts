@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
 import {
-  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, type DeliveryHistory, timing as timingScore,
+  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, type DeliveryHistory, timing as timingScore,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
 import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -29,6 +29,8 @@ export interface ScoreRunResult {
   playsMatched: number;
   /** eligible accounts the code critic dropped before ranking, by check */
   criticDropped: Record<string, number>;
+  /** eligible accounts under delivery.digest.min_score (never sent) */
+  belowMinScore: number;
   /** every scored account (for tuning and evals; not rendered) */
   all?: { account: ScoredAccount; score: AccountScore }[];
 }
@@ -40,7 +42,7 @@ export function configVersion(pack: Pack): string {
 }
 
 /** Daily scoring run (plan 8d). Writes scores + plays and returns the ranking for the digest. */
-export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: number; write?: boolean }): Promise<ScoreRunResult> {
+export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: number; write?: boolean; minScore?: number }): Promise<ScoreRunResult> {
   const { pack } = opts;
   const now = opts.now ?? new Date();
   const db = getDb();
@@ -140,7 +142,11 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     verdicts.set(r.account.id, v);
     if (!v.pass) for (const f of v.failed) criticDropped[f.check] = (criticDropped[f.check] ?? 0) + 1;
   }
-  const passed = results.filter((r) => verdicts.get(r.account.id)?.pass !== false);
+  const minScore = opts.minScore ?? pack.delivery.digest.min_score;
+  const criticPassed = results.filter((r) => verdicts.get(r.account.id)?.pass !== false);
+  // score threshold: below it never reaches the email or Sheet (the next lead above it takes the slot)
+  const passed = criticPassed.filter((r) => !r.score.eligible || displayScore(r.score) >= minScore);
+  const belowMinScore = criticPassed.length - passed.length;
 
   const ranking = rankAccounts(passed, opts.maxLeads ?? pack.delivery.digest.max_leads, 5, {
     reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days,
@@ -179,6 +185,6 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   return {
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
-    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, all: results.map((r) => ({ account: r.account, score: r.score })),
+    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore, all: results.map((r) => ({ account: r.account, score: r.score })),
   };
 }

@@ -63,4 +63,27 @@ describe("one-tap labels", () => {
     expect(await ack.json()).toEqual({ deleted: 1 });
     expect(env.LABELS.m.size).toBe(0);
   });
+  it("find email: GET confirms only; POST queues the request and dispatches enrich.yml once a minute", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => { calls.push(url); return new Response(null, { status: 204 }); });
+    const env = { LABEL_SECRET: "s3cret", LABELS: kv(), GH_TOKEN: "t", GH_REPO: "o/r" };
+    const { sign } = await import("./sign.js");
+    const sig = await sign("s3cret", D, "enrich");
+    const waits: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waits.push(p) };
+    const get = await worker.fetch(req(`/e?d=${D}&s=${sig}`), env, ctx);
+    expect(await get.text()).toContain("Find email");
+    expect(env.LABELS.m.size).toBe(0);
+    expect((await worker.fetch(req(`/e?d=${D}&s=${await sign("s3cret", D, "good")}`), env, ctx)).status).toBe(400); // a label signature can't enrich
+    await worker.fetch(req("/e", { method: "POST", body: new URLSearchParams({ d: D, s: sig }) }), env, ctx);
+    await worker.fetch(req("/e", { method: "POST", body: new URLSearchParams({ d: D, s: sig }) }), env, ctx);
+    await Promise.all(waits);
+    expect(calls).toEqual(["https://api.github.com/repos/o/r/actions/workflows/enrich.yml/dispatches"]);
+    expect(env.LABELS.m.has(`enrich:${D}`)).toBe(true);
+    expect((await worker.fetch(req("/enrich-requests"), env, ctx)).status).toBe(403);
+    const list = await (await worker.fetch(req("/enrich-requests", { headers: { authorization: "Bearer s3cret" } }), env, ctx)).json();
+    expect(list.map((x: { d: string }) => x.d)).toEqual([D]);
+    await worker.fetch(req("/enrich-requests/ack", { method: "POST", headers: { authorization: "Bearer s3cret" }, body: JSON.stringify([D]) }), env, ctx);
+    expect(env.LABELS.m.has(`enrich:${D}`)).toBe(false);
+  });
 });

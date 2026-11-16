@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { rankAccounts, enterpriseTitle, type Ranking, type RankInput } from "@tell/intel";
+import { rankAccounts, enterpriseTitle, displayScore, type Ranking, type RankInput } from "@tell/intel";
 import type { Contact } from "@tell/people";
 import type { ScoredAccount } from "./score.js";
 
@@ -41,7 +41,7 @@ export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string
     const f = reachFactor(contacts.get(r.account.id), owners.get(r.account.id) ?? [], pack.icp.reach);
     factors.set(r.account.id, f);
     return { ...r, score: { ...r.score, priority: r.score.priority * f } };
-  });
+  }).filter((r) => displayScore(r.score) >= pack.delivery.digest.min_score); // a hard-to-reach lead can fall under the threshold
   const ranking = rankAccounts(rows, max, 5, { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days });
   const noContact = [...pool.leads, ...pool.watchlist].filter((r) => !contacts.get(r.account.id)).length;
   return { ranking: { ...ranking, held: pool.held }, factors, noContact, enterprise };

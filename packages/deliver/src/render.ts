@@ -72,6 +72,8 @@ type Lead = ScoreRunResult["ranking"]["leads"][number];
 /** The digest's day ("2026-11-16") as a date, at noon UTC so the calendar day is the same in IST. */
 const dayDate = (date: string) => new Date(`${date}T12:00:00Z`);
 const windowFor = (l: Lead, date: string, pack: Pack) => sendWindow(l.score.evidence, dayDate(date), pack.icp.calendar);
+/** A contact worth a find-email click: named, and no address seen in public or verified yet. */
+export const needsEmail = (c: Contact | null | undefined) => !!c && c.person.email?.status !== "observed" && c.person.email?.status !== "verified";
 const WHEN_COLOR: Record<SendWindow["band"], string> = { now: "#047857", good: "#1d4ed8", wait: "#6b7280" };
 export type Contacts = Map<string, Contact | null>;
 
@@ -132,7 +134,7 @@ const C = { ink: "#18181b", muted: "#71717a", faint: "#a1a1aa", line: "#e4e4e7",
 const A = (href: string, text: string, style = "") => `<a href="${safeHref(href)}" style="color:${C.link};text-decoration:none;${style}">${text}</a>`;
 const regionShort = (r: string | null) => (r === "United States of America" ? "US" : r === "United Kingdom" ? "UK" : r === "United Arab Emirates" ? "UAE" : r);
 
-const EMAIL_LABEL = { observed: "seen in public", likely: "likely", guessed: "guessed", invalid: "" } as const;
+const EMAIL_LABEL: Record<NonNullable<Contact["person"]["email"]>["status"], string> = { observed: "seen in public", verified: "verified", likely: "likely", guessed: "guessed", invalid: "" };
 /** "jo@acme.com (likely)" for usable addresses; nothing for invalid ones. */
 export function emailText(p: Contact["person"]): string | null {
   const e = p.email;
@@ -152,7 +154,7 @@ function reachHtml(c: Contact): string {
   return parts.join(` <span style="color:${C.line}">|</span> `);
 }
 
-function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes, tap?: { good: string; bad: string }, when?: SendWindow): string {
+function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes, tap?: { good: string; bad: string; enrich?: string }, when?: SendWindow): string {
   const a = l.account, s = l.score;
   const c = contacts?.get(a.id);
   const company = a.name ?? a.domain;
@@ -197,7 +199,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
       ${head}${whenHtml}${back}${why}${opener}${pitch}${warn}
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px"><tr>
         <td valign="middle">${tags}</td>
-        ${tap ? `<td valign="middle" align="right" style="white-space:nowrap">${btn(tap.good, "👍&nbsp; Good", "#047857")}${btn(tap.bad, "👎&nbsp; Bad", "#b91c1c")}</td>` : ""}
+        ${tap ? `<td valign="middle" align="right" style="white-space:nowrap">${tap.enrich && needsEmail(c) ? btn(tap.enrich, "✉️&nbsp; Find email", "#1d4ed8") : ""}${btn(tap.good, "👍&nbsp; Good", "#047857")}${btn(tap.bad, "👎&nbsp; Bad", "#b91c1c")}</td>` : ""}
       </tr></table>
     </td>
   </tr></table>
@@ -237,7 +239,7 @@ function gigHtml(g: DigestGig): string {
   return `<div style="margin:8px 0">${A(g.applyUrl ?? g.url, esc(g.title), `color:${C.ink};font-weight:600`)}<div style="font-size:12px;color:${C.muted}">${meta}${meta ? " · " : ""}${via}</div></div>`;
 }
 
-export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes, labels?: Map<string, { good: string; bad: string }>, champions: ChampionMove[] = []): DigestEmail {
+export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes, labels?: Map<string, { good: string; bad: string; enrich?: string }>, champions: ChampionMove[] = []): DigestEmail {
   const leads = r.ranking.leads, watch = r.ranking.watchlist, people = r.personLeads;
   const named = (l: Lead) => { const c = contacts?.get(l.account.id); const co = l.account.name ?? l.account.domain; return c ? `${firstName(c.person.name)} at ${co}` : co; };
   const subject = leads.length
@@ -253,6 +255,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `Haiku $${health.haikuTodayUsd.toFixed(3)} of $${health.haikuCapUsd.toFixed(2)}`,
     health.writerCapUsd != null ? `Sonnet $${(health.writerTodayUsd ?? 0).toFixed(3)} of $${health.writerCapUsd.toFixed(2)}` : "",
     health.indiaTracked != null ? `India ${health.indiaTracked} tracked, ${health.indiaInLeads ?? 0} today` : "",
+    pack.delivery.digest.min_score > 0 && r.belowMinScore ? `${r.belowMinScore} under score ${pack.delivery.digest.min_score} not sent` : "",
     `${m.label_count_30d ?? 0} labelled (30d)${(m.label_count_30d ?? 0) > 0 ? `, ${Math.round((m.precision_30d ?? 0) * 100)}% good` : ""}`,
     ...(health.usage ?? []).filter((u) => !FREE_TIER.has(u.service) && u.pct >= 1).map((u) => `${u.service.replace(/_/g, " ")} cap reached`),
   ].filter(Boolean).join(" · ");
@@ -316,7 +319,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 }
 
 /** The Sheet row for a delivered lead, in LEAD_COLUMNS order minus ID (appended when the delivery id exists). */
-export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }, calendar?: Pack["icp"]["calendar"]): string[] {
+export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }, calendar?: Pack["icp"]["calendar"], enrichUrl?: string): string[] {
   const a = l.account, s = l.score;
   const company = a.name ?? a.domain;
   return [
@@ -340,6 +343,7 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     signalSummary(s.evidence),
     linkedinDraft(contact, note, copy?.linkedin.greeting),
     calendar ? sendWindowText(sendWindow(s.evidence, dayDate(date), calendar)) : "", // Timing (appended column)
+    enrichUrl && needsEmail(contact) ? enrichUrl : "", // Enrich email: a link until clicked, then the answer
   ];
 }
 

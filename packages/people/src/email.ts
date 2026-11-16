@@ -4,13 +4,14 @@
  *
  * Status, strongest first:
  *   observed: this exact address was seen in public for this person
+ *   verified: Air Waterfall confirmed it (mailbox check or an email finder agreeing with the pattern)
  *   likely:   built from a pattern learned from at least one name-matched address at this domain
  *   (no guessed tier: without an observed address or a learned pattern, no email is shown)
  *   invalid:  the domain does not receive mail (no MX or a null MX), or a bounce came back
  * No SMTP probing: it is unreliable (catch-alls, greylisting) and looks like abuse.
  */
 
-export type EmailStatus = "observed" | "likely" | "guessed" | "invalid";
+export type EmailStatus = "observed" | "verified" | "likely" | "guessed" | "invalid";
 
 export const PATTERNS = ["first", "first.last", "firstlast", "flast", "f.last", "first_last", "firstl", "last", "last.first"] as const;
 export type Pattern = (typeof PATTERNS)[number];

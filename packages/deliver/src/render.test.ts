@@ -14,7 +14,7 @@ const score = (o: Partial<AccountScore> = {}): AccountScore => ({
   plays: [{ id: "struggling_to_hire", title: "Struggling to hire ops", angle: "Bridge while they hire.", evidence: [ev({})] }], ...o,
 });
 const result = (leads: number): ScoreRunResult => ({
-  configVersion: "example-gtm@abc", scored: 10, eligible: 9, playsMatched: 3, criticDropped: {}, personLeads: [],
+  configVersion: "example-gtm@abc", scored: 10, eligible: 9, playsMatched: 3, criticDropped: {}, belowMinScore: 0, personLeads: [],
   ranking: {
     leads: Array.from({ length: leads }, (_, i) => ({ account: { id: `a${i}`, domain: `acme${i}.com`, name: `Acme ${i}`, sizeBand: "2-10", region: "India", segment: "b2b" }, score: score(), incomplete: false, recentlyDelivered: false, newSinceDelivery: false })),
     watchlist: [], held: { incomplete: 0, recentlyDelivered: 0 },
@@ -84,12 +84,16 @@ describe("sheet row", () => {
     const contact = { person: { name: "Riya Sample", role: "Founder/CEO", linkedin: "https://linkedin.com/in/riya", source: "yc" }, persona: "Founder / CEO", note: "" };
     const row = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13");
     expect(row).toHaveLength(LEAD_COLUMNS.length - 1); // everything but the hidden ID
-    expect(row.at(-4)).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
-    expect(row.at(-3)).not.toBe(""); // Signals: every lead has at least one
-    expect(row.at(-2)).toBe(""); // LinkedIn message: empty without a checked draft
-    expect(row.at(-1)).toBe(""); // Timing: only with the pack calendar
-    const timed = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13", undefined, "", undefined, pack.icp.calendar);
-    expect(timed.at(-1)).toMatch(/^(Message now|Good time|Can wait)/); // the separate "good time to message" label
+    // stored rows have no hidden ID: columns after it sit one place earlier
+    const at = (r: string[], c: (typeof LEAD_COLUMNS)[number]) => { const i = LEAD_COLUMNS.indexOf(c); return r[i < LEAD_COLUMNS.indexOf("ID") ? i : i - 1]; };
+    expect(at(row, "Email draft")).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
+    expect(at(row, "Signals")).not.toBe(""); // every lead has at least one
+    expect(at(row, "LinkedIn message")).toBe(""); // empty without a checked draft
+    expect(at(row, "Timing")).toBe(""); // only with the pack calendar
+    expect(at(row, "Enrich email")).toBe(""); // only with a find-email link
+    const timed = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13", undefined, "", undefined, pack.icp.calendar, "https://w.test/e?d=x&s=y");
+    expect(at(timed, "Timing")).toMatch(/^(Message now|Good time|Can wait)/); // the separate "good time to message" label
+    expect(at(timed, "Enrich email")).toBe("https://w.test/e?d=x&s=y"); // a link until clicked
     const col = (c: (typeof LEAD_COLUMNS)[number]) => row[LEAD_COLUMNS.indexOf(c)];
     expect(col("Person")).toBe("Riya Sample");
     expect(col("Opener")).toContain("Hi Riya");

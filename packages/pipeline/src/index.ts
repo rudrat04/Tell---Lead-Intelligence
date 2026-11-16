@@ -19,3 +19,4 @@ export * from "./backfill.js";
 export * from "./discover-jsearch.js";
 export * from "./scope.js";
 export * from "./network.js";
+export * from "./waterfall.js";

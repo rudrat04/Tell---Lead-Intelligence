@@ -76,11 +76,12 @@ export class WriterClient implements LlmClient {
 
   async complete({ system, user }: { system: string; user: string; think?: boolean }): Promise<string> {
     if (this.spentUsd >= this.opts.capUsd) throw new Error("writer spend cap reached");
+    // effort is always sent: Sonnet 5.5 defaults to high
     const res = await this.client.beta.messages.create({
       model: WRITER_MODEL,
       max_tokens: 16000,
       thinking: { type: "adaptive" },
-      output_config: { effort: this.opts.effort ?? "medium" },
+      output_config: { effort: this.opts.effort ?? "low" },
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
@@ -93,5 +94,5 @@ export class WriterClient implements LlmClient {
   }
 }
 
-/** ANALYST_EFFORT env: low or medium (default medium); anything else falls back to medium. */
-export const writerEffort = (v = process.env.ANALYST_EFFORT): WriterEffort => (v === "low" ? "low" : "medium");
+/** ANALYST_EFFORT env: low (default) or medium; anything else is low. */
+export const writerEffort = (v = process.env.ANALYST_EFFORT): WriterEffort => (v === "medium" ? "medium" : "low");

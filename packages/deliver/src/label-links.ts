@@ -36,3 +36,24 @@ export async function fetchTaps(baseUrl: string, secret: string): Promise<Tap[]>
   const j = (await res.json()) as Tap[];
   return j.filter((t) => /^[0-9a-f-]{36}$/i.test(t.d) && (t.v === "good" || t.v === "bad"));
 }
+
+/** Find-email link (the Worker's /e): queues one Air Waterfall lookup for this delivery's contact, only when clicked. */
+export function enrichLink(baseUrl: string, secret: string, deliveryId: string): string {
+  const sig = createHmac("sha256", secret).update(`${deliveryId}|enrich`).digest("hex").slice(0, 32);
+  return `${baseUrl.replace(/\/+$/, "")}/e?d=${deliveryId}&s=${sig}`;
+}
+
+export interface EnrichRequest { d: string; at: string }
+
+/** Find-email clicks waiting in the Worker. Throws on auth or network failure. */
+export async function fetchEnrichRequests(baseUrl: string, secret: string): Promise<EnrichRequest[]> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/enrich-requests`, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`enrich requests: HTTP ${res.status}`);
+  return ((await res.json()) as EnrichRequest[]).filter((r) => /^[0-9a-f-]{36}$/i.test(r.d));
+}
+
+export async function ackEnrichRequests(baseUrl: string, secret: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/enrich-requests/ack`, { method: "POST", headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" }, body: JSON.stringify(ids), signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`enrich requests ack: HTTP ${res.status}`);
+}
