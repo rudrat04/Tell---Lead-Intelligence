@@ -94,13 +94,14 @@ type HitRole = { title: string; company: string; current: boolean; from?: string
  * People-search facts about this company (#6, #7): a GTM leader who started in the last 90 days (they buy in their
  * first months), and someone in an ops role who left in the last 180 days (a gap). Exported for tests.
  */
-export function peopleEvents(hit: { url: string; roles: HitRole[] }, company: string, domain: string, opsPatterns: RegExp[], now: Date): { type: "new_gtm_leader" | "ops_person_left"; quote: string; url: string; observedAt: Date }[] {
+export function peopleEvents(hit: { url: string; roles: HitRole[] }, company: string, domain: string, opsPatterns: RegExp[], now: Date, leaderPatterns: RegExp[] = []): { type: "new_gtm_leader" | "ops_person_left"; quote: string; url: string; observedAt: Date }[] {
+  const isLeader = (t: string) => (leaderPatterns.length ? leaderPatterns.some((p) => p.test(t)) : GTM_LEADER.test(t));
   const out: { type: "new_gtm_leader" | "ops_person_left"; quote: string; url: string; observedAt: Date }[] = [];
   const days = (d: Date) => (now.getTime() - d.getTime()) / 86_400_000;
   const when = (d: Date) => d.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
   for (const r of hit.roles.filter((x) => isSameCompany(x.company, company, domain))) {
     const from = r.from ? new Date(r.from) : null, to = r.to ? new Date(r.to) : null;
-    if (r.current && from && !Number.isNaN(from.getTime()) && days(from) >= 0 && days(from) <= 90 && GTM_LEADER.test(r.title)) {
+    if (r.current && from && !Number.isNaN(from.getTime()) && days(from) >= 0 && days(from) <= 90 && isLeader(r.title)) {
       out.push({ type: "new_gtm_leader", quote: `New ${r.title} since ${when(from)}`, url: hit.url, observedAt: from });
     }
     if (!r.current && to && !Number.isNaN(to.getTime()) && days(to) >= 0 && days(to) <= 180 && opsPatterns.some((p) => p.test(r.title))) {

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
-import { HaikuClient, HAIKU_MODEL, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
+import { WriterClient, WRITER_MODEL, writerEffort, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
 import type { Contact } from "@tell/people";
 import type { RankInput } from "@tell/intel";
 import { getDb, analyses, and, inArray } from "@tell/db";
@@ -9,6 +9,8 @@ import type { ScoredAccount } from "./score.js";
 
 /** Evidence items the analyst sees per lead (strongest first). */
 export const ANALYST_MAX_EVIDENCE = 6;
+/** usage_daily service for the writer's spend */
+export const WRITER_USAGE = "sonnet";
 
 export interface LeadAnalysis extends Analysis { cachedFrom?: Date | null }
 
@@ -31,7 +33,8 @@ function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefin
 
 /**
  * Analyst for today's leads (not the watchlist). Same evidence + plays = cached analysis, so test sends and
- * re-runs don't pay twice. Spend counts against the persisted daily Haiku cap shared with the tick.
+ * re-runs don't pay twice. Written by Sonnet (WRITER_MODEL) at ANALYST_EFFORT (low|medium); spend counts against its own
+ * persisted daily cap (usage_daily "sonnet", WRITER_DAILY_CAP_USD, default $1), apart from the tick's Haiku cap.
  */
 export async function analyzeLeads(
   leads: RankInput<ScoredAccount>[], contacts: Map<string, Contact | null>, pack: Pack,
@@ -43,7 +46,7 @@ export async function analyzeLeads(
   const write = opts.write !== false;
   const db = getDb();
   // model + prompt in the key: a prompt change re-writes openers instead of serving stale cached ones
-  const version = `${HAIKU_MODEL}:${createHash("sha256").update(analystSystemPrompt(pack)).digest("hex").slice(0, 8)}`;
+  const version = `${WRITER_MODEL}:${createHash("sha256").update(analystSystemPrompt(pack)).digest("hex").slice(0, 8)}`;
   const prepared = leads.map((l) => ({ l, ...inputFor(l, contacts.get(l.account.id), version) }));
 
   const prior = await db.select().from(analyses).where(and(
@@ -66,14 +69,14 @@ export async function analyzeLeads(
   if (!todo.length) return res;
 
   let llm = opts.llm;
-  let haiku: HaikuClient | null = null;
+  let writer: WriterClient | null = null;
   const usage = opts.usage ?? (opts.llm ? null : neonUsage());
-  const cap = opts.dailyCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1);
+  const cap = opts.dailyCapUsd ?? Number(process.env.WRITER_DAILY_CAP_USD ?? 1);
   if (!llm) {
     if (!process.env.ANTHROPIC_API_KEY) return { ...res, skipped: "no ANTHROPIC_API_KEY" };
-    const remaining = cap - (await usage!.spentToday("haiku"));
-    if (remaining <= 0) return { ...res, skipped: "daily Haiku cap reached" };
-    llm = haiku = new HaikuClient({ capUsd: remaining });
+    const remaining = cap - (await usage!.spentToday(WRITER_USAGE));
+    if (remaining <= 0) return { ...res, skipped: "daily writer cap reached" };
+    llm = writer = new WriterClient({ capUsd: remaining, effort: writerEffort() });
   }
   try {
     for (const p of todo) {
@@ -86,12 +89,12 @@ export async function analyzeLeads(
         await db.insert(analyses).values({
           accountId: p.l.account.id, hypothesis: a.hypothesis, angle: a.angle, opener: a.opener, citations: [],
           cited: a.citations.map((i) => p.refs[i]!), counterEvidence: a.counterEvidence, confidence: a.confidence,
-          evidenceKey: p.key, model: HAIKU_MODEL, emailSubject: a.email?.subject ?? null, emailBody: a.email?.body ?? null, linkedinMessage: a.linkedin,
+          evidenceKey: p.key, model: WRITER_MODEL, emailSubject: a.email?.subject ?? null, emailBody: a.email?.body ?? null, linkedinMessage: a.linkedin,
         }).onConflictDoNothing({ target: [analyses.accountId, analyses.evidenceKey] });
       }
     }
   } finally {
-    if (haiku) { res.spentUsd = haiku.spent; await usage?.addSpend("haiku", haiku.spent, cap); }
+    if (writer) { res.spentUsd = writer.spent; await usage?.addSpend(WRITER_USAGE, writer.spent, cap); }
   }
   return res;
 }

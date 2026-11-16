@@ -2,7 +2,7 @@ import type { Pack } from "@tell/config";
 import type { Evidence } from "@tell/intel";
 import type { ScoreRunResult, DigestGig, ChampionMove } from "@tell/pipeline";
 import { firstName, personaSearchLinks, type Contact } from "@tell/people";
-import { hasHiring, displayScore } from "@tell/intel";
+import { hasHiring, displayScore, sendWindow, sendWindowText, type SendWindow } from "@tell/intel";
 
 /** Daily digest (plan section 10). "Why now" is written by code from cited evidence: free and deterministic. */
 
@@ -20,6 +20,9 @@ export interface DigestHealth {
   tickErrors24h: number;
   haikuTodayUsd: number;
   haikuCapUsd: number;
+  /** the Sonnet writer (analyst drafts), its own daily cap */
+  writerTodayUsd?: number;
+  writerCapUsd?: number;
   /** India coverage (eval requirement): tracked Indian accounts, and how many made today's leads */
   indiaTracked?: number;
   indiaInLeads?: number;
@@ -65,6 +68,11 @@ export function describe(e: Evidence): string {
 }
 
 type Lead = ScoreRunResult["ranking"]["leads"][number];
+
+/** The digest's day ("2026-11-16") as a date, at noon UTC so the calendar day is the same in IST. */
+const dayDate = (date: string) => new Date(`${date}T12:00:00Z`);
+const windowFor = (l: Lead, date: string, pack: Pack) => sendWindow(l.score.evidence, dayDate(date), pack.icp.calendar);
+const WHEN_COLOR: Record<SendWindow["band"], string> = { now: "#047857", good: "#1d4ed8", wait: "#6b7280" };
 export type Contacts = Map<string, Contact | null>;
 
 /** The opening line, written by code from the strongest evidence: "Hi Riya, saw Bluejay has had a "GTM Engineer" role open for 4 months." */
@@ -144,7 +152,7 @@ function reachHtml(c: Contact): string {
   return parts.join(` <span style="color:${C.line}">|</span> `);
 }
 
-function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes, tap?: { good: string; bad: string }): string {
+function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes, tap?: { good: string; bad: string }, when?: SendWindow): string {
   const a = l.account, s = l.score;
   const c = contacts?.get(a.id);
   const company = a.name ?? a.domain;
@@ -170,6 +178,9 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
     : `<div style="font-size:14px;line-height:1.6;margin-top:12px">${ev.map((e) => `<div>• ${A(e.url, esc(describe(e)), `color:${C.ink}`)}</div>`).join("")}</div>`;
 
   const back = l.backReason ? `<div style="font-size:13px;margin-top:10px;color:${C.accent}"><b>Back on your list.</b> ${esc(l.backReason)}</div>` : "";
+  // when to write: a separate label, not part of the score
+  const whenCol = when ? WHEN_COLOR[when.band] : C.muted;
+  const whenHtml = when ? `<div style="font-size:13px;margin-top:8px"><span style="display:inline-block;padding:1px 8px;border-radius:10px;border:1px solid ${whenCol};color:${whenCol};font-weight:600">${esc(when.label)}</span>${when.reasons.length ? ` <span style="color:${C.muted}">${esc(when.reasons.join("; "))}</span>` : ""}</div>` : "";
   const opener = open ? `<div style="margin-top:12px;padding:10px 12px;background:${C.quote};border-left:3px solid ${C.accent};border-radius:4px;font-size:14px;line-height:1.5;color:${C.ink}">${esc(open)}</div>` : "";
   const angle = n?.angle ?? s.plays[0]?.angle;
   const pitch = angle ? `<div style="font-size:13px;margin-top:8px;color:${C.muted}"><b style="color:${C.ink}">Pitch:</b> ${esc(angle)}</div>` : "";
@@ -183,7 +194,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
     <td width="28" valign="top" style="font-size:13px;font-weight:700;color:${C.faint};padding-top:3px">${i + 1}</td>
     <td valign="top">
-      ${head}${back}${why}${opener}${pitch}${warn}
+      ${head}${whenHtml}${back}${why}${opener}${pitch}${warn}
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px"><tr>
         <td valign="middle">${tags}</td>
         ${tap ? `<td valign="middle" align="right" style="white-space:nowrap">${btn(tap.good, "👍&nbsp; Good", "#047857")}${btn(tap.bad, "👎&nbsp; Bad", "#b91c1c")}</td>` : ""}
@@ -193,7 +204,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
 </td></tr>`;
 }
 
-function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes): string {
+function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes, when?: SendWindow): string {
   const a = l.account, s = l.score;
   const c = contacts?.get(a.id);
   const n = notes?.get(a.id);
@@ -207,6 +218,7 @@ function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
     c?.warm?.length ? `   Warm path: ${c.warm[0]!.text}` : "",
     ...(c?.others ?? []).map((o) => `   Also: ${o.person.name}, ${o.person.role ?? o.persona}${o.person.linkedin ? ` ${o.person.linkedin}` : ""}`),
     ...(c ? [] : personaSearchLinks(personas, a.sizeBand, company, null).slice(0, 2).map((x) => `   Search ${x.persona}: ${x.url}`)),
+    when ? `   When: ${sendWindowText(when)}` : "",
     l.backReason ? `   Back on your list. ${l.backReason}` : "",
     n ? `   Why now: ${n.hypothesis}` : "",
     ...s.drivers.slice(0, 3).map((e) => `   - ${describe(e)}  ${e.url}`),
@@ -239,6 +251,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `${health.boardsChecked24h}/${health.boardsTotal} job boards checked`,
     `${health.ticks24h} ticks`,
     `Haiku $${health.haikuTodayUsd.toFixed(3)} of $${health.haikuCapUsd.toFixed(2)}`,
+    health.writerCapUsd != null ? `Sonnet $${(health.writerTodayUsd ?? 0).toFixed(3)} of $${health.writerCapUsd.toFixed(2)}` : "",
     health.indiaTracked != null ? `India ${health.indiaTracked} tracked, ${health.indiaInLeads ?? 0} today` : "",
     `${m.label_count_30d ?? 0} labelled (30d)${(m.label_count_30d ?? 0) > 0 ? `, ${Math.round((m.precision_30d ?? 0) * 100)}% good` : ""}`,
     ...(health.usage ?? []).filter((u) => !FREE_TIER.has(u.service) && u.pct >= 1).map((u) => `${u.service.replace(/_/g, " ")} cap reached`),
@@ -275,7 +288,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 </td></tr>
 <tr><td style="padding:8px 24px 0">
   ${championsHtml}
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${leads.map((l, i) => leadHtml(l, i, contacts, pack.icp.personas, notes, labels?.get(l.account.id))).join("")}</table>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${leads.map((l, i) => leadHtml(l, i, contacts, pack.icp.personas, notes, labels?.get(l.account.id), windowFor(l, date, pack))).join("")}</table>
   ${gigs.length ? section(`Freelance gigs (${gigs.length})`, gigs.map(gigHtml).join("")) : ""}
   ${watchHtml}${peopleHtml}
 </td></tr>
@@ -291,7 +304,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     leads.length ? `${leads.length} ${leads.length === 1 ? "PERSON" : "PEOPLE"} TO CONTACT` : "NO NEW LEADS TODAY",
     "",
     champions.length ? `PAST CLIENTS WHO MOVED\n${champions.map((m) => `- ${m.name}: was at ${m.was}, now ${m.title} at ${m.company} (since ${month(m.since)})${m.url ? ` ${m.url}` : ""}`).join("\n")}\n` : "",
-    ...leads.map((l, i) => leadText(l, i, contacts, pack.icp.personas, notes) + "\n"),
+    ...leads.map((l, i) => leadText(l, i, contacts, pack.icp.personas, notes, windowFor(l, date, pack)) + "\n"),
     gigs.length ? `FREELANCE GIGS\n${gigs.map((g) => `- ${g.title}${g.company ? ` (${g.company})` : ""}: ${g.applyUrl ?? g.url} (via ${SOURCE_NAME[g.source] ?? g.source}: ${g.url})`).join("\n")}\n` : "",
     watch.length ? `WATCHLIST\n${watch.map((w) => `- ${w.account.name ?? w.account.domain} (${w.account.domain})`).join("\n")}\n` : "",
     people.length ? `PEOPLE ASKING, NO COMPANY YET\n${people.map((p) => `- ${p.platform}/${p.handle}: "${p.quote}" ${p.url}`).join("\n")}\n` : "",
@@ -303,7 +316,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 }
 
 /** The Sheet row for a delivered lead, in LEAD_COLUMNS order minus ID (appended when the delivery id exists). */
-export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }): string[] {
+export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }, calendar?: Pack["icp"]["calendar"]): string[] {
   const a = l.account, s = l.score;
   const company = a.name ?? a.domain;
   return [
@@ -326,6 +339,7 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     emailDraft(contact, note, signature, copy?.greeting),
     signalSummary(s.evidence),
     linkedinDraft(contact, note, copy?.linkedin.greeting),
+    calendar ? sendWindowText(sendWindow(s.evidence, dayDate(date), calendar)) : "", // Timing (appended column)
   ];
 }
 
@@ -336,7 +350,7 @@ const SIGNAL_LABEL: Record<string, string> = {
   cta_sales_led: "Site went sales-led", pricing_page_added: "Pricing page added", gtm_tool_added: "New GTM tool", stack_sprawl: "Tool sprawl",
   tool_overlap: "Overlapping tools", role_reposted: "Role reposted", ops_owner_known: "Has an ops owner (against)", ops_team_2plus: "Ops team of 2+ (against)",
   jd_mentions: "Job ad names the pain", leaky_capture: "Leaky lead capture", has_gtm_agency: "Credits a GTM agency (against)",
-  new_gtm_leader: "New GTM leader", ops_person_left: "Ops person left", marketing_subdomain: "New marketing subdomain", outbound_domain: "Cold-email domain set up",
+  new_gtm_leader: "New leader with budget", ops_person_left: "Ops person left", marketing_subdomain: "New marketing subdomain", outbound_domain: "Cold-email domain set up",
   champion_moved: "Past client joined", freeze_to_contract: "Couldn't hire, now contract", email_auth_gap: "Cold email without DMARC/SPF",
   attribution_gap: "Demo form skips the source", site_health_poor: "Slow site", content_motion: "New content channel",
 };

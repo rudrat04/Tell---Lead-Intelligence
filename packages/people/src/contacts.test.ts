@@ -64,4 +64,15 @@ describe("people events from dated roles", () => {
       ["ops_person_left", "RevOps Manager left in Aug 2026"],
     ]);
   });
+
+  it("pack leader titles replace the built-in GTM list (a new COO counts; a new VP Sales then only if listed)", async () => {
+    const { peopleEvents } = await import("./contacts.js");
+    const now = new Date("2026-11-14T00:00:00Z");
+    const hit = { url: "https://linkedin.example/in/y", roles: [
+      { title: "Chief Operating Officer", company: "Tanmark", current: true, from: "2026-10-01", to: null },
+      { title: "VP Sales", company: "Tanmark", current: true, from: "2026-10-01", to: null },
+    ] };
+    expect(peopleEvents(hit, "Tanmark", "tanmark.test", [], now).map((e) => e.quote)).toEqual(["New VP Sales since Oct 2026"]);
+    expect(peopleEvents(hit, "Tanmark", "tanmark.test", [], now, [/\b(chief operating officer|coo)\b/i]).map((e) => e.quote)).toEqual(["New Chief Operating Officer since Oct 2026"]);
+  });
 });

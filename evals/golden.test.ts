@@ -42,11 +42,12 @@ describe("golden sets", () => {
     expect(failures).toEqual([]);
   });
 
-  it("code critic: vendors and already-solved accounts are dropped", () => {
-    type Row = { name: string; domain: string; title: string; tools: string[]; evidence: { type: string; class: string; ageDays: number; current: boolean }[]; expect: boolean; note?: string };
+  it("code critic: vendors, already-solved, out-of-ICP and unknown-size enterprise accounts are dropped", () => {
+    type Row = { name: string; domain: string; title: string; tools: string[]; sizeBand?: string | null; segment?: string | null; evidence: { type: string; class: string; ageDays: number; current: boolean; url?: string }[]; expect: boolean; note?: string };
     const rows = load<Row>("critic.jsonl");
     const failures = report("critic", rows.map((r) => {
-      const v = critic({ name: r.name, domain: r.domain, siteTitle: r.title, tools: r.tools, evidence: r.evidence.map((e, i) => ({ ...e, quote: e.type, url: "https://example.invalid", ref: { kind: "signal" as const, id: `${i}` } })) }, pack);
+      const v = critic({ name: r.name, domain: r.domain, siteTitle: r.title, tools: r.tools, sizeBand: r.sizeBand ?? null, segment: r.segment ?? null,
+        evidence: r.evidence.map((e, i) => ({ ...e, quote: e.type, url: e.url ?? "https://example.invalid", ref: { kind: "signal" as const, id: `${i}` } })) }, pack);
       return { ok: v.pass === r.expect, label: `${r.name} -> expected pass=${r.expect}, got ${v.failed.map((f) => f.check).join(",") || "pass"}${r.note ? ` (${r.note})` : ""}` };
     }));
     expect(failures).toEqual([]);

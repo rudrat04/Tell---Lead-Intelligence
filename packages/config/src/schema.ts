@@ -66,6 +66,17 @@ export const IcpSchema = z.object({
     /** boost when you can reach them through people you know (pnpm network: a connection, a past client there); 1 = off */
     warm_path: z.number().min(1).max(3).default(1),
   }).default({ no_contact: 1, no_email: 1, guessed_email: 1, off_persona: 1, warm_path: 1 }),
+  /** the buyers' calendar, for the "good time to message" label (never part of the score) */
+  calendar: z.object({
+    /** month their financial year starts (India: 4 = April; US: 1) */
+    fiscal_year_start_month: z.number().int().min(1).max(12).default(1),
+    /** the last N days of a quarter count as "closing" (busy) */
+    quarter_end_days: z.number().int().min(0).max(31).default(10),
+    /** quiet periods by month-day ("12-22" to "01-02" wraps the year); add festivals per year */
+    quiet_periods: z.array(z.object({
+      from: z.string().regex(/^\d{2}-\d{2}$/), to: z.string().regex(/^\d{2}-\d{2}$/), reason: z.string().min(1),
+    })).default([]),
+  }).default({ fiscal_year_start_month: 1, quarter_end_days: 10, quiet_periods: [] }),
   /** who to contact at a matching company, in order of preference, by company size */
   personas: z.array(z.object({
     title: z.string(),
@@ -162,6 +173,9 @@ export const RolesSchema = z.object({
   founding: z.array(pattern).default(["(?i)\\b(founding|first)\\b"]),
   /** phrases in a new GTM job ad that describe your offer's pain (jd_mentions, if the pack defines it) */
   jd_patterns: z.array(pattern).default([]),
+  /** titles of leaders who hold a budget: one who started at an account in the last 90 days fires new_gtm_leader
+   *  (seen in people-search results). Empty = the built-in GTM leader titles. */
+  leaders: z.array(pattern).default([]),
 });
 
 export const ExtractorSchema = z.object({
@@ -316,6 +330,13 @@ export const CriticSchema = z.object({
   /** negative signal types that mean "already solved" when newer than every positive signal */
   solved_types: z.array(z.string()).default(["core_role_filled"]),
   solved_max_age_days: z.number().int().min(1).default(60),
+  /** Large companies whose size no source gave (Keka, Workable, JSearch accounts): proof of size from what we already see.
+   *  url_patterns: a job/evidence URL on an enterprise careers system (Workday, SuccessFactors, a branded locale portal).
+   *  title_patterns: the contact found for the account holds a regional / business-unit title. Unknown-size accounts only. */
+  enterprise: z.object({
+    url_patterns: z.array(pattern).default([]),
+    title_patterns: z.array(pattern).default([]),
+  }).default({ url_patterns: [], title_patterns: [] }),
 });
 
 /**
@@ -366,7 +387,7 @@ export const PackSchema = z.object({
   delivery: DeliverySchema,
   tools: ToolsSchema.default({ sprawl_min: 4, sprawl_exclude_categories: [], overlap_categories: [], outbound_categories: ["outbound"], analytics_categories: ["analytics"], tools: {} }),
   copy: CopySchema.default(COPY_DEFAULT),
-  critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60 }),
+  critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60, enterprise: { url_patterns: [], title_patterns: [] } }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
 }).superRefine((p, ctx) => {
   for (const t of CODE_SIGNAL_TYPES) {

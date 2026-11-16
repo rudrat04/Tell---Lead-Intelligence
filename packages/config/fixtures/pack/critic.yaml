@@ -8,3 +8,10 @@ solved_tools: []
 # negative signal types meaning "already solved" when newer than every positive signal
 solved_types: [core_role_filled, ops_team_2plus]
 solved_max_age_days: 60
+# enterprises whose size no source gave (unknown-size accounts only)
+enterprise:
+  url_patterns:
+    - "(?i)(myworkdayjobs\\.com|successfactors\\.(com|eu)|taleo\\.net|icims\\.com)"
+    - "(?i)^https?://(www\\.)?(careers|jobs)\\.[^/]+/(?:[a-z-]+/)?(?:[a-z]{2}/)?[a-z]{2}(?:[-_][a-z]{2})?/job/"
+  title_patterns:
+    - "(?i)\\b(region(al)?|global|apac|emea|country (head|manager)|business unit)\\b"

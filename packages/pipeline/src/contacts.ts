@@ -59,6 +59,7 @@ export async function contactsFor(
   if (search) {
     let budget = opts.maxSearches ?? 40;
     const opsRx = pack.roles.core.map(toRegex);
+    const leaderRx = pack.roles.leaders.map(toRegex);
     const targets = new Set(opts.searchFor ?? accountIds);
     const memo = new Set((await db.select({ a: peopleSearches.accountId, p: peopleSearches.persona }).from(peopleSearches)
       .where(and(inArray(peopleSearches.accountId, [...targets]), sql`${peopleSearches.searchedAt} > ${new Date(Date.now() - PEOPLE_REFRESH_DAYS * DAY)}`)))
@@ -83,7 +84,7 @@ export async function contactsFor(
             return p ? [{ ...p, workHistory: h.roles.map((r) => ({ title: r.title, company: r.company, from: r.from ?? null, to: r.to ?? null })) }] : [];
           }).slice(0, 2);
           // dated roles in the same results: a new GTM leader, or an ops person who left (only types the pack defines)
-          const evs = hits.flatMap((h) => peopleEvents(h, company, acct.domain, opsRx, new Date())).filter((e) => pack.signals.signals[e.type]);
+          const evs = hits.flatMap((h) => peopleEvents(h, company, acct.domain, opsRx, new Date(), leaderRx)).filter((e) => pack.signals.signals[e.type]);
           if (write && evs.length) {
             const sp = pack.signals.signals;
             await db.insert(signals).values(evs.map((e) => ({ accountId: acct.id, class: sp[e.type]!.class, type: e.type, strength: sp[e.type]!.strength,

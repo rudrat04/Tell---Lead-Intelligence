@@ -4,7 +4,7 @@ import {
   buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, type DeliveryHistory, timing as timingScore,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
-import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, eq, and, inArray, sql } from "@tell/db";
+import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, eq, and, inArray, sql } from "@tell/db";
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const DAY = 86_400_000;
@@ -123,11 +123,20 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
       else dnsTools.set(r.account_id, r.extracted?.tools ?? []);
     }
   }
+  // YC companies whose latest facts fail the hard filters (discovery records the verdict per YC entry, weekly)
+  const ycFail = new Map<string, string>();
+  const eligibleDomains = results.filter((r) => r.score.eligible).map((r) => r.account.domain);
+  for (const part of chunk(eligibleDomains, 500)) {
+    const rows = await db.execute(sql`select domain, bool_or(fit_pass) as ok, min(reason) as reason from ${companySeeds}
+      where source = 'yc' and ${inArray(companySeeds.domain, part)} group by domain`);
+    for (const r of rows.rows as { domain: string; ok: boolean; reason: string | null }[]) if (!r.ok) ycFail.set(r.domain, r.reason ?? "fails the hard filters");
+  }
   const verdicts = new Map<string, CriticVerdict>();
   for (const r of results) {
     if (!r.score.eligible) continue;
     const sf = site.get(r.account.id);
-    const v = critic({ name: r.account.name, domain: r.account.domain, siteTitle: sf?.title, partnerBadge: sf?.partnerBadge, tools: [...(sf?.tools ?? []), ...(dnsTools.get(r.account.id) ?? [])], evidence: r.score.evidence }, pack);
+    const v = critic({ name: r.account.name, domain: r.account.domain, siteTitle: sf?.title, partnerBadge: sf?.partnerBadge, tools: [...(sf?.tools ?? []), ...(dnsTools.get(r.account.id) ?? [])],
+      sizeBand: r.account.sizeBand, segment: r.account.segment, ycFitFailed: ycFail.get(r.account.domain) ?? null, evidence: r.score.evidence }, pack);
     verdicts.set(r.account.id, v);
     if (!v.pass) for (const f of v.failed) criticDropped[f.check] = (criticDropped[f.check] ?? 0) + 1;
   }

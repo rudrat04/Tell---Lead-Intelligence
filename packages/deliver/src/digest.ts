@@ -37,17 +37,19 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
     select count(*)::int as n, count(*) filter (where ${runs.status} <> 'ok')::int as errors
     from ${runs} where ${runs.task} like 'tick:%' and ${runs.startedAt} > ${since}`)).rows as { n: number; errors: number }[];
   const spend = await db.select({ used: usageDaily.used }).from(usageDaily).where(and(eq(usageDaily.day, istDay()), eq(usageDaily.service, "haiku")));
+  const writer = await db.select({ used: usageDaily.used, limit: usageDaily.limit }).from(usageDaily).where(and(eq(usageDaily.day, istDay()), eq(usageDaily.service, "sonnet")));
   const [india] = (await db.execute(sql`select count(*)::int as n from ${accounts} where ${accounts.region} = 'India' and ${accounts.status} = 'active'`)).rows as { n: number }[];
   // latest usage-guard readings (written by the nightly upkeep step)
   const usage = ((await db.execute(sql`select distinct on (service) service, used, "limit" from usage_daily
-    where service <> 'haiku' and day > (now() - interval '3 days')::date order by service, day desc`)).rows as { service: string; used: number; limit: number }[])
+    where service not in ('haiku', 'sonnet') and day > (now() - interval '3 days')::date order by service, day desc`)).rows as { service: string; used: number; limit: number }[])
     .map((u) => ({ service: u.service, pct: u.limit > 0 ? u.used / u.limit : 0 }));
   const [tp] = (await db.execute(sql`select count(*)::int as n from tuning_actions where status = 'proposed' and created_at > now() - interval '8 days'`)).rows as { n: number }[];
   const metrics = Object.fromEntries(((await db.execute(sql`select distinct on (metric) metric, value from eval_results
     where computed_at > now() - interval '3 days' order by metric, computed_at desc`)).rows as { metric: string; value: number }[]).map((r) => [r.metric, Number(r.value)]));
   return {
     boardsTotal: b?.total ?? 0, boardsChecked24h: b?.checked ?? 0, boardsFailing: b?.failing ?? 0,
-    ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd, indiaTracked: india?.n ?? 0, usage, metrics, tuningPending: tp?.n ?? 0,
+    ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd,
+    writerTodayUsd: writer[0]?.used ?? 0, writerCapUsd: writer[0]?.limit ?? Number(process.env.WRITER_DAILY_CAP_USD ?? 1), indiaTracked: india?.n ?? 0, usage, metrics, tuningPending: tp?.n ?? 0,
   };
 }
 
@@ -95,11 +97,11 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   } catch { enrich.push("network failed"); }
   const r = rerankByReach(score.ranking, contacts, pack, max);
   score.ranking = r.ranking;
-  enrich.push(`reach: ${[...r.factors.values()].filter((f) => f < 1).length} of ${r.factors.size} pool leads down-weighted; ${r.noContact} dropped for no contact`);
+  enrich.push(`reach: ${[...r.factors.values()].filter((f) => f < 1).length} of ${r.factors.size} pool leads down-weighted; ${r.noContact} dropped for no contact; ${r.enterprise} dropped as enterprise (contact title)`);
   // analyst only for today's leads; cached by evidence, so test sends and re-runs don't pay again
   let notes: Awaited<ReturnType<typeof analyzeLeads>>["analyses"] | undefined;
   try {
-    const an = await analyzeLeads(score.ranking.leads, contacts, pack, { dailyCapUsd: opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) });
+    const an = await analyzeLeads(score.ranking.leads, contacts, pack); // Sonnet writer, own daily cap (WRITER_DAILY_CAP_USD)
     notes = an.analyses;
     enrich.push(`analyst fresh=${an.fresh} cached=${an.cached} failed=${an.failed}${an.skipped ? ` (${an.skipped})` : ""}`);
   } catch { enrich.push("analyst failed"); /* code-written openers stand */ }
@@ -116,7 +118,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   const deliveryRows = (at: Date) => score.ranking.leads.map((l) => ({
     id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: at, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
-    sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature, pack.copy),
+    sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature, pack.copy, pack.icp.calendar),
   }));
   if (opts.sheetOnly) {
     if (score.ranking.leads.length) await db.insert(deliveries).values(deliveryRows(new Date()));

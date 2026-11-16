@@ -52,3 +52,46 @@ export class HaikuClient implements LlmClient {
     return block && block.type === "text" ? block.text : "";
   }
 }
+
+/** The writer (analyst: hypothesis, opener, email and LinkedIn drafts). Classification stays on Haiku. */
+export const WRITER_MODEL = "claude-sonnet-5-5";
+/** USD per million tokens for claude-sonnet-5-5. Cache reads are $0.10/M (0.05x input). */
+export const WRITER_PRICE = { inPerM: 2, outPerM: 10, cacheWriteMult: 1.25, cacheReadMult: 0.05 };
+export type WriterEffort = "low" | "medium";
+
+/**
+ * Sonnet client for writing: adaptive thinking at low or medium effort (Sonnet 5.5 defaults to high, so it is always set),
+ * prompt caching on the system prompt, server-side refusal fallback ("default" routing), and a spend cap for this
+ * client's lifetime (pass the *remaining* daily writer budget). The fallback model's tokens are costed at Sonnet rates.
+ */
+export class WriterClient implements LlmClient {
+  private client: Anthropic;
+  private spentUsd = 0;
+
+  constructor(private opts: { capUsd: number; effort?: WriterEffort; apiKey?: string }) {
+    this.client = new Anthropic({ apiKey: opts.apiKey ?? process.env.ANTHROPIC_API_KEY });
+  }
+
+  get spent() { return this.spentUsd; }
+
+  async complete({ system, user }: { system: string; user: string; think?: boolean }): Promise<string> {
+    if (this.spentUsd >= this.opts.capUsd) throw new Error("writer spend cap reached");
+    const res = await this.client.beta.messages.create({
+      model: WRITER_MODEL,
+      max_tokens: 16000,
+      thinking: { type: "adaptive" },
+      output_config: { effort: this.opts.effort ?? "medium" },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: user }],
+    });
+    this.spentUsd += costUsd(res.usage, WRITER_PRICE);
+    if (res.stop_reason === "refusal") return ""; // the whole fallback chain declined: invalid output, code opener stands
+    const block = res.content.find((b) => b.type === "text");
+    return block && block.type === "text" ? block.text : "";
+  }
+}
+
+/** ANALYST_EFFORT env: low or medium (default medium); anything else falls back to medium. */
+export const writerEffort = (v = process.env.ANALYST_EFFORT): WriterEffort => (v === "low" ? "low" : "medium");

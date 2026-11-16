@@ -84,9 +84,12 @@ describe("sheet row", () => {
     const contact = { person: { name: "Riya Sample", role: "Founder/CEO", linkedin: "https://linkedin.com/in/riya", source: "yc" }, persona: "Founder / CEO", note: "" };
     const row = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13");
     expect(row).toHaveLength(LEAD_COLUMNS.length - 1); // everything but the hidden ID
-    expect(row.at(-3)).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
-    expect(row.at(-2)).not.toBe(""); // Signals: every lead has at least one
-    expect(row.at(-1)).toBe(""); // LinkedIn message: empty without a checked draft
+    expect(row.at(-4)).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
+    expect(row.at(-3)).not.toBe(""); // Signals: every lead has at least one
+    expect(row.at(-2)).toBe(""); // LinkedIn message: empty without a checked draft
+    expect(row.at(-1)).toBe(""); // Timing: only with the pack calendar
+    const timed = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13", undefined, "", undefined, pack.icp.calendar);
+    expect(timed.at(-1)).toMatch(/^(Message now|Good time|Can wait)/); // the separate "good time to message" label
     const col = (c: (typeof LEAD_COLUMNS)[number]) => row[LEAD_COLUMNS.indexOf(c)];
     expect(col("Person")).toBe("Riya Sample");
     expect(col("Opener")).toContain("Hi Riya");

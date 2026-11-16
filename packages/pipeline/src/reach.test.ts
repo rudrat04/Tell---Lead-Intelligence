@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { loadFixturePack } from "@tell/config";
+import { enterpriseTitle } from "@tell/intel";
 import { reachFactor } from "./reach.js";
 
 const r = { no_contact: 0.5, no_email: 0.7, guessed_email: 0.85, off_persona: 0.8, warm_path: 1 };
@@ -24,5 +26,16 @@ describe("warm path boost", () => {
     expect(reachFactor(contact("likely"), ["RevOps lead"], { ...r, warm_path: 1.5 })).toBe(1);
     const champ = { person: { name: "Ana Pell", role: "VP Marketing", source: "network", email: { address: "ana@x.test", status: "likely" as const, note: "" } }, persona: null, note: "" };
     expect(reachFactor(champ, ["RevOps lead"], { ...r, warm_path: 1 })).toBe(1);
+  });
+});
+
+describe("enterprise by contact title (unknown-size accounts)", () => {
+  it("a regional / business-unit title marks an enterprise; a founder or head of growth does not", async () => {
+    const pack = await loadFixturePack();
+    expect(enterpriseTitle("Vice President, Head of Growth Region | Imaging at Examplecorp", pack)).toBe(true);
+    expect(enterpriseTitle("Country Manager India at Examplecorp", pack)).toBe(true);
+    expect(enterpriseTitle("Co-founder & CEO at Tinyloop", pack)).toBe(false);
+    expect(enterpriseTitle("Head of Growth at Tinyloop", pack)).toBe(false);
+    expect(enterpriseTitle(null, pack)).toBe(false);
   });
 });
