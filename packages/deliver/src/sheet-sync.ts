@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { getDb, deliveries, labels, inArray, sql } from "@tell/db";
-import { appendRows, readLabels, ensureLeadHeaders, fillColumnById, LEAD_CELLS_BEFORE_ID } from "./sheets.js";
+import { appendRows, readLabels, ensureLeadHeaders, fillColumnById, storedRow, rowFor } from "./sheets.js";
 import { fetchTaps, ackTaps } from "./label-links.js";
 
 export interface SheetSyncResult { appended: number; labelsSynced: number; taps?: number; tapsNote?: string; skipped?: string }
@@ -31,9 +31,9 @@ export async function appendPendingLeads(pack: Pack): Promise<number> {
   const pending = await db.select({ id: deliveries.id, row: deliveries.sheetRow }).from(deliveries)
     .where(sql`${deliveries.sheetRow} is not null and ${deliveries.sheetAppendedAt} is null`).orderBy(deliveries.deliveredAt).limit(500);
   if (!pending.length) return 0;
-  await ensureLeadHeaders(id); // e.g. "Email draft" on a Sheet made before it existed
-  // stored rows are the cells before ID, then any cells after it (older rows end before ID)
-  await appendRows(id, "Leads", pending.map((p) => { const r = p.row as string[]; return [...r.slice(0, LEAD_CELLS_BEFORE_ID), p.id, ...r.slice(LEAD_CELLS_BEFORE_ID)]; }));
+  const header = await ensureLeadHeaders(id); // adds columns a Sheet made earlier doesn't have yet
+  // cells placed by header name, so moving columns in the Sheet never shifts data
+  await appendRows(id, "Leads", pending.map((p) => rowFor(header, storedRow(p.row), p.id)));
   await db.update(deliveries).set({ sheetAppendedAt: new Date() }).where(inArray(deliveries.id, pending.map((p) => p.id)));
   return pending.length;
 }

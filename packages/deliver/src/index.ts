@@ -7,3 +7,4 @@ export * from "./bounces.js";
 export * from "./label-links.js";
 export * from "./backfill-drafts.js";
 export * from "./enrich-requests.js";
+export * from "./sheet-rebuild.js";

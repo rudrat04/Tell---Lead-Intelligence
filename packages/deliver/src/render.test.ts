@@ -3,7 +3,7 @@ import { loadFixturePack } from "@tell/config";
 import type { ScoreRunResult } from "@tell/pipeline";
 import type { AccountScore, Evidence } from "@tell/intel";
 import { renderDigest, opener, leadSheetRow, describe as describeEvidence } from "./render.js";
-import { LEAD_COLUMNS } from "./sheets.js";
+import { LEAD_COLUMNS, storedRow, rowFor, emailCells } from "./sheets.js";
 import { buildMime } from "./gmail.js";
 
 const pack = await loadFixturePack();
@@ -80,26 +80,38 @@ describe("freelance gigs section", () => {
 });
 
 describe("sheet row", () => {
-  it("has one value per column except the hidden ID, leaves your columns empty, names the person", () => {
+  it("is keyed by column name, leaves your columns empty, names the person; email cells hold the address only", () => {
     const contact = { person: { name: "Riya Sample", role: "Founder/CEO", linkedin: "https://linkedin.com/in/riya", source: "yc" }, persona: "Founder / CEO", note: "" };
     const row = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13");
-    expect(row).toHaveLength(LEAD_COLUMNS.length - 1); // everything but the hidden ID
-    // stored rows have no hidden ID: columns after it sit one place earlier
-    const at = (r: string[], c: (typeof LEAD_COLUMNS)[number]) => { const i = LEAD_COLUMNS.indexOf(c); return r[i < LEAD_COLUMNS.indexOf("ID") ? i : i - 1]; };
-    expect(at(row, "Email draft")).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
-    expect(at(row, "Signals")).not.toBe(""); // every lead has at least one
-    expect(at(row, "LinkedIn message")).toBe(""); // empty without a checked draft
-    expect(at(row, "Timing")).toBe(""); // only with the pack calendar
-    expect(at(row, "Enrich email")).toBe(""); // only with a find-email link
+    expect(Object.keys(row).every((k) => (LEAD_COLUMNS as readonly string[]).includes(k))).toBe(true);
+    expect(row["Email draft"]).toBe(""); // no analyst draft: the email cell stays empty, never a generic template
+    expect(row.Signals).not.toBe(""); // every lead has at least one
+    expect(row["LinkedIn message"]).toBe(""); // empty without a checked draft
+    expect(row.Timing).toBe(""); // only with the pack calendar
+    expect(row["Enrich email"]).toBe(""); // only with a find-email link
+    expect(row.Score).toMatch(/^\d+$/);
+    expect(row["ICP fit"]).toMatch(/^\d+$/);
+    expect(row.LinkedIn).toBe("https://linkedin.com/in/riya");
+    expect(row.Email).toBeUndefined(); // no address known: empty, not a guess
     const timed = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13", undefined, "", undefined, pack.icp.calendar, "https://w.test/e?d=x&s=y");
-    expect(at(timed, "Timing")).toMatch(/^(Message now|Good time|Can wait)/); // the separate "good time to message" label
-    expect(at(timed, "Enrich email")).toBe("https://w.test/e?d=x&s=y"); // a link until clicked
-    const col = (c: (typeof LEAD_COLUMNS)[number]) => row[LEAD_COLUMNS.indexOf(c)];
-    expect(col("Person")).toBe("Riya Sample");
-    expect(col("Opener")).toContain("Hi Riya");
-    expect([col("Label"), col("Reason"), col("Outcome"), col("Notes")]).toEqual(["", "", "", ""]);
+    expect(timed.Timing).toMatch(/^(Message now|Good time|Can wait)/); // the separate "good time to message" label
+    expect(timed["Enrich email"]).toBe("https://w.test/e?d=x&s=y"); // a link until clicked
+    const seen = { ...contact, person: { ...contact.person, email: { address: "riya@acme.test", status: "observed" as const, note: "" } } };
+    expect(leadSheetRow(result(1).ranking.leads[0]!, seen, "2026-11-13")).toMatchObject({ Email: "riya@acme.test", Verified: "yes", Risky: "no", "Catch-all": "unknown" });
+    expect(row.Person).toBe("Riya Sample");
+    expect(row.Opener).toContain("Hi Riya");
+    expect([row.Label, row.Reason, row.Outcome, row.Notes]).toEqual([undefined, undefined, undefined, undefined]);
+  });
+
+  it("old positional rows convert by name: Profile splits into Email / LinkedIn / Verified / Risky, Priority becomes Score", () => {
+    const old = ["2026-11-10", "Riya Sample", "CEO", "riya@acme.test (likely)\nhttps://linkedin.com/in/riya", "Acme", "https://acme.test", "11-50", "b2b", "India",
+      "Play", "why", "Hi Riya", "angle", "72", "good", "", "", "", "draft", "sig", "li", "Good time", ""];
+    expect(storedRow(old)).toMatchObject({ Person: "Riya Sample", Company: "Acme", Score: "72", Label: "good", Email: "riya@acme.test", Verified: "no", Risky: "no", LinkedIn: "https://linkedin.com/in/riya", Timing: "Good time" });
+    expect(rowFor(["Company", "My column", "ID", "Email"], storedRow(old), "id-1")).toEqual(["Acme", "", "id-1", "riya@acme.test"]);
+    expect(emailCells("x@acme.test", "invalid")).toMatchObject({ Verified: "no", Risky: "yes" });
   });
 });
+
 
 describe("non-hiring signal wording", () => {
   const c = { person: { name: "Riya S", role: "CEO", source: "yc" }, persona: "Founder / CEO", note: "" };

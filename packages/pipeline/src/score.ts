@@ -31,6 +31,8 @@ export interface ScoreRunResult {
   criticDropped: Record<string, number>;
   /** eligible accounts under delivery.digest.min_score (never sent) */
   belowMinScore: number;
+  /** account id -> critic checks it failed (eligible accounts only) */
+  criticFailed?: Record<string, string[]>;
   /** every scored account (for tuning and evals; not rendered) */
   all?: { account: ScoredAccount; score: AccountScore }[];
 }
@@ -185,6 +187,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   return {
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
-    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore, all: results.map((r) => ({ account: r.account, score: r.score })),
+    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore,
+    criticFailed: Object.fromEntries([...verdicts].filter(([, v]) => !v.pass).map(([id, v]) => [id, v.failed.map((f) => f.check)])), all: results.map((r) => ({ account: r.account, score: r.score })),
   };
 }

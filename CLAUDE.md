@@ -38,6 +38,7 @@ Runtime jobs (need `.env`; see `.env.example`):
 | `pnpm bounces [days]` | read hard bounces from the sending mailbox and mark those addresses invalid (skips without gmail.readonly) |
 | `pnpm watch` | weekly account watch: YC pages (founders, funding, launches), homepage + DNS changes, GTM tools |
 | `pnpm sheet:setup <pack-dir>` / `pnpm sheet:sync` | create the leads Sheet / append pending rows + read labels back |
+| `pnpm sheet:rebuild [--dry]` | one-time: rewrite the Leads tab in the current column order, dropping rows off the ICP or under `min_score` (rows with an Outcome stay; old tab kept as "Leads backup <date>") |
 | `pnpm ops` | nightly upkeep: usage guard → janitor (retention) → eval metrics → verified backup to R2 |
 | `pnpm tune [--show] [--dry]` | weekly self-tuning proposals from labels (never applied; `--show` local only) |
 | `pnpm forget --name "X" --domain d` / `--email e` | delete a person everywhere (Neon, Sheet, R2 backups, imported network) and suppress them |
@@ -91,6 +92,7 @@ Key invariants (each was a real bug or a deliberate design decision):
 - **Idempotency** is enforced by unique keys (signals on `evidence_url,type`; plays per account; people per account+name+source; gigs per source+external id; digest once per IST day via `runs.idempotency_key`).
 - **Spend**: Haiku daily cap (tick classification) and the Sonnet writer cap (digest drafts) are persisted per IST day in `usage_daily` (`haiku`, `sonnet`); every run checks remaining budget. Spend caps reaching their limit are a quiet "cap reached" note in the digest health line; only the usage guard's free-tier services (`FREE_TIER_SERVICES`) warn.
 - `raw_items`, `candidates`, `scores` are monthly-partitioned (migration 0001); `ensure-partitions.ts` runs daily.
+- **Sheet rows by column name**: `LEAD_COLUMNS` is the vetting order (Score, ICP fit, Timing, company, why, person, Email / Verified / Risky / Catch-all, your columns, drafts, hidden ID). Stored rows (`deliveries.sheet_row`) are objects by column name (old positional arrays convert via `storedRow`); appends and fills find columns by header, so columns can be moved in the Sheet. Email holds the address only.
 - **One-tap labels**: real digests carry signed 👍/👎 links (`TELL_LABEL_URL` + `LABEL_SECRET`) to the Worker, which shows a confirm page (GETs never label: link scanners prefetch) and stores taps in KV; `sheet:sync` pulls them, fills empty Label cells, then acks. The Sheet stays the single source labels are read from.
 - **`digest --test` records nothing**, so repeated test sends show the same leads; only real (scheduled) digests write `deliveries`.
 - **Re-delivery** (`redelivery()` in `intel/rank.ts`): a delivered account is held for `redeliver_after_days` (90) and comes back early on a new play or new strong evidence (first seen after the delivery: strength ≥ `alone_min_strength` or a new type; a role posted before the delivery but found later isn't new), with a "Back on your list" reason in digest + Sheet. 👎 holds it past the window (only a new play brings it back); outcome meeting/won never comes back. Labels come from the Sheet via `sheet:sync`.

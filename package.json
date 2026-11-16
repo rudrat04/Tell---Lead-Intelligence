@@ -24,6 +24,7 @@
     "jsearch": "tsx scripts/jsearch.ts",
     "sheet:setup": "tsx scripts/sheet.ts setup",
     "sheet:sync": "tsx scripts/sheet.ts sync",
+    "sheet:rebuild": "tsx scripts/sheet-rebuild.ts",
     "google:auth": "tsx scripts/gmail-auth.ts",
     "watch": "tsx scripts/watch.ts",
     "ops": "tsx scripts/ops.ts",

@@ -3,7 +3,7 @@ import { runScoring, contactsFor, analyzeLeads, type ScoredAccount } from "@tell
 import type { RankInput } from "@tell/intel";
 import { getDb, deliveries, eq, sql } from "@tell/db";
 import { emailDraft, linkedinDraft, leadOpener } from "./render.js";
-import { ensureLeadHeaders, fillColumnById, LEAD_COLUMNS, LEAD_CELLS_BEFORE_ID } from "./sheets.js";
+import { ensureLeadHeaders, fillColumnById, storedRow } from "./sheets.js";
 
 export interface BackfillDraftsResult {
   deliveries: number;
@@ -16,9 +16,6 @@ export interface BackfillDraftsResult {
   /** local review only (never printed in CI) */
   samples: { company: string; email: string; linkedin: string }[];
 }
-
-/** where a Sheet column sits in the stored row (cells before the hidden ID, then the ones after it) */
-const storedIndex = (c: (typeof LEAD_COLUMNS)[number]) => { const i = LEAD_COLUMNS.indexOf(c); return i < LEAD_CELLS_BEFORE_ID ? i : i - 1; };
 
 /**
  * Re-write the opener, email draft and LinkedIn message for leads already delivered, with the current copy brief:
@@ -69,9 +66,7 @@ export async function backfillDrafts(opts: { pack: Pack; dryRun?: boolean; capUs
     if (op) opener.set(r.id, op);
     if (res.samples.length < 5 && (e || li)) res.samples.push({ company: l.account.name ?? l.account.domain, email: e, linkedin: li });
     if (opts.dryRun) continue;
-    const stored = [...((r.row as string[]) ?? [])];
-    const put = (col: (typeof LEAD_COLUMNS)[number], v: string | undefined) => { if (v === undefined) return; const i = storedIndex(col); while (stored.length < i) stored.push(""); stored[i] = v; };
-    put("Email draft", e); put("LinkedIn message", li); put("Opener", op || undefined);
+    const stored = { ...storedRow(r.row), "Email draft": e, "LinkedIn message": li, ...(op ? { Opener: op } : {}) };
     await db.update(deliveries).set({ sheetRow: stored }).where(eq(deliveries.id, r.id));
   }
 

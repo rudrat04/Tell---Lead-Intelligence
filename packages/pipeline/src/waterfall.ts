@@ -64,15 +64,11 @@ export async function waterfallContacts(
   return { looked, found };
 }
 
-/** What the Sheet's "Enrich email" cell says after a click (pure; exported for tests). */
-export function enrichCellText(r: WaterfallEmail, suppressed = false): string {
+/** What the "Enrich email" cell says after a click (the address itself goes in Email). Pure; exported for tests. */
+export function enrichStatus(r: WaterfallEmail, suppressed = false): string {
   if (suppressed) return "suppressed (do not contact)";
-  const pct = `${Math.round(r.confidence * 100)}%`;
-  if (r.email && r.verdict === "valid") return `${r.email} (verified${r.foundAt ? `, ${r.foundAt}` : ""})`;
-  if (r.email && r.verdict === "likely") return `${r.email} (likely ${pct}${r.catchAll ? ", catch-all" : ""})`;
-  if (r.email && r.verdict === "risky") return `${r.email} (risky guess ${pct}: verify before sending)`;
-  if (r.verdict === "invalid") return "no deliverable address";
-  return "not found";
+  if (r.email) return `done: ${r.verdict}, ${Math.round(r.confidence * 100)}%${r.foundAt ? ` (${r.foundAt})` : ""}`;
+  return r.verdict === "invalid" ? "no deliverable address" : "not found";
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseDiscover, parseEnrich, type WaterfallEmail } from "@tell/watchers";
-import { enrichCellText } from "./waterfall.js";
+import { enrichStatus } from "./waterfall.js";
 
 const r = (verdict: WaterfallEmail["verdict"], email: string | null, extra: Partial<WaterfallEmail> = {}): WaterfallEmail =>
   ({ email, verdict, confidence: 0.9, catchAll: false, foundAt: "tomba", cached: false, credits: 1, ...extra });
@@ -23,12 +23,11 @@ describe("Air Waterfall responses", () => {
 });
 
 describe("Enrich email cell", () => {
-  it("says how sure the answer is; a risky guess is labelled as one; suppressed never shows the address", () => {
-    expect(enrichCellText(r("valid", "mila@acme.test"))).toBe("mila@acme.test (verified, tomba)");
-    expect(enrichCellText(r("likely", "mila@acme.test", { confidence: 0.7, catchAll: true }))).toBe("mila@acme.test (likely 70%, catch-all)");
-    expect(enrichCellText(r("risky", "mila@acme.test", { confidence: 0.4 }))).toBe("mila@acme.test (risky guess 40%: verify before sending)");
-    expect(enrichCellText(r("invalid", null))).toBe("no deliverable address");
-    expect(enrichCellText(r("not_found", null))).toBe("not found");
-    expect(enrichCellText(r("valid", "mila@acme.test"), true)).toBe("suppressed (do not contact)");
+  it("is a short status after the click (the address goes in Email); suppressed never shows anything", () => {
+    expect(enrichStatus(r("valid", "mila@acme.test"))).toBe("done: valid, 90% (tomba)");
+    expect(enrichStatus(r("risky", "mila@acme.test", { confidence: 0.4, foundAt: null }))).toBe("done: risky, 40%");
+    expect(enrichStatus(r("invalid", null))).toBe("no deliverable address");
+    expect(enrichStatus(r("not_found", null))).toBe("not found");
+    expect(enrichStatus(r("valid", "mila@acme.test"), true)).toBe("suppressed (do not contact)");
   });
 });

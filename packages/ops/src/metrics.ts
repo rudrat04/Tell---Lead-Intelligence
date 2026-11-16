@@ -28,8 +28,8 @@ export async function computeMetrics(opts: { write?: boolean } = {}): Promise<Me
   const delivered = await one<{ india: number; total: number; named: number; nonfounder: number; nonhiring: number }>(sql`
     select count(*) filter (where a.region = 'India')::int as india,
            count(*)::int as total,
-           count(*) filter (where coalesce(d.sheet_row->>1, '') <> '')::int as named,
-           count(*) filter (where coalesce(d.sheet_row->>1, '') <> '' and coalesce(d.sheet_row->>2, '') !~* '(founder|ceo|chief executive)')::int as nonfounder,
+           count(*) filter (where coalesce(d.sheet_row->>'Person', d.sheet_row->>1, '') <> '')::int as named,
+           count(*) filter (where coalesce(d.sheet_row->>'Person', d.sheet_row->>1, '') <> '' and coalesce(d.sheet_row->>'Role', d.sheet_row->>2, '') !~* '(founder|ceo|chief executive)')::int as nonfounder,
            count(*) filter (where exists (select 1 from signals s where s.account_id = d.account_id
              and s.type = any(string_to_array(${NON_HIRING.join(",")}, ',')) and s.observed_at > d.delivered_at - interval '30 days' and s.observed_at <= d.delivered_at))::int as nonhiring
     from deliveries d join accounts a on a.id = d.account_id where d.delivered_at > now() - interval '30 days'`);

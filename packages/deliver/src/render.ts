@@ -1,4 +1,5 @@
 import type { Pack } from "@tell/config";
+import { emailCells, type LeadRow } from "./sheets.js";
 import type { Evidence } from "@tell/intel";
 import type { ScoreRunResult, DigestGig, ChampionMove } from "@tell/pipeline";
 import { firstName, personaSearchLinks, type Contact } from "@tell/people";
@@ -318,33 +319,35 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   return { subject: subjectFull, html, text };
 }
 
-/** The Sheet row for a delivered lead, in LEAD_COLUMNS order minus ID (appended when the delivery id exists). */
-export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }, calendar?: Pack["icp"]["calendar"], enrichUrl?: string): string[] {
+/** The Sheet row for a delivered lead, by column name (the hidden ID is added when the row is appended). */
+export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }, calendar?: Pack["icp"]["calendar"], enrichUrl?: string): LeadRow {
   const a = l.account, s = l.score;
   const company = a.name ?? a.domain;
-  return [
-    date,
-    contact?.person.name ?? "",
-    contact?.person.role ?? "",
-    [contact && emailText(contact.person), contact?.person.linkedin ?? contact?.person.twitter].filter(Boolean).join("\n"),
-    company,
-    `https://${a.domain}`,
-    a.sizeBand ?? "",
-    a.segment ?? "",
-    a.region ?? "",
-    s.plays.map((p) => p.title).join(" + "),
-    [l.backReason ? `Back: ${l.backReason}` : "", contact?.warm?.length ? `Warm path: ${contact.warm[0]!.text}` : "", ...s.drivers.slice(0, 3).map((e) => `${describe(e)} (${e.url})`)].filter(Boolean).join("\n"),
-    leadOpener(contact, company, s.drivers[0], note) ?? "",
-    note?.angle ?? s.plays[0]?.angle ?? "",
-    String(displayScore(s)), // 0-100: how far above the base rate
-    "", "", "", "", // Label, Reason, Outcome, Notes: yours
-    // (the hidden ID column is inserted here when the row is appended)
-    emailDraft(contact, note, signature, copy?.greeting),
-    signalSummary(s.evidence),
-    linkedinDraft(contact, note, copy?.linkedin.greeting),
-    calendar ? sendWindowText(sendWindow(s.evidence, dayDate(date), calendar)) : "", // Timing (appended column)
-    enrichUrl && needsEmail(contact) ? enrichUrl : "", // Enrich email: a link until clicked, then the answer
-  ];
+  const e = contact?.person.email;
+  return {
+    Date: date,
+    Company: company,
+    Website: `https://${a.domain}`,
+    Score: String(displayScore(s)), // 0-100: how far above the base rate (50 = twice as likely as an average account)
+    "ICP fit": String(Math.round(s.fit * 100)), // 0-100: size and segment against your ICP
+    Timing: calendar ? sendWindowText(sendWindow(s.evidence, dayDate(date), calendar)) : "",
+    Size: a.sizeBand ?? "",
+    Segment: a.segment ?? "",
+    Region: a.region ?? "",
+    "Why now": [l.backReason ? `Back: ${l.backReason}` : "", contact?.warm?.length ? `Warm path: ${contact.warm[0]!.text}` : "", ...s.drivers.slice(0, 3).map((x) => `${describe(x)} (${x.url})`)].filter(Boolean).join("\n"),
+    Signals: signalSummary(s.evidence),
+    Plays: s.plays.map((p) => p.title).join(" + "),
+    Person: contact?.person.name ?? "",
+    Role: contact?.person.role ?? "",
+    LinkedIn: contact?.person.linkedin ?? contact?.person.twitter ?? "",
+    ...(e && e.status !== "invalid" ? emailCells(e.address, EMAIL_LABEL[e.status], /catch-all/i.test(e.note) ? true : null) : {}),
+    "Enrich email": enrichUrl && needsEmail(contact) ? enrichUrl : "", // a link until clicked, then the result
+    Opener: leadOpener(contact, company, s.drivers[0], note) ?? "",
+    Angle: note?.angle ?? s.plays[0]?.angle ?? "",
+    "Email draft": emailDraft(contact, note, signature, copy?.greeting),
+    "LinkedIn message": linkedinDraft(contact, note, copy?.linkedin.greeting),
+    // Label, Reason, Outcome, Notes: yours
+  };
 }
 
 const SIGNAL_LABEL: Record<string, string> = {

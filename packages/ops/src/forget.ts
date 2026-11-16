@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { r2, type Pack } from "@tell/config";
 import { getDb, people, emails, deliveries, suppressionList, deletionRequests, accounts, networkContacts, signals, and, eq, inArray, sql } from "@tell/db";
-import { googleAccessToken } from "@tell/deliver";
+import { googleAccessToken, a1Col } from "@tell/deliver";
 
 /**
  * Deletion request (plan section 9; GDPR / India DPDP): remove a person's data everywhere we hold it, then suppress
@@ -15,10 +15,12 @@ export interface ForgetResult { people: number; emails: number; deliveryRows: nu
 
 export const hashEmail = (e: string) => createHash("sha256").update(e.trim().toLowerCase()).digest("hex");
 
-/** Replace a name inside a stored Sheet row (array of cells). Exported for tests. */
+/** Replace a name inside a stored Sheet row (old rows: an array of cells; newer: cells by column name). Exported for tests. */
 export function scrubRow(row: unknown, name: string): unknown {
-  if (!Array.isArray(row)) return row;
-  return row.map((c) => (typeof c === "string" && c.includes(name) ? c.split(name).join("[removed]") : c));
+  const scrub = (c: unknown) => (typeof c === "string" && c.includes(name) ? c.split(name).join("[removed]") : c);
+  if (Array.isArray(row)) return row.map(scrub);
+  if (row && typeof row === "object") return Object.fromEntries(Object.entries(row).map(([k, v]) => [k, scrub(v)]));
+  return row;
 }
 
 export async function forgetPerson(req: ForgetRequest, pack: Pack): Promise<ForgetResult> {
@@ -64,10 +66,10 @@ export async function forgetPerson(req: ForgetRequest, pack: Pack): Promise<Forg
     const token = await googleAccessToken();
     const api = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values`;
     for (const tab of ["Leads", "Gigs"]) {
-      const j = (await (await fetch(`${api}/${encodeURIComponent(`${tab}!A:Z`)}`, { headers: { authorization: `Bearer ${token}` } })).json()) as { values?: string[][] };
+      const j = (await (await fetch(`${api}/${encodeURIComponent(`${tab}!A:AZ`)}`, { headers: { authorization: `Bearer ${token}` } })).json()) as { values?: string[][] };
       const data: { range: string; values: string[][] }[] = [];
       (j.values ?? []).forEach((row, ri) => row.forEach((cell, ci) => {
-        if (ri > 0 && allNames.some((n) => cell.includes(n))) data.push({ range: `${tab}!${String.fromCharCode(65 + ci)}${ri + 1}`, values: [[allNames.reduce((c, n) => c.split(n).join("[removed]"), cell)]] });
+        if (ri > 0 && allNames.some((n) => cell.includes(n))) data.push({ range: `${tab}!${a1Col(ci)}${ri + 1}`, values: [[allNames.reduce((c, n) => c.split(n).join("[removed]"), cell)]] });
       }));
       if (data.length) {
         await fetch(`${api}:batchUpdate`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ valueInputOption: "RAW", data }) });
