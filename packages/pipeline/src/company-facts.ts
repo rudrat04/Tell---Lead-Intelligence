@@ -7,7 +7,8 @@ import { neonUsage, type UsageStore } from "./usage.js";
 
 /**
  * Company size and segment for accounts no source gave them for (Keka, Workable, JSearch accounts): one Exa company
- * search per account, accepted only when the result's website is the account's own domain (never a name match).
+ * search per account (name + domain), accepted only when the result's website is the account's own domain, or its
+ * LinkedIn company page address is the domain's name and the company name agrees (never a name alone).
  *   size:    headcount -> the pack's size band; under team_size.min or over the last band gets a band the pack doesn't
  *            have ("under 5", "201+"), so the critic's ICP check drops it
  *   segment: Haiku picks one of pack icp.segment_descriptions from the company's description
@@ -25,8 +26,23 @@ export function bandForHeadcount(n: number, icp: Pack["icp"]): string {
   return band ? band.band : `${icp.size_bands[icp.size_bands.length - 1]!.max + 1}+`;
 }
 
-/** The company record whose website is this domain, if any (pure; exported for tests). */
-export const companyFor = (domain: string, hits: CompanyHit[]) => hits.find((h) => registrableDomain(h.url) === domain) ?? null;
+const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+/**
+ * The company record for this domain, if any (pure; exported for tests): its website is the domain, or it is a
+ * LinkedIn company page whose address is the domain's name (linkedin.com/company/trackier for trackier.com) AND whose
+ * company name matches that name or the account's. Two independent matches, never a name alone.
+ */
+export function companyFor(domain: string, hits: CompanyHit[], accountName?: string | null): CompanyHit | null {
+  const own = hits.find((h) => registrableDomain(h.url) === domain);
+  if (own) return own;
+  const label = norm(domain.split(".")[0]!);
+  return hits.find((h) => {
+    const slug = h.url.match(/linkedin\.com\/company\/([^/?#]+)/i)?.[1];
+    if (!slug || norm(slug) !== label) return false;
+    const n = norm(h.name);
+    return n === label || (!!accountName && n === norm(accountName));
+  }) ?? null;
+}
 
 /** Segment prompt from the pack; the answer must be one of the keys. Exported for tests. */
 export function segmentPrompt(pack: Pack): string {
@@ -48,7 +64,7 @@ export async function fillCompanyFacts(
   if (!search) return { ...res, skipped: "no EXA_API_KEY" };
   const write = opts.write !== false;
   const db = getDb();
-  const rows = await db.select({ id: accounts.id, domain: accounts.domain, size: accounts.sizeBand, segment: accounts.segment }).from(accounts)
+  const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, size: accounts.sizeBand, segment: accounts.segment }).from(accounts)
     .where(and(inArray(accounts.id, accountIds), sql`(${accounts.sizeBand} is null or ${accounts.segment} is null)`));
   if (!rows.length) return res;
   const recent = new Set((await db.select({ a: peopleSearches.accountId }).from(peopleSearches).where(and(
@@ -72,7 +88,8 @@ export async function fillCompanyFacts(
       if (recent.has(a.id) || budget-- <= 0) continue;
       res.looked++;
       let hit: CompanyHit | null = null;
-      try { hit = companyFor(a.domain, await search(a.domain)); } catch { continue; /* Exa down: try next run */ }
+      // name + domain finds the company's own record more often than the bare domain
+      try { hit = companyFor(a.domain, await search(a.name ? `${a.name} ${a.domain}` : a.domain), a.name); } catch { continue; /* Exa down: try next run */ }
       const set: { sizeBand?: string; segment?: string } = {};
       if (hit?.employees && !a.size) { set.sizeBand = bandForHeadcount(hit.employees, pack.icp); res.sized++; }
       if (hit?.description && !a.segment && llm) {

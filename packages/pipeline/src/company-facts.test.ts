@@ -24,6 +24,13 @@ describe("company facts", async () => {
     expect(hits).toHaveLength(2);
     expect(companyFor("northwind.test", hits)).toMatchObject({ employees: 40, country: "India" });
     expect(companyFor("other.test", hits)).toBeNull();
+    const li = parseExaCompanies({ results: [
+      { url: "https://in.linkedin.com/company/tinyloop", entities: [{ type: "company", properties: { name: "TinyLoop", workforce: { total: 30 } } }] },
+      { url: "https://www.linkedin.com/company/tinyloop-labs", entities: [{ type: "company", properties: { name: "Tinyloop Labs", workforce: { total: 900 } } }] },
+    ] });
+    expect(companyFor("tinyloop.test", li)?.employees).toBe(30); // LinkedIn page: address and name both match the domain
+    expect(companyFor("tinyloop.test", [li[1]!])).toBeNull(); // a similar name alone is not proof
+    expect(companyFor("loop.test", li, "TinyLoop")).toBeNull(); // the address must match the domain too
   });
 
   it("segment answer must be one of the pack's segments", () => {
