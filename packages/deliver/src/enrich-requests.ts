@@ -1,8 +1,8 @@
 import type { Pack } from "@tell/config";
-import { getDb, deliveries, inArray } from "@tell/db";
+import { getDb, deliveries, inArray, sql } from "@tell/db";
 import { airWaterfall } from "@tell/watchers";
 import { enrichContact, enrichCellText } from "@tell/pipeline";
-import { fetchEnrichRequests, ackEnrichRequests } from "./label-links.js";
+import { fetchEnrichRequests, ackEnrichRequests, enrichLink } from "./label-links.js";
 import { fillColumnById, ensureLeadHeaders, LEAD_COLUMNS, LEAD_CELLS_BEFORE_ID } from "./sheets.js";
 
 /** Stored Sheet row cell for a column (rows are stored without the hidden ID). */
@@ -45,4 +45,22 @@ export async function runEnrichRequests(pack: Pack): Promise<{ status: "ok" | "s
   }
   await ackEnrichRequests(base, secret, done);
   return out;
+}
+
+/**
+ * Put a find-email link in the "Enrich email" cell of delivered rows that have a contact but no email yet (rows made
+ * before the column existed). Only empty cells are written, so answers already there stay. Returns cells written.
+ */
+export async function backfillEnrichLinks(pack: Pack): Promise<{ status: "ok" | "skipped"; reason?: string; rows: number; cells: number }> {
+  const base = process.env.TELL_LABEL_URL, secret = process.env.LABEL_SECRET, sheetId = pack.delivery.sheet.spreadsheet_id;
+  if (!base || !secret || !sheetId) return { status: "skipped", reason: "TELL_LABEL_URL / LABEL_SECRET / sheet not set", rows: 0, cells: 0 };
+  const rows = await getDb().select({ id: deliveries.id, row: deliveries.sheetRow }).from(deliveries).where(sql`${deliveries.sheetAppendedAt} is not null`);
+  const links = new Map<string, string>();
+  for (const r of rows) {
+    const row = (r.row ?? null) as string[] | null;
+    if (row && cell(row, "Person") && !cell(row, "Profile").includes("@")) links.set(r.id, enrichLink(base, secret, r.id));
+  }
+  if (!links.size) return { status: "ok", rows: 0, cells: 0 };
+  await ensureLeadHeaders(sheetId);
+  return { status: "ok", rows: links.size, cells: await fillColumnById(sheetId, "Enrich email", links) };
 }
