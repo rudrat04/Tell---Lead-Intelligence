@@ -3,7 +3,7 @@ import { getDb, deliveries, inArray, eq, sql } from "@tell/db";
 import { airWaterfall } from "@tell/watchers";
 import { enrichContact, enrichStatus } from "@tell/pipeline";
 import { fetchEnrichRequests, ackEnrichRequests, enrichLink } from "./label-links.js";
-import { fillColumnById, ensureLeadHeaders, storedRow, emailCells, type LeadRow, type LeadColumn } from "./sheets.js";
+import { fillColumnById, ensureLeadHeaders, sheetsCall, storedRow, emailCells, type LeadRow, type LeadColumn } from "./sheets.js";
 
 
 /**
@@ -44,6 +44,13 @@ export async function runEnrichRequests(pack: Pack): Promise<{ status: "ok" | "s
   const sheetId = pack.delivery.sheet.spreadsheet_id;
   if (sheetId && cols.size) {
     await ensureLeadHeaders(sheetId);
+    // a link can carry another delivery's id than its row (same account delivered twice): map link id -> row ID
+    const grid = (await sheetsCall<{ values?: string[][] }>(`/${sheetId}/values/${encodeURIComponent("Leads!A:AZ")}`)).values ?? [];
+    const [h = [], ...body] = grid;
+    const ei = h.findIndex((x) => x.trim() === "Enrich email"), ii = h.findIndex((x) => x.trim() === "ID");
+    const rowOf = new Map<string, string>();
+    for (const r of body) { const m = (r[ei] ?? "").match(/[?&]d=([0-9a-f-]{36})/i); if (m && r[ii]) rowOf.set(m[1]!, r[ii]!.trim()); }
+    for (const [col, values] of cols) cols.set(col, new Map([...values].map(([d, v]) => [rowOf.get(d) ?? d, v])));
     for (const [col, values] of cols) {
       const n = await fillColumnById(sheetId, col, values, true);
       if (col === "Enrich email") out.sheetCells = n;
