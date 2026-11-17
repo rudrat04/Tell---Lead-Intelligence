@@ -54,7 +54,18 @@ jobs:
         run: pnpm jsearch
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          # Tell's own OpenWeb Ninja key only: the RapidAPI key is shared with another project, and the pack's
+          # 190/month would use up its quota (no secret = the step skips)
+          JSEARCH_API_KEY: ${{ secrets.JSEARCH_API_KEY }}
+
+      # a rotating slice of discovery every day (Workable query x location, Common Crawl tenants), so the set of
+      # companies keeps growing between the weekly runs; never blocks the digest
+      - name: Discover new companies (daily slice)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: pnpm boards:discover --daily
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Job boards diff
         id: boards

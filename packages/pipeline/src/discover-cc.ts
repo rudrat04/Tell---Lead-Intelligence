@@ -73,7 +73,7 @@ export interface CcDiscoveryResult {
   boardsNew: number;
 }
 
-export async function runCcDiscovery(opts: { pack: Pack; maxTenants?: number; recheckDays?: number }): Promise<CcDiscoveryResult> {
+export async function runCcDiscovery(opts: { pack: Pack; maxTenants?: number; recheckDays?: number; skipListing?: boolean }): Promise<CcDiscoveryResult> {
   applyPackIdentity(opts.pack);
   const db = getDb();
   const lists = domainLists(opts.pack.domains);
@@ -81,11 +81,11 @@ export async function runCcDiscovery(opts: { pack: Pack; maxTenants?: number; re
   const now = new Date();
   const res: CcDiscoveryResult = { index: null, perAts: {}, due: 0, checked: 0, noPortal: 0, noRoles: 0, staffing: 0, unresolved: 0, filtered: 0, resolved: 0, india: 0, withGtmRoles: 0, boardsNew: 0 };
 
-  try { res.index = await ccLatestIndex(); } catch { return res; } // index down: YC-only this week
-
-  // 1. list tenants per ATS into company_seeds (one Common Crawl request at a time)
-  for (const s of SOURCES) {
-    const { urls, complete } = await ccUrls(res.index, `*.${s.suffix}`);
+  // 1. list tenants per ATS into company_seeds (one Common Crawl request at a time). The daily slice skips this
+  //    (weekly is enough: a crawl index changes monthly) and only checks tenants already listed.
+  if (!opts.skipListing) try { res.index = await ccLatestIndex(); } catch { return res; } // index down: YC-only this week
+  for (const s of opts.skipListing ? [] : SOURCES) {
+    const { urls, complete } = await ccUrls(res.index!, `*.${s.suffix}`);
     const tenants = tenantsFromUrls(urls, s.suffix);
     res.perAts[s.ats] = { listed: tenants.length, complete };
     for (let i = 0; i < tenants.length; i += 500) {

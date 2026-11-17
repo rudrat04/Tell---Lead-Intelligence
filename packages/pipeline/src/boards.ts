@@ -156,7 +156,7 @@ async function fetchPostings(b: BoardRow): Promise<JobPosting[]> {
 }
 
 /** Daily diff of every tracked board's GTM/ops roles into jobs + signals. Dead boards (7 straight failures) stop being checked. */
-export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): Promise<BoardCheckResult> {
+export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number; maxYcBoards?: number }): Promise<BoardCheckResult> {
   applyPackIdentity(opts.pack);
   const db = getDb();
   const specs = opts.pack.signals.signals;
@@ -164,12 +164,17 @@ export async function runBoardCheck(opts: { pack: Pack; maxBoards?: number }): P
   const jdPatterns = (opts.pack.roles.jd_patterns ?? []).map(toRegex);
   const now = new Date();
 
-  const boards: BoardRow[] = await db.select({
+  let boards: BoardRow[] = await db.select({
     id: jobBoards.id, accountId: jobBoards.accountId, source: jobBoards.source, slug: jobBoards.slug, baselineDone: jobBoards.baselineDone, failCount: jobBoards.failCount,
   }).from(jobBoards).innerJoin(accounts, eq(accounts.id, jobBoards.accountId))
     // JSearch roles age out in runJSearch; boards of accounts the pack can never score (out of regions_any) aren't fetched
     .where(and(eq(jobBoards.status, "active"), sql`${jobBoards.source} <> 'jsearch'`, regionInScopeSql(opts.pack, accounts.region)))
-    .orderBy(sql`${jobBoards.lastCheckedAt} asc nulls first`).limit(opts.maxBoards ?? 2000);
+    .orderBy(sql`${jobBoards.lastCheckedAt} asc nulls first`).limit(opts.maxBoards ?? 3000);
+  // YC job pages are one host that throttles long runs: the least recently checked `maxYcBoards` per day (each YC
+  // board every few days); ATS APIs (Greenhouse, Lever, Ashby, Keka, Workable...) are all checked daily
+  const ycCap = opts.maxYcBoards ?? Number(process.env.MAX_YC_BOARDS ?? 300);
+  let yc = 0;
+  boards = boards.filter((b) => b.source !== "yc" || yc++ < ycCap);
 
   const openRows = boards.length
     ? await db.select().from(jobs).where(and(inArray(jobs.boardId, boards.map((b) => b.id)), sql`${jobs.closedAt} is null`))

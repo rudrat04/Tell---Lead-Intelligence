@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canonicalUrl, pickQueries, parseHitDate, postAuthor, hitsToItems, makeWebSearch, type SearchHit } from "./web-search.js";
+import { canonicalUrl, pickQueries, parseHitDate, postAuthor, hitsToItems, makeWebSearch, countryFor, type SearchHit } from "./web-search.js";
 import { isMappingAllowed } from "./policy.js";
 
 const now = new Date("2026-11-14T06:00:00Z");
@@ -69,5 +69,17 @@ describe("web search source", () => {
   it("authors are never mapped beyond the post itself", () => {
     expect(isMappingAllowed("web_search", "explicit")).toBe(true);
     expect(isMappingAllowed("web_search", "profile")).toBe(false);
+  });
+});
+
+describe("web search countries", () => {
+  it("rotates countries per search and shifts by day, so each query meets each country", () => {
+    const o = { country: "in", countries: ["in", "us", "gb"], perDay: 8 };
+    const day1 = [0, 1, 2].map((n) => countryFor(o, n, now));
+    expect(new Set(day1)).toEqual(new Set(["in", "us", "gb"]));
+    expect(countryFor(o, 0, new Date(now.getTime() + 86_400_000))).not.toBe(countryFor(o, 0, now));
+  });
+  it("falls back to the single country", () => {
+    expect(countryFor({ country: "in", countries: [], perDay: 8 }, 5, now)).toBe("in");
   });
 });

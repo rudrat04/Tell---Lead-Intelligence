@@ -33,7 +33,14 @@ type Acc = { id: string; domain: string; ycSlug: string | null };
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
-export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: Date }): Promise<WatchResult> {
+/** `n` items starting at slice number `k` (wrapping), so consecutive runs cover the whole list. Exported for tests. */
+export function rotatingSlice<T>(items: T[], n: number, k: number): T[] {
+  if (items.length <= n) return items;
+  const start = (k * n) % items.length;
+  return Array.from({ length: n }, (_, i) => items[(start + i) % items.length]!);
+}
+
+export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: Date; maxYcPages?: number }): Promise<WatchResult> {
   const { pack } = opts;
   applyPackIdentity(pack);
   const now = opts.now ?? new Date();
@@ -104,11 +111,13 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
   const sameTools = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
 
   // Lane 1: YC pages (one host, one at a time via politeGet)
+  // YC throttled a daily 1,060-page run (~270 in); weekly, 1,060 went through: a safety cap of `maxYcPages` per run, a different slice each
+  // week, so every YC account is still visited every few weeks
+  const ycList = rotatingSlice(list.filter((a) => a.ycSlug).sort((x, y) => x.id.localeCompare(y.id)), opts.maxYcPages ?? Number(process.env.MAX_YC_PAGES ?? 1200), Math.floor(now.getTime() / (7 * 86_400_000)));
   const ycLane = async () => {
-    for (const a of list) {
-      if (!a.ycSlug) continue;
+    for (const a of ycList) {
       try {
-        const prof = await fetchYcCompanyProfile(a.ycSlug);
+        const prof = await fetchYcCompanyProfile(a.ycSlug!);
         res.ycPages++;
         res.peopleSaved += await saveYcFounders(a.id, prof);
         await emit(a.id, eventsFromYcProfile(prof, now));

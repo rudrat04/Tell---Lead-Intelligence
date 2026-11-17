@@ -1,4 +1,4 @@
-import type { Pack } from "@tell/config";
+import { leadCap, type Pack } from "@tell/config";
 import {
   runScoring, istDay, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, type ScoreRunResult, type ChampionMove,
@@ -73,7 +73,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   }
 
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
-  const max = pack.delivery.digest.max_leads;
+  const max = leadCap(pack); // Infinity when max_leads is 0: every lead over min_score
   // score a pool of pool_multiplier x the leads, find who to contact there, drop leads with nobody to contact, re-rank by reach
   const scoreRun = (write: boolean) => runScoring({ pack, write, maxLeads: max * pack.delivery.digest.pool_multiplier });
   // first pass without writes (scores are written once, by the final pass)

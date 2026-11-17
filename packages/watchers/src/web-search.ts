@@ -25,9 +25,11 @@ export interface WebSearchOpts {
   /** Google `tbs` recency: d | w | m */
   timeRange: "d" | "w" | "m";
   country: string;
+  /** Google country codes to rotate through, one per search; empty = `country` every time */
+  countries?: string[];
   maxAgeDays: number;
   budget: SearchBudget;
-  search?: (q: string) => Promise<SearchHit[]>;
+  search?: (q: string, country: string) => Promise<SearchHit[]>;
   now?: () => Date;
 }
 
@@ -110,12 +112,12 @@ export function hitsToItems(hits: SearchHit[], query: string, now: Date, maxAgeD
 }
 
 export function serperSearch(opts: { apiKey: string; timeRange: string; country: string }) {
-  return async (q: string): Promise<SearchHit[]> => {
+  return async (q: string, country = opts.country): Promise<SearchHit[]> => {
     const res = await fetch("https://google.serper.dev/search", {
       method: "POST",
       headers: { "x-api-key": opts.apiKey, "content-type": "application/json" },
       // free Serper accounts reject more than 10 results per search
-      body: JSON.stringify({ q, num: 10, gl: opts.country, hl: "en", tbs: `qdr:${opts.timeRange}` }),
+      body: JSON.stringify({ q, num: 10, gl: country, hl: "en", tbs: `qdr:${opts.timeRange}` }),
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`serper -> ${res.status}`);
@@ -124,17 +126,26 @@ export function serperSearch(opts: { apiKey: string; timeRange: string; country:
   };
 }
 
+/** The country for the n-th search of the day: rotates through `countries`, shifted by day so every query meets every
+ *  country over time (a query always running in the same country would never find the others). Exported for tests. */
+export function countryFor(o: Pick<WebSearchOpts, "country" | "countries" | "perDay">, nthToday: number, now: Date): string {
+  const cs = o.countries?.length ? o.countries : [o.country];
+  const day = Math.floor(now.getTime() / 86_400_000);
+  return cs[(day + nthToday) % cs.length]!;
+}
+
 export function makeWebSearch(o: WebSearchOpts): Watcher {
   return {
     id: "web_search",
     async fetch() {
       const now = (o.now ?? (() => new Date()))();
-      const qs = pickQueries(o.queries, o.perDay, await o.budget.used(), o.perTick, now);
+      const used = await o.budget.used();
+      const qs = pickQueries(o.queries, o.perDay, used, o.perTick, now);
       const search = o.search ?? serperSearch({ apiKey: process.env.SERPER_API_KEY ?? "", timeRange: o.timeRange, country: o.country });
       const out: RawItem[] = [];
-      for (const q of qs) {
+      for (const [i, q] of qs.entries()) {
         await o.budget.add(1);
-        out.push(...hitsToItems(await search(q), q, now, o.maxAgeDays));
+        out.push(...hitsToItems(await search(q, countryFor(o, used + i, now)), q, now, o.maxAgeDays));
       }
       return [...new Map(out.map((i) => [i.externalId, i])).values()];
     },

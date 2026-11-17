@@ -1,9 +1,10 @@
 import type { Pack } from "@tell/config";
 import { searchWorkable, fetchWorkableAccount, fetchWorkablePostings, subdomainCandidates, findBoardLinks, type WorkableHit } from "@tell/watchers";
-import { passesHardFilters, regionFromPostings, looksLikeStaffing, classifyJob, compileRoles } from "@tell/intel";
+import { passesHardFilters, regionFromPostings, regionInScope, looksLikeStaffing, classifyJob, compileRoles } from "@tell/intel";
 import { registrableDomain, checkHomepage, domainLists } from "@tell/people";
 import { getDb, accounts, jobBoards, companySeeds, and, eq, inArray, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
+import { pickRotating } from "./discover-jsearch.js";
 import { ownPages } from "./boards.js";
 
 export interface WorkableDiscoveryResult {
@@ -20,6 +21,8 @@ export interface WorkableDiscoveryResult {
   filtered: number;
   resolved: number;
   india: number;
+  /** resolved accounts by region (counts only) */
+  byRegion: Record<string, number>;
   withGtmRoles: number;
   boardsNew: number;
 }
@@ -44,19 +47,23 @@ export function groupHits(hits: WorkableHit[]): Company[] {
  * the board subdomain is accepted only when Workable's account API returns the same account id as the search.
  * Region comes from the board's job locations, never from the search filter.
  */
-export async function runWorkableDiscovery(opts: { pack: Pack; recheckDays?: number }): Promise<WorkableDiscoveryResult> {
+export async function runWorkableDiscovery(opts: { pack: Pack; recheckDays?: number; maxSearches?: number; maxCompanies?: number; now?: Date }): Promise<WorkableDiscoveryResult> {
   const cfg = opts.pack.sources.workable;
-  const res: WorkableDiscoveryResult = { queries: 0, hits: 0, companies: 0, due: 0, checked: 0, noWebsite: 0, badSite: 0, noBoard: 0, staffing: 0, notRegion: 0, filtered: 0, resolved: 0, india: 0, withGtmRoles: 0, boardsNew: 0 };
+  const res: WorkableDiscoveryResult = { queries: 0, hits: 0, companies: 0, due: 0, checked: 0, noWebsite: 0, badSite: 0, noBoard: 0, staffing: 0, notRegion: 0, filtered: 0, resolved: 0, india: 0, byRegion: {}, withGtmRoles: 0, boardsNew: 0 };
   if (!cfg.enabled || !cfg.queries.length) return res;
   applyPackIdentity(opts.pack);
   const db = getDb();
   const lists = domainLists(opts.pack.domains);
   const roles = compileRoles(opts.pack.roles);
-  const now = new Date();
+  const now = opts.now ?? new Date();
 
+  // every query x location (weekly), or a day-rotated slice of them (daily discovery: a different few each day)
+  const locations = cfg.locations.length ? cfg.locations : [cfg.location];
+  const pairs = cfg.queries.flatMap((q) => locations.map((l) => ({ q, l })));
+  const searches = opts.maxSearches != null ? pickRotating(pairs, opts.maxSearches, now) : pairs;
   const hits: WorkableHit[] = [];
-  for (const q of cfg.queries) {
-    try { hits.push(...(await searchWorkable(q, cfg.location, { dayRange: cfg.day_range, maxPages: cfg.max_pages }))); res.queries++; }
+  for (const { q, l } of searches) {
+    try { hits.push(...(await searchWorkable(q, l, { dayRange: cfg.day_range, maxPages: cfg.max_pages }))); res.queries++; }
     catch { /* one query failing doesn't stop the rest */ }
   }
   res.hits = hits.length;
@@ -71,7 +78,7 @@ export async function runWorkableDiscovery(opts: { pack: Pack; recheckDays?: num
     for (const r of await db.select({ id: companySeeds.sourceId, at: companySeeds.siteCheckedAt }).from(companySeeds)
       .where(and(eq(companySeeds.source, "workable"), inArray(companySeeds.sourceId, part)))) seen.set(r.id, r.at);
   }
-  const due = companies.filter((c) => { const at = seen.get(c.id); return !at || at < recheck; }).slice(0, cfg.max_companies);
+  const due = companies.filter((c) => { const at = seen.get(c.id); return !at || at < recheck; }).slice(0, opts.maxCompanies ?? cfg.max_companies);
   res.due = due.length;
 
   for (const c of due) {
@@ -87,6 +94,7 @@ export async function runWorkableDiscovery(opts: { pack: Pack; recheckDays?: num
     else if (k === "resolved") {
       res.resolved++;
       if (v.region === "India") res.india++;
+      if (v.region) res.byRegion[v.region] = (res.byRegion[v.region] ?? 0) + 1;
       if (v.gtmRoles) res.withGtmRoles++;
       if (v.boardNew) res.boardsNew++;
     }
@@ -115,9 +123,9 @@ export async function runWorkableDiscovery(opts: { pack: Pack; recheckDays?: num
     if (!sub) return { reason: "no-board", domain };
 
     const postings = await fetchWorkablePostings(sub);
-    // regionFromPostings only recognises India: for an India search, require at least half the board's roles there
+    // at least half the board's roles in one country, and that country in regions_any (unknown is out, as in scoring)
     const region = regionFromPostings(postings);
-    if (cfg.location.toLowerCase() === "india" && region !== "India") return { reason: "not-region", domain };
+    if (!regionInScope(region, opts.pack.icp)) return { reason: "not-region", domain };
 
     const fit = passesHardFilters({ domain, teamSize: null, industries: [], status: null }, opts.pack.icp);
     if (!fit.pass) return { reason: `filtered: ${fit.reason}`, domain };

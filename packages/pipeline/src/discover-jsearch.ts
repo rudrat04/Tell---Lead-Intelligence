@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { searchJSearch, findBoardLinks, fetchBoardPostings, type JSearchJob, type JSearchQuery } from "@tell/watchers";
-import { passesHardFilters, regionFromPostings, looksLikeStaffing, classifyJob, compileRoles, type JobClass } from "@tell/intel";
+import { passesHardFilters, regionFromPostings, regionInScope, looksLikeStaffing, classifyJob, compileRoles, type JobClass } from "@tell/intel";
 import { registrableDomain, checkHomepage, domainLists, nameMatchesDomain, type DomainLists } from "@tell/people";
 import { getDb, accounts, jobBoards, jobs, companySeeds, usageDaily, and, eq, inArray, sql } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
@@ -122,10 +122,13 @@ export async function runJSearch(opts: {
   res.monthUsed = await monthUsed("jsearch", now);
   const n = allowedRequests(cfg.per_run, cfg.per_month, res.monthUsed, istDay(now));
   const found: JSearchJob[] = [];
-  for (const query of pickRotating(cfg.queries, n, now)) {
+  const places = cfg.locations.length ? cfg.locations : [{ location: cfg.location, country: cfg.country }];
+  // place-major, so one run's consecutive picks are different queries (a place listed twice is searched twice as often)
+  const pairs = places.flatMap((p) => cfg.queries.map((query) => ({ query, ...p })));
+  for (const { query, location, country } of pickRotating(pairs, n, now)) {
     await countRequest("jsearch", cfg.per_month, now);
     res.requests++;
-    try { found.push(...(await search({ query, location: cfg.location, country: cfg.country, datePosted: cfg.date_posted }))); }
+    try { found.push(...(await search({ query, location, country, datePosted: cfg.date_posted }))); }
     catch { res.errors++; }
   }
   res.monthUsed += res.requests;
@@ -178,7 +181,7 @@ export async function runJSearch(opts: {
   async function resolve(e: Employer): Promise<{ reason: string; domain?: string | null }> {
     if (looksLikeStaffing(e.name, e.hits.map((h) => h.description), e.hits.map((h) => h.title))) return { reason: "staffing" };
     const region = regionFromPostings(e.hits.map((h) => ({ location: h.location, countryCodes: h.countryCodes })));
-    if (cfg.location.toLowerCase() === "india" && region !== "India") return { reason: "not-region" };
+    if (!regionInScope(region, opts.pack.icp)) return { reason: "not-region" };
     const site = e.hits.map((h) => employerDomain(h, lists)).find(Boolean) ?? null;
     if (!site) return { reason: "no-website" };
     const home = await checkHomepage(site);

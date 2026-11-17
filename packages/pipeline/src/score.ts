@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Pack } from "@tell/config";
+import { leadCap, type Pack } from "@tell/config";
 import {
   buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, bestCaseDisplayScore, type DeliveryHistory, timing as timingScore,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
@@ -86,7 +86,10 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   // Evidence is incomplete when a board covering the account failed on its last check (plan 8d-2: outages are not evidence)
   const failing = new Set((await db.select({ a: jobBoards.accountId }).from(jobBoards)
-    .where(and(eq(jobBoards.status, "active"), sql`${jobBoards.failCount} > 0`))).map((r) => r.a));
+    // failing, or not checked for a week: their open roles may have closed since (boards out of regions_any aren't
+    // checked; widening it brings them back stale, and the YC cap gets through them in a few days)
+    .where(and(eq(jobBoards.status, "active"), sql`${jobBoards.source} <> 'jsearch'`,
+      sql`(${jobBoards.failCount} > 0 or ${jobBoards.lastCheckedAt} is null or ${jobBoards.lastCheckedAt} < now() - interval '7 days')`))).map((r) => r.a));
 
   // every account delivered before, with the latest label and outcome you gave it in the Sheet (any delivery):
   // a 👎 or a meeting holds it beyond the re-delivery window (redelivery())
@@ -160,7 +163,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     .sort((a, b) => b.score.intent - a.score.intent)
     .map((r) => r.account.id);
 
-  const ranking = rankAccounts(passed, opts.maxLeads ?? pack.delivery.digest.max_leads, 5, {
+  const ranking = rankAccounts(passed, opts.maxLeads ?? leadCap(pack), 5, {
     reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days,
   });
 
@@ -170,7 +173,9 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     strength: signals.strength, observedAt: signals.observedAt,
   }).from(personLeads).innerJoin(signals, eq(personLeads.signalId, signals.id))
     .where(and(sql`${personLeads.mappedAccountId} is null`, sql`${signals.observedAt} > ${new Date(now.getTime() - 30 * DAY)}`));
-  const personRanked = (regionsAny.length ? [] : pl).map((p) => ({ ...p, score: (p.strength / 5) * timingScore((now.getTime() - p.observedAt.getTime()) / DAY) }))
+  // shown whatever regions_any says: a person lead has no account region, and the web search that finds them is already
+  // scoped by country (sources.web_search.countries). Hiding them all under a region filter hid the strongest intent.
+  const personRanked = pl.map((p) => ({ ...p, score: (p.strength / 5) * timingScore((now.getTime() - p.observedAt.getTime()) / DAY) }))
     .sort((a, b) => b.score - a.score).slice(0, 5)
     .map(({ observedAt: _o, ...rest }) => rest);
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseJSearch } from "./jsearch.js";
+import { parseJSearch, jsearchProvider } from "./jsearch.js";
 
 const job = {
   job_id: "abc==", job_title: " Revenue Operations Manager ", employer_name: "Acme Analytics", employer_website: "https://www.acmeanalytics.in",
@@ -25,5 +25,13 @@ describe("JSearch parsing", () => {
     expect(j!.postedAt).toBeUndefined();
     expect(j!.website).toBeNull();
     expect(j!.countryCodes).toEqual([]);
+  });
+});
+
+describe("JSearch provider", () => {
+  it("prefers the OpenWeb Ninja key, falls back to RapidAPI, else none", () => {
+    expect(jsearchProvider({ JSEARCH_API_KEY: "ak_x", RAPIDAPI_KEY: "r" })?.kind).toBe("openwebninja");
+    expect(jsearchProvider({ RAPIDAPI_KEY: "r" })?.kind).toBe("rapidapi");
+    expect(jsearchProvider({})).toBeNull();
   });
 });

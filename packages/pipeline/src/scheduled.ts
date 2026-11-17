@@ -27,7 +27,7 @@ export function tickWatchers(pack: Pack, usage?: UsageStore, env: NodeJS.Process
   const ws = s.web_search;
   if (ws.enabled && ws.queries.length && usage && env.SERPER_API_KEY) {
     all.push(makeWebSearch({
-      queries: ws.queries, perDay: ws.per_day, perTick: ws.per_tick, timeRange: ws.time_range, country: ws.country, maxAgeDays: ws.max_age_days,
+      queries: ws.queries, perDay: ws.per_day, perTick: ws.per_tick, timeRange: ws.time_range, country: ws.country, countries: ws.countries, maxAgeDays: ws.max_age_days,
       budget: { used: () => usage.spentToday("serper"), add: (n) => usage.addSpend("serper", n, ws.per_day) },
     }));
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { verifyPost } from "./verifier.js";
+import { verifyPost, verifierPrompt } from "./verifier.js";
 import type { LlmClient, PostExtraction } from "./post.js";
 
 const reply = (o: unknown): LlmClient => ({ complete: async () => JSON.stringify(o) });
@@ -20,5 +20,14 @@ describe("Gate 4 verifier parsing", () => {
   it("names the field when the reply still doesn't fit", async () => {
     const r = await verifyPost(reply({ genuine_need: "maybe", disqualifier: "none", reason: "?" }), "post", positive, "a B2B team");
     expect(r).toEqual({ decision: "uncertain", reason: "verifier schema mismatch (genuine_need)" });
+  });
+});
+
+describe("Gate 4 verifier prompt", () => {
+  // false-positive class (Nov 2026): "looking for a freelancer to set up our lead gen" was called a recruiter post
+  it("treats hiring a freelancer/agency for your own company as the buyer, not a recruiter", () => {
+    const p = verifierPrompt("a B2B team");
+    expect(p).toMatch(/freelancer, contractor, consultant or agency[^.]*OWN company is a GENUINE need/);
+    expect(p).toMatch(/"recruiter" means hiring on behalf of another company/);
   });
 });

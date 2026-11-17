@@ -1,11 +1,26 @@
 /** Weekly: seed YC companies through the ICP filter and discover their job boards; then Keka/Freshteam tenants
- * from Common Crawl and Workable job search (India coverage). Counts only (public logs). Flags: --yc-only, --cc-only, --workable-only, --portfolios-only. */
+ * from Common Crawl and Workable job search. Counts only (public logs). Flags: --daily (rotating slice), --yc-only, --cc-only, --workable-only, --portfolios-only. */
 import "dotenv/config";
 import { loadPack } from "@tell/config";
 import { runDiscovery, runCcDiscovery, runWorkableDiscovery, runPortfolioDiscovery } from "@tell/pipeline";
 
 const pack = await loadPack();
 const args = process.argv.slice(2);
+
+// --daily: a small rotating slice every day, so new companies keep arriving between weekly runs (a fixed set of
+// accounts runs dry: each delivered one is held for redeliver_after_days). Workable searches rotate across query x
+// location; Common Crawl tenants already listed are checked oldest first (no index listing). YC stays weekly.
+if (args.includes("--daily")) {
+  try {
+    const w = await runWorkableDiscovery({ pack, maxSearches: Number(process.env.DAILY_WORKABLE_SEARCHES ?? 8), maxCompanies: Number(process.env.DAILY_WORKABLE_COMPANIES ?? 60) });
+    console.log(`daily workable: queries=${w.queries} companies=${w.companies} due=${w.due} resolved=${w.resolved} boards_new=${w.boardsNew} not_region=${w.notRegion} regions=${JSON.stringify(w.byRegion)}`);
+  } catch (e) { console.log(`daily workable: failed (${(e as Error).name})`); }
+  try {
+    const c = await runCcDiscovery({ pack, skipListing: true, maxTenants: Number(process.env.DAILY_CC_TENANTS ?? 40) });
+    console.log(`daily cc: due=${c.due} checked=${c.checked} resolved=${c.resolved} boards_new=${c.boardsNew}`);
+  } catch (e) { console.log(`daily cc: failed (${(e as Error).name})`); }
+  process.exit(0);
+}
 
 const only = args.find((a) => a.endsWith("-only"));
 if (!only || only === "--yc-only") {
@@ -27,7 +42,7 @@ if (!only || only === "--cc-only") {
 if (!only || only === "--workable-only") {
   try {
     const w = await runWorkableDiscovery({ pack });
-    console.log(`workable discovery: queries=${w.queries} hits=${w.hits} companies=${w.companies} due=${w.due} checked=${w.checked} no_website=${w.noWebsite} bad_site=${w.badSite} no_board=${w.noBoard} staffing=${w.staffing} not_region=${w.notRegion} filtered=${w.filtered} resolved=${w.resolved} india=${w.india} gtm_roles=${w.withGtmRoles} boards_new=${w.boardsNew}`);
+    console.log(`workable discovery: queries=${w.queries} hits=${w.hits} companies=${w.companies} due=${w.due} checked=${w.checked} no_website=${w.noWebsite} bad_site=${w.badSite} no_board=${w.noBoard} staffing=${w.staffing} not_region=${w.notRegion} filtered=${w.filtered} resolved=${w.resolved} india=${w.india} regions=${JSON.stringify(w.byRegion)} gtm_roles=${w.withGtmRoles} boards_new=${w.boardsNew}`);
   } catch (e) {
     console.log(`workable discovery: failed (${(e as Error).name})`);
   }

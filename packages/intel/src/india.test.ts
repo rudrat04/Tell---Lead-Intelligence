@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { regionFromPostings, looksLikeStaffing } from "./india.js";
+import { regionFromPostings, countryOf, looksLikeStaffing } from "./india.js";
 
 describe("region from job locations", () => {
   it("India when at least half the located roles are in India", () => {
@@ -9,6 +9,21 @@ describe("region from job locations", () => {
   it("unknown (not guessed) otherwise", () => {
     expect(regionFromPostings([{ location: "Cairo, Egypt" }, { location: "Riyadh" }, { location: "Pune" }])).toBeNull();
     expect(regionFromPostings([{}, { location: " " }])).toBeNull();
+  });
+  it("other in-scope countries, with the names accounts already use", () => {
+    expect(regionFromPostings([{ countryCodes: ["US"] }, { location: "Austin, TX" }])).toBe("United States of America");
+    expect(regionFromPostings([{ location: "London, UK" }, { location: "Remote" }])).toBe("United Kingdom");
+    expect(regionFromPostings([{ location: "Dubai" }, { location: "Abu Dhabi, UAE" }, { location: "Pune" }])).toBe("United Arab Emirates");
+    expect(regionFromPostings([{ countryCodes: ["SG"] }])).toBe("Singapore");
+    expect(regionFromPostings([{ location: "Toronto, ON" }])).toBe("Canada");
+  });
+  it("India wins a tie, so India detection is unchanged", () => {
+    expect(regionFromPostings([{ location: "Bengaluru" }, { location: "Mumbai" }, { countryCodes: ["US"] }, { location: "New York" }])).toBe("India");
+  });
+  it("ambiguous words name no country", () => {
+    expect(countryOf({ location: "Come join us" })).toBeNull();
+    expect(countryOf({ location: "Cambridge" })).toBeNull();
+    expect(countryOf({ location: "San Jose, CA" })).toBe("United States of America");
   });
 });
 

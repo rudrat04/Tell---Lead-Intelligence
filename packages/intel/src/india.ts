@@ -1,5 +1,5 @@
 /**
- * Region and agency checks for job boards found outside YC (Keka, Freshteam tenants).
+ * Region and agency checks for job boards found outside YC (Keka, Freshteam, Workable, JSearch, portfolios).
  * The ATS says nothing about the company's region (Keka and Freshteam have Gulf, African and US customers),
  * so the region comes from where the roles are.
  */
@@ -8,14 +8,52 @@ export const INDIA_LOCATION = /\b(india|bengaluru|bangalore|mumbai|navi mumbai|t
 
 export interface LocatedPosting { location?: string; countryCodes?: string[] }
 
-const inIndia = (p: LocatedPosting) => (p.countryCodes ?? []).some((c) => c.toUpperCase() === "IN") || INDIA_LOCATION.test(p.location ?? "");
+/**
+ * Countries a role's location can name, with the region names accounts already use (YC's spelling). India first: on a
+ * tie it wins, so India detection is exactly what it was. Only unambiguous words: no "US"/"CA" text (they match "join us",
+ * "CA" for California), no cities that exist in two countries (Cambridge, Waterloo is only Ontario's).
+ */
+const COUNTRIES: { name: string; codes: string[]; re: RegExp }[] = [
+  { name: "India", codes: ["IN"], re: INDIA_LOCATION },
+  { name: "United States of America", codes: ["US", "USA"], re: /\b(united states|u\.s\.a\.?|usa|new york|nyc|san francisco|bay area|los angeles|seattle|boston|austin|chicago|denver|atlanta|miami|dallas|houston|palo alto|mountain view|menlo park|san jose|san diego|washington,? d\.?c\.?)\b/i },
+  { name: "United Kingdom", codes: ["GB", "UK"], re: /\b(united kingdom|uk|england|scotland|wales|london|manchester|edinburgh|glasgow|bristol|birmingham, uk|leeds)\b/i },
+  { name: "Canada", codes: ["CA"], re: /\b(canada|toronto|vancouver|montreal|montréal|ottawa|calgary|edmonton|waterloo, on)\b/i },
+  { name: "United Arab Emirates", codes: ["AE"], re: /\b(united arab emirates|uae|dubai|abu dhabi|sharjah)\b/i },
+  { name: "Saudi Arabia", codes: ["SA"], re: /\b(saudi arabia|ksa|riyadh|jeddah|dammam|khobar)\b/i },
+  { name: "Qatar", codes: ["QA"], re: /\b(qatar|doha)\b/i },
+  { name: "Bahrain", codes: ["BH"], re: /\b(bahrain|manama)\b/i },
+  { name: "Oman", codes: ["OM"], re: /\b(oman|muscat)\b/i },
+  { name: "Kuwait", codes: ["KW"], re: /\bkuwait\b/i },
+  { name: "Singapore", codes: ["SG"], re: /\bsingapore\b/i },
+  { name: "Malaysia", codes: ["MY"], re: /\b(malaysia|kuala lumpur|penang)\b/i },
+  { name: "Indonesia", codes: ["ID"], re: /\b(indonesia|jakarta)\b/i },
+  { name: "Vietnam", codes: ["VN"], re: /\b(vietnam|viet nam|ho chi minh|hanoi)\b/i },
+  { name: "Thailand", codes: ["TH"], re: /\b(thailand|bangkok)\b/i },
+  { name: "Philippines", codes: ["PH"], re: /\b(philippines|manila|makati|cebu|taguig)\b/i },
+];
+
+/** The country a posting is in: its country codes first, then its location text; null = none we know. */
+export function countryOf(p: LocatedPosting): string | null {
+  const codes = (p.countryCodes ?? []).map((c) => c.toUpperCase());
+  for (const c of COUNTRIES) if (c.codes.some((x) => codes.includes(x))) return c.name;
+  for (const c of COUNTRIES) if (c.re.test(p.location ?? "")) return c.name;
+  return null;
+}
+
 const located = (p: LocatedPosting) => (p.countryCodes?.length ?? 0) > 0 || !!p.location?.trim();
 
-/** "India" when at least half the roles with a location are in India; otherwise null (unknown, not guessed). */
+/**
+ * The country at least half the roles with a location are in (India wins a tie); otherwise null (unknown, not guessed).
+ * Region names match the ones accounts already carry, so `icp.hard_filters.regions_any` applies to every source.
+ */
 export function regionFromPostings(postings: LocatedPosting[]): string | null {
   const withLoc = postings.filter(located);
   if (!withLoc.length) return null;
-  return withLoc.filter(inIndia).length / withLoc.length >= 0.5 ? "India" : null;
+  const counts = new Map<string, number>();
+  for (const p of withLoc) { const c = countryOf(p); if (c) counts.set(c, (counts.get(c) ?? 0) + 1); }
+  // COUNTRIES order breaks ties, so India is chosen first
+  for (const c of COUNTRIES) if ((counts.get(c.name) ?? 0) / withLoc.length >= 0.5) return c.name;
+  return null;
 }
 
 // hiring *for* a client, not serving clients: "we are hiring a sales head for our client" / "on behalf of our client", never

@@ -208,33 +208,40 @@ export const SourcesSchema = z.object({
     time_range: z.enum(["d", "w", "m"]).default("w"),
     /** Google country code for results */
     country: z.string().default("in"),
+    /** several Google country codes, rotated per search (e.g. in, us, gb, ae, sg); empty = just `country` */
+    countries: z.array(z.string()).default([]),
     /** results older than this (when the search shows a date) are dropped */
     max_age_days: z.number().int().min(1).default(14),
-  }).default({ enabled: false, queries: [], per_day: 8, per_tick: 1, time_range: "w", country: "in", max_age_days: 14 }),
-  /** Workable job search (weekly discovery): companies hiring these roles in `location` become accounts + boards */
+  }).default({ enabled: false, queries: [], per_day: 8, per_tick: 1, time_range: "w", country: "in", countries: [], max_age_days: 14 }),
+  /** Workable job search: companies hiring these roles in `location` (or each of `locations`) become accounts + boards.
+   *  Weekly runs every query x location; the daily discovery slice runs a rotating few (new companies every day). */
   workable: z.object({
     enabled: z.boolean().default(false),
     location: z.string().default("India"),
+    /** several search locations (e.g. India, United Kingdom, Dubai); empty = just `location` */
+    locations: z.array(z.string()).default([]),
     queries: z.array(z.string()).default([]),
     day_range: z.number().int().min(1).max(90).default(30),
     max_pages: z.number().int().min(1).max(10).default(5),
     /** companies checked per run (each costs a few requests) */
     max_companies: z.number().int().min(1).default(150),
-  }).default({ enabled: false, location: "India", queries: [], day_range: 30, max_pages: 5, max_companies: 150 }),
-  /** JSearch (RapidAPI, RAPIDAPI_KEY; Google for Jobs: LinkedIn, Naukri, Indeed listings), daily: companies hiring the
+  }).default({ enabled: false, location: "India", locations: [], queries: [], day_range: 30, max_pages: 5, max_companies: 150 }),
+  /** JSearch (JSEARCH_API_KEY = OpenWeb Ninja, else RAPIDAPI_KEY; Google for Jobs: LinkedIn, Naukri, Indeed listings), daily: companies hiring the
    *  pack's roles become accounts, their roles tracked as state. Free Basic plan = 200 requests/month. */
   jsearch: z.object({
     enabled: z.boolean().default(false),
     queries: z.array(z.string()).default([]),
     location: z.string().default("India"),
     country: z.string().default("in"),
+    /** several search places, rotated with the queries (each query x place in turn); empty = `location` + `country` */
+    locations: z.array(z.object({ location: z.string(), country: z.string() })).default([]),
     date_posted: z.enum(["today", "3days", "week", "month"]).default("week"),
     /** requests per daily run, and per calendar month (persisted, counted before each request; paced over the month) */
     per_run: z.number().int().min(1).max(50).default(6),
     per_month: z.number().int().min(1).default(180),
     /** roles found only through JSearch close when no search has seen them for this long */
     close_after_days: z.number().int().min(7).default(21),
-  }).default({ enabled: false, queries: [], location: "India", country: "in", date_posted: "week", per_run: 6, per_month: 180, close_after_days: 21 }),
+  }).default({ enabled: false, queries: [], location: "India", country: "in", locations: [], date_posted: "week", per_run: 6, per_month: 180, close_after_days: 21 }),
   /** VC / accelerator portfolio pages (weekly): each company page's "Website" link becomes an account; job boards
    *  are found on that site. Region comes from job locations, never from the investor. */
   portfolios: z.array(z.object({
@@ -303,7 +310,8 @@ export const DeliverySchema = z.object({
     /** the Gmail / Google Workspace address that sends (the authorised OAuth account) */
     from: z.string().email().optional(),
     from_name: z.string().default("Lead digest"),
-    max_leads: z.number().int().min(1).max(25).default(10),
+    /** leads per digest; 0 = no cap: every lead over min_score that day (then min_score must be set) */
+    max_leads: z.number().int().min(0).max(25).default(10),
     /** candidates scored, searched for contacts and checked for email = max_leads x this; leads with no named contact drop out
      *  and the next candidate takes the slot, so a larger pool fills the digest at the cost of more people searches */
     pool_multiplier: z.number().int().min(1).max(5).default(3),
@@ -413,10 +421,41 @@ export const PackSchema = z.object({
       if (!p.signals.signals[r]) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "requires_any"], message: `unknown signal type "${r}"` });
     }
   }
+  // cross-file names: a typo here never errors at run time, it just silently scores wrong (neutral fit, no persona)
+  const personaTitles = new Set(p.icp.personas.map((x) => x.title));
+  const bands = new Set(p.icp.size_bands.map((b) => b.band));
+  for (const [name, play] of Object.entries(p.plays.plays)) {
+    for (const t of play.personas) {
+      if (!personaTitles.has(t)) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "personas"], message: `unknown persona "${t}" (icp.personas titles: ${[...personaTitles].join(", ")})` });
+    }
+    for (const t of Object.keys(play.min_count)) {
+      if (!play.requires.includes(t)) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "min_count"], message: `min_count "${t}" is not in requires` });
+    }
+  }
+  p.icp.personas.forEach((x, i) => x.size_bands.forEach((b) => {
+    if (!bands.has(b)) ctx.addIssue({ code: "custom", path: ["icp", "personas", i, "size_bands"], message: `unknown size band "${b}"` });
+  }));
+  for (const b of Object.keys(p.icp.soft_fit.size_band)) {
+    if (!bands.has(b)) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "size_band", b], message: `unknown size band "${b}"` });
+  }
+  const segments = new Set([...Object.values(p.icp.segment_map), ...Object.keys(p.icp.segment_descriptions)]);
+  for (const sname of Object.keys(p.icp.soft_fit.segment)) {
+    if (!segments.has(sname)) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "segment", sname], message: `segment "${sname}" is never assigned (not in segment_map or segment_descriptions)` });
+  }
+  // a region you target but forgot to weigh gets region_default; only an issue when region carries weight
+  if ((p.icp.soft_fit.weights.region ?? 0) > 0) for (const r of p.icp.hard_filters.regions_any) {
+    if (p.icp.soft_fit.region[r] == null) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "region"], message: `regions_any has "${r}" but soft_fit.region doesn't weigh it` });
+  }
   const w = Object.values(p.icp.soft_fit.weights).reduce((a, b) => a + b, 0);
   if (Math.abs(w - 1) > 0.01) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "weights"], message: `weights must sum to 1 (got ${w.toFixed(2)})` });
+  if (p.delivery.digest.max_leads === 0 && p.delivery.digest.min_score < 1) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "min_score"], message: "max_leads 0 (no cap) needs a min_score, or every eligible account becomes a lead" });
   if (p.icp.hard_filters.team_size.min > p.icp.hard_filters.team_size.max) ctx.addIssue({ code: "custom", path: ["icp", "hard_filters", "team_size"], message: "min > max" });
 });
 
 export type Pack = z.infer<typeof PackSchema>;
+
+/** Leads per digest: `delivery.digest.max_leads`, where 0 means no cap (every lead over min_score). */
+export function leadCap(pack: Pick<Pack, "delivery">): number {
+  return pack.delivery.digest.max_leads === 0 ? Infinity : pack.delivery.digest.max_leads;
+}
 export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;
