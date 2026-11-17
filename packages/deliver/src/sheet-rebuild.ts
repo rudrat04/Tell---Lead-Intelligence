@@ -1,4 +1,4 @@
-import type { Pack } from "@tell/config";
+import { minScoreFor, type Pack } from "@tell/config";
 import { runScoring } from "@tell/pipeline";
 import { displayScore, icpRecheck, sendWindow, sendWindowText } from "@tell/intel";
 import { getDb, deliveries, inArray, eq } from "@tell/db";
@@ -71,7 +71,7 @@ export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; no
     let drop: keyof SheetRebuildResult["removed"] | null = null;
     if (!x) drop = "outOfScope";
     else if ((failed[x.account.id] ?? []).some((c) => c === "icp" || c === "enterprise" || c === "vendor") || icpRecheck(x.account, pack)) drop = "notIcp";
-    else if (displayScore(x.score) < pack.delivery.digest.min_score) drop = "belowScore";
+    else if (displayScore(x.score) < minScoreFor(pack, x.account.region)) drop = "belowScore";
     if (drop && !hasOutcome) { res.removed[drop]++; continue; }
     if (drop) res.keptForOutcome++;
     if (x) {

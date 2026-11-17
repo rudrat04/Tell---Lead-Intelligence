@@ -1,5 +1,5 @@
-import type { Pack } from "@tell/config";
-import { rankAccounts, enterpriseTitle, displayScore, type Ranking, type RankInput } from "@tell/intel";
+import { minScoreFor, type Pack } from "@tell/config";
+import { rankAccounts, rankByRegionGroups, enterpriseTitle, displayScore, type Ranking, type RankInput } from "@tell/intel";
 import type { Contact } from "@tell/people";
 import type { ScoredAccount } from "./score.js";
 
@@ -41,8 +41,11 @@ export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string
     const f = reachFactor(contacts.get(r.account.id), owners.get(r.account.id) ?? [], pack.icp.reach);
     factors.set(r.account.id, f);
     return { ...r, score: { ...r.score, priority: r.score.priority * f } };
-  }).filter((r) => displayScore(r.score) >= pack.delivery.digest.min_score); // a hard-to-reach lead can fall under the threshold
-  const ranking = rankAccounts(rows, max, 5, { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days });
+  }).filter((r) => displayScore(r.score) >= minScoreFor(pack, r.account.region)); // a hard-to-reach lead can fall under the threshold
+  const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days };
+  const groups = pack.delivery.digest.region_groups;
+  // with region groups, each group keeps its own top N after re-ranking (so one region never takes another's slots)
+  const ranking = groups.length ? rankByRegionGroups(rows, groups, (a) => a.region, 1, 5, rankOpts) : rankAccounts(rows, max, 5, rankOpts);
   const noContact = [...pool.leads, ...pool.watchlist].filter((r) => !contacts.get(r.account.id)).length;
   return { ranking: { ...ranking, held: pool.held }, factors, noContact, enterprise };
 }

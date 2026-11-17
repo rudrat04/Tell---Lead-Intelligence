@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { leadCap, type Pack } from "@tell/config";
+import { leadCap, minScoreFor, type Pack } from "@tell/config";
 import {
-  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, bestCaseDisplayScore, type DeliveryHistory, timing as timingScore,
+  buildEvidence, scoreAccount, rankAccounts, rankByRegionGroups, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, bestCaseDisplayScore, type DeliveryHistory, timing as timingScore,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
 import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -46,7 +46,9 @@ export function configVersion(pack: Pack): string {
 }
 
 /** Daily scoring run (plan 8d). Writes scores + plays and returns the ranking for the digest. */
-export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: number; write?: boolean; minScore?: number }): Promise<ScoreRunResult> {
+/** poolScale: with region groups, each group's size is multiplied by this (the digest's pool_multiplier); maxLeads is
+ *  the size of a single list when there are no groups. */
+export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: number; poolScale?: number; write?: boolean; minScore?: number }): Promise<ScoreRunResult> {
   const { pack } = opts;
   const now = opts.now ?? new Date();
   const db = getDb();
@@ -149,23 +151,26 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     verdicts.set(r.account.id, v);
     if (!v.pass) for (const f of v.failed) criticDropped[f.check] = (criticDropped[f.check] ?? 0) + 1;
   }
-  const minScore = opts.minScore ?? pack.delivery.digest.min_score;
+  // the floor can differ per region group (delivery.digest.region_groups[].min_score); opts.minScore overrides all
+  const floorOf = (r: { account: ScoredAccount }) => opts.minScore ?? minScoreFor(pack, r.account.region);
   const criticPassed = results.filter((r) => verdicts.get(r.account.id)?.pass !== false);
   // score threshold: below it never reaches the email or Sheet (the next lead above it takes the slot)
-  const passed = criticPassed.filter((r) => !r.score.eligible || displayScore(r.score) >= minScore);
+  const passed = criticPassed.filter((r) => !r.score.eligible || displayScore(r.score) >= floorOf(r));
   const belowMinScore = criticPassed.length - passed.length;
   // below the floor only because size or segment is unknown: worth a company-facts lookup (the digest fills them and
   // re-scores). Without this, facts were looked up only for accounts already over the floor, so unknown facts kept
   // an account under it forever. Closest to the floor first, so the per-run lookup budget goes where it can matter.
   const factsCandidates = criticPassed
-    .filter((r) => r.score.eligible && !(r.recentlyDelivered && !r.newSinceDelivery) && displayScore(r.score) < minScore && (!r.account.sizeBand || !r.account.segment)
-      && bestCaseDisplayScore(r.score) >= minScore)
+    .filter((r) => r.score.eligible && !(r.recentlyDelivered && !r.newSinceDelivery) && displayScore(r.score) < floorOf(r) && (!r.account.sizeBand || !r.account.segment)
+      && bestCaseDisplayScore(r.score) >= floorOf(r))
     .sort((a, b) => b.score.intent - a.score.intent)
     .map((r) => r.account.id);
 
-  const ranking = rankAccounts(passed, opts.maxLeads ?? leadCap(pack), 5, {
-    reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days,
-  });
+  const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days };
+  const groups = pack.delivery.digest.region_groups;
+  const ranking = groups.length
+    ? rankByRegionGroups(passed, groups, (a) => a.region, opts.poolScale ?? 1, 5, rankOpts)
+    : rankAccounts(passed, opts.maxLeads ?? leadCap(pack), 5, rankOpts);
 
   // Person leads: no account, ranked on the post alone (plan 8a): strength x timing
   const pl = await db.select({

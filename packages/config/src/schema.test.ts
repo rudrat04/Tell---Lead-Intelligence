@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "./fixture.js";
-import { PackSchema } from "./schema.js";
+import { PackSchema, minScoreFor } from "./schema.js";
 
 // cross-file names that used to fail silently (neutral fit, no persona) now fail pack:check
 describe("pack cross-file checks", () => {
@@ -37,5 +37,21 @@ describe("pack cross-file checks", () => {
     expect(issues(p).join()).toMatch(/max_leads 0 \(no cap\) needs a min_score/);
     p.delivery.digest.min_score = 60;
     expect(issues(p)).toEqual([]);
+  });
+  it("region groups: one catch-all, no region twice", async () => {
+    const p = await base();
+    p.delivery.digest.region_groups = [{ name: "A", regions: [], max_leads: 5 }, { name: "B", regions: [], max_leads: 5 }];
+    expect(issues(p).join()).toMatch(/only one group can be the catch-all/);
+    p.delivery.digest.region_groups = [{ name: "A", regions: ["X"], max_leads: 5 }, { name: "B", regions: ["X"], max_leads: 5 }];
+    expect(issues(p).join()).toMatch(/a region is in two groups/);
+  });
+  it("a region group's own floor wins, the catch-all and no groups use min_score", async () => {
+    const p = await base();
+    p.delivery.digest.min_score = 60;
+    expect(minScoreFor(p as never, "India")).toBe(60);
+    p.delivery.digest.region_groups = [{ name: "India", regions: ["India"], max_leads: 10, min_score: 40 }, { name: "Rest", regions: [], max_leads: 10 }];
+    expect(minScoreFor(p as never, "India")).toBe(40);
+    expect(minScoreFor(p as never, "Canada")).toBe(60);
+    expect(minScoreFor(p as never, null)).toBe(60);
   });
 });

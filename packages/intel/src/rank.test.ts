@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import { compileRoles } from "./jobs.js";
-import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, displayScore, bestCaseDisplayScore, redelivery, STATE_MAX_AGE_DAYS, type JobRow, type SignalRow, type AccountFacts, type DeliveryHistory } from "./rank.js";
+import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, rankByRegionGroups, displayScore, bestCaseDisplayScore, redelivery, STATE_MAX_AGE_DAYS, type JobRow, type SignalRow, type AccountFacts, type DeliveryHistory } from "./rank.js";
 
 const pack = await loadFixturePack();
 const roles = compileRoles(pack.roles);
@@ -333,5 +333,24 @@ describe("re-delivery: leads you've seen come back only with something new", () 
     for (const outcome of ["meeting", "won"]) {
       expect(run([job("RevOps Manager", 100)], [], hist({ outcome }), () => undefined)).toEqual({ recentlyDelivered: true, newSinceDelivery: false });
     }
+  });
+});
+
+describe("region groups", () => {
+  const row = (id: string, region: string | null, priority: number) => ({
+    account: { id, region }, incomplete: false, recentlyDelivered: false, newSinceDelivery: false,
+    score: { intent: priority, fit: 1, timing: 1, priority, baseRate: 0.02, lane: "combined" as const, eligible: true, evidence: [], plays: [], drivers: [] },
+  });
+  const groups = [{ name: "India", regions: ["India"], max_leads: 2 }, { name: "Other regions", regions: [], max_leads: 2 }];
+  it("each group gets its own top N, India first, even when other regions score higher", () => {
+    const rows = [row("us1", "United States of America", 0.9), row("us2", "United States of America", 0.8), row("us3", "United Kingdom", 0.7),
+      row("in1", "India", 0.3), row("in2", "India", 0.2), row("in3", "India", 0.1), row("x", null, 0.05)];
+    const r = rankByRegionGroups(rows, groups, (a) => a.region);
+    expect(r.leads.map((l) => `${l.group}:${l.account.id}`)).toEqual(["India:in1", "India:in2", "Other regions:us1", "Other regions:us2"]);
+    expect(r.watchlist.map((w) => w.account.id)).toEqual(["us3", "in3", "x"]);
+  });
+  it("a group with fewer leads isn't padded from another", () => {
+    const r = rankByRegionGroups([row("us1", "United States of America", 0.9), row("us2", "Canada", 0.8), row("us3", "Canada", 0.7)], groups, (a) => a.region);
+    expect(r.leads.map((l) => l.account.id)).toEqual(["us1", "us2"]);
   });
 });

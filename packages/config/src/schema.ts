@@ -315,13 +315,23 @@ export const DeliverySchema = z.object({
     /** candidates scored, searched for contacts and checked for email = max_leads x this; leads with no named contact drop out
      *  and the next candidate takes the slot, so a larger pool fills the digest at the cost of more people searches */
     pool_multiplier: z.number().int().min(1).max(5).default(3),
+    /** separate top-N lists by region, each ranked on score alone and shown under its own heading, e.g.
+     *  [{ name: India, regions: [India], max_leads: 10 }, { name: Other regions, regions: [], max_leads: 10 }].
+     *  `regions: []` = every region no other group names. Set = max_leads is ignored (the digest is their sum). */
+    region_groups: z.array(z.object({
+      name: z.string().min(1),
+      regions: z.array(z.string()).default([]),
+      max_leads: z.number().int().min(1).max(25),
+      /** this list's score floor (0-100); unset = delivery.digest.min_score */
+      min_score: z.number().int().min(0).max(100).optional(),
+    })).default([]),
     /** slots kept for companies that qualify through non-hiring signals (funding, launches, tools, site changes, posts) */
     reserved_non_hiring: z.number().int().min(0).default(0),
     /** leads below this display score (0-100; 50 = twice as likely as an average account) never reach the email or the
      *  Sheet, fast lane included; the next lead above it takes the slot. 0 = off (rank only). */
     min_score: z.number().int().min(0).max(100).default(0),
     send_hour_local: z.number().int().min(0).max(23).default(9),
-  }).default({ from_name: "Lead digest", max_leads: 10, send_hour_local: 9, reserved_non_hiring: 0, pool_multiplier: 3, min_score: 0 }),
+  }).default({ from_name: "Lead digest", max_leads: 10, region_groups: [], send_hour_local: 9, reserved_non_hiring: 0, pool_multiplier: 3, min_score: 0 }),
   redeliver_after_days: z.number().int().min(1).default(90),
   /** Google Sheet for leads + your labels (created by `pnpm sheet:setup`; private: it holds lead names) */
   sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),
@@ -448,14 +458,33 @@ export const PackSchema = z.object({
   }
   const w = Object.values(p.icp.soft_fit.weights).reduce((a, b) => a + b, 0);
   if (Math.abs(w - 1) > 0.01) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "weights"], message: `weights must sum to 1 (got ${w.toFixed(2)})` });
-  if (p.delivery.digest.max_leads === 0 && p.delivery.digest.min_score < 1) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "min_score"], message: "max_leads 0 (no cap) needs a min_score, or every eligible account becomes a lead" });
+  const groups = p.delivery.digest.region_groups;
+  if (groups.filter((g) => !g.regions.length).length > 1) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: "only one group can be the catch-all (regions: [])" });
+  const named = groups.flatMap((g) => g.regions);
+  if (new Set(named).size !== named.length) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: "a region is in two groups" });
+  const anyRegions = p.icp.hard_filters.regions_any;
+  for (const r of named) if (anyRegions.length && !anyRegions.includes(r)) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: `region "${r}" is not in icp.hard_filters.regions_any (it would never have leads)` });
+  if (p.delivery.digest.max_leads === 0 && !groups.length && p.delivery.digest.min_score < 1) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "min_score"], message: "max_leads 0 (no cap) needs a min_score, or every eligible account becomes a lead" });
   if (p.icp.hard_filters.team_size.min > p.icp.hard_filters.team_size.max) ctx.addIssue({ code: "custom", path: ["icp", "hard_filters", "team_size"], message: "min > max" });
 });
 
 export type Pack = z.infer<typeof PackSchema>;
 
-/** Leads per digest: `delivery.digest.max_leads`, where 0 means no cap (every lead over min_score). */
+/** The region group an account falls in: the one naming its region, else the catch-all (regions: []); null = none. */
+export function regionGroupFor(pack: Pick<Pack, "delivery">, region: string | null | undefined) {
+  const g = pack.delivery.digest.region_groups;
+  return g.find((x) => region != null && x.regions.includes(region)) ?? g.find((x) => !x.regions.length) ?? null;
+}
+
+/** The score floor for an account in this region: its region group's min_score, else delivery.digest.min_score. */
+export function minScoreFor(pack: Pick<Pack, "delivery">, region: string | null | undefined): number {
+  return regionGroupFor(pack, region)?.min_score ?? pack.delivery.digest.min_score;
+}
+
+/** Leads per digest: the sum of region_groups when set, else `delivery.digest.max_leads` (0 = no cap). */
 export function leadCap(pack: Pick<Pack, "delivery">): number {
+  const g = pack.delivery.digest.region_groups;
+  if (g.length) return g.reduce((n, x) => n + x.max_leads, 0);
   return pack.delivery.digest.max_leads === 0 ? Infinity : pack.delivery.digest.max_leads;
 }
 export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;

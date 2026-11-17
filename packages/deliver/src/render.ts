@@ -271,6 +271,12 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   ].filter(Boolean);
   const healthLines = [...alerts, summary, `Config ${r.configVersion}`];
 
+  // region groups (delivery.digest.region_groups): a heading where each group's leads start
+  const startsGroup = (i: number) => !!leads[i]?.group && leads[i]!.group !== leads[i - 1]?.group;
+  const groupCount = (g?: string) => leads.filter((l) => l.group === g).length;
+  const groupHeading = (l: (typeof leads)[number], i: number) => startsGroup(i)
+    ? `<tr><td style="padding:20px 0 4px;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${C.muted}">${esc(l.group!)} (${groupCount(l.group)})</td></tr>`
+    : "";
   const section = (title: string, body: string) => `<div style="margin-top:28px"><div style="font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${C.muted};margin-bottom:6px">${title}</div>${body}</div>`;
   const watchHtml = watch.length ? section("Watchlist", watch.map((w) =>
     `<div style="font-size:13px;margin:4px 0">${A(`https://${w.account.domain}`, esc(w.account.name ?? w.account.domain), `color:${C.ink};font-weight:600`)} <span style="color:${C.muted}">${esc(w.score.drivers[0] ? describe(w.score.drivers[0]) : "")}</span></div>`).join("")) : "";
@@ -292,7 +298,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 </td></tr>
 <tr><td style="padding:8px 24px 0">
   ${championsHtml}
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${leads.map((l, i) => leadHtml(l, i, contacts, pack.icp.personas, notes, labels?.get(l.account.id), windowFor(l, date, pack))).join("")}</table>
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${leads.map((l, i) => groupHeading(l, i) + leadHtml(l, i, contacts, pack.icp.personas, notes, labels?.get(l.account.id), windowFor(l, date, pack))).join("")}</table>
   ${gigs.length ? section(`Freelance gigs (${gigs.length})`, gigs.map(gigHtml).join("")) : ""}
   ${watchHtml}${peopleHtml}
 </td></tr>
@@ -308,7 +314,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     leads.length ? `${leads.length} ${leads.length === 1 ? "PERSON" : "PEOPLE"} TO CONTACT` : "NO NEW LEADS TODAY",
     "",
     champions.length ? `PAST CLIENTS WHO MOVED\n${champions.map((m) => `- ${m.name}: was at ${m.was}, now ${m.title} at ${m.company} (since ${month(m.since)})${m.url ? ` ${m.url}` : ""}`).join("\n")}\n` : "",
-    ...leads.map((l, i) => leadText(l, i, contacts, pack.icp.personas, notes, windowFor(l, date, pack)) + "\n"),
+    ...leads.map((l, i) => (startsGroup(i) ? `${(l.group ?? "").toUpperCase()} (${groupCount(l.group)})\n` : "") + leadText(l, i, contacts, pack.icp.personas, notes, windowFor(l, date, pack)) + "\n"),
     gigs.length ? `FREELANCE GIGS\n${gigs.map((g) => `- ${g.title}${g.company ? ` (${g.company})` : ""}: ${g.applyUrl ?? g.url} (via ${SOURCE_NAME[g.source] ?? g.source}: ${g.url})`).join("\n")}\n` : "",
     watch.length ? `WATCHLIST\n${watch.map((w) => `- ${w.account.name ?? w.account.domain} (${w.account.domain})`).join("\n")}\n` : "",
     people.length ? `PEOPLE ASKING, NO COMPANY YET\n${people.map((p) => `- ${p.platform}/${p.handle}: "${p.quote}" ${p.url}`).join("\n")}\n` : "",

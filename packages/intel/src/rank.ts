@@ -324,6 +324,8 @@ export interface RankInput<A> {
   newSinceDelivery: boolean;
   /** shown on a lead that is back: why */
   backReason?: string;
+  /** the region group this lead was ranked in (delivery.digest.region_groups), for the digest heading */
+  group?: string;
 }
 
 /** The account's last delivery and what you said about it in the Sheet. */
@@ -397,5 +399,31 @@ export function rankAccounts<A>(rows: RankInput<A>[], max: number, watchlistSize
   const rest = sorted.filter((r) => !guaranteed.includes(r));
   const leads = [...guaranteed, ...rest.slice(0, Math.max(0, max - guaranteed.length))].sort(byPriority);
   const watchlist = sorted.filter((r) => !leads.includes(r)).slice(0, watchlistSize);
+  return { leads, watchlist, held };
+}
+
+export interface RegionGroup { name: string; regions: string[]; max_leads: number }
+
+/**
+ * One ranking per region group, each the usual top-N by score (fast lane kept), concatenated in group order and tagged
+ * with the group name. `regions: []` takes every region no other group names (unknown region included). `scale`
+ * multiplies each group's size (the digest scores a pool of pool_multiplier x the leads). Watchlist: the best
+ * not-chosen accounts across all groups.
+ */
+export function rankByRegionGroups<A>(rows: RankInput<A>[], groups: RegionGroup[], regionOf: (a: A) => string | null, scale = 1, watchlistSize = 5,
+  opts: { reserveNonHiring?: number; freshDays?: number } = {}): Ranking<A> {
+  const named = new Set(groups.flatMap((g) => g.regions));
+  const held = { incomplete: 0, recentlyDelivered: 0 };
+  const leads: RankInput<A>[] = [];
+  const rest: RankInput<A>[] = [];
+  for (const g of groups) {
+    const inGroup = rows.filter((r) => { const reg = regionOf(r.account); return g.regions.length ? reg != null && g.regions.includes(reg) : reg == null || !named.has(reg); });
+    const r = rankAccounts(inGroup, g.max_leads * scale, inGroup.length, opts);
+    held.incomplete += r.held.incomplete;
+    held.recentlyDelivered += r.held.recentlyDelivered;
+    leads.push(...r.leads.map((l) => ({ ...l, group: g.name })));
+    rest.push(...r.watchlist);
+  }
+  const watchlist = rest.sort((a, b) => b.score.priority - a.score.priority).slice(0, watchlistSize);
   return { leads, watchlist, held };
 }
