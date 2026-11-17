@@ -82,7 +82,9 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   // so an enterprise or an off-ICP segment leaves the pool before contacts are looked up
   let factsNote = "company facts: none needed";
   try {
-    const f = await fillCompanyFacts([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, { write: !opts.dryRun });
+    // pool accounts first, then accounts under min_score only because size/segment is unknown (they may pass once known)
+    const ids = [...new Set([...[...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), ...score.factsCandidates])];
+    const f = await fillCompanyFacts(ids, pack, { write: !opts.dryRun });
     factsNote = f.skipped ? `company facts: ${f.skipped}` : `company facts: ${f.looked} looked up, ${f.sized} sized, ${f.segmented} segmented`;
     if (f.changed.length) score = await scoreRun(false);
   } catch { factsNote = "company facts failed"; }

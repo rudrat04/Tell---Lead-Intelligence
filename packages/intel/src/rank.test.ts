@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import { compileRoles } from "./jobs.js";
-import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, displayScore, redelivery, STATE_MAX_AGE_DAYS, type JobRow, type SignalRow, type AccountFacts, type DeliveryHistory } from "./rank.js";
+import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, displayScore, bestCaseDisplayScore, redelivery, STATE_MAX_AGE_DAYS, type JobRow, type SignalRow, type AccountFacts, type DeliveryHistory } from "./rank.js";
 
 const pack = await loadFixturePack();
 const roles = compileRoles(pack.roles);
@@ -72,6 +72,15 @@ describe("priority decays once", () => {
     expect(displayScore({ priority: 0.04, baseRate: 0.02 })).toBe(50);
     expect(displayScore({ priority: 0.01, baseRate: 0.02 })).toBe(0);
     expect(displayScore({ priority: 0.2, baseRate: 0.02 })).toBeGreaterThan(displayScore({ priority: 0.1, baseRate: 0.02 }));
+  });
+
+  it("bestCaseDisplayScore: an account under the floor only because size/segment is unknown is worth a facts lookup", () => {
+    // one fresh LR-3 signal (intent 0.0577), unknown size + segment (fit 0.45) at influence 0.5: 52 now, 65 with full fit
+    const s = { intent: 0.0577, baseRate: 0.02, priority: 0.0577 * (0.5 + 0.5 * 0.45) };
+    expect(displayScore(s)).toBeLessThan(60);
+    expect(bestCaseDisplayScore(s)).toBeGreaterThanOrEqual(60);
+    // a 20-day-old signal can't reach 60 even with perfect fit: no lookup spent on it
+    expect(bestCaseDisplayScore({ intent: 0.0392, baseRate: 0.02 })).toBeLessThan(60);
   });
 });
 

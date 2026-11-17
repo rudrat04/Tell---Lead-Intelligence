@@ -308,6 +308,14 @@ export function displayScore(s: { priority: number; baseRate: number }): number 
   return s.priority > 0 ? Math.round(100 * Math.max(0, 1 - s.baseRate / s.priority)) : 0;
 }
 
+/**
+ * Best display score this account could reach once its unknown company facts are filled in: the score with fit 1.
+ * Used to pick which below-floor accounts are worth a company-facts lookup (unknown size and segment cost ~10 points).
+ */
+export function bestCaseDisplayScore(s: { intent: number; baseRate: number }): number {
+  return displayScore({ priority: s.intent, baseRate: s.baseRate });
+}
+
 export interface RankInput<A> {
   account: A; score: AccountScore; incomplete: boolean;
   /** held by a past delivery: inside the re-delivery window, or labelled 👎, or in a meeting / won (redelivery()) */

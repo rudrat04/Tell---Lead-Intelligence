@@ -67,6 +67,9 @@ export async function fillCompanyFacts(
   const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, size: accounts.sizeBand, segment: accounts.segment }).from(accounts)
     .where(and(inArray(accounts.id, accountIds), sql`(${accounts.sizeBand} is null or ${accounts.segment} is null)`));
   if (!rows.length) return res;
+  // keep the caller's order: the per-run budget goes to the first ids (pool leads, then the closest under the floor)
+  const order = new Map(accountIds.map((id, i) => [id, i]));
+  rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   const recent = new Set((await db.select({ a: peopleSearches.accountId }).from(peopleSearches).where(and(
     inArray(peopleSearches.accountId, rows.map((r) => r.id)), eq(peopleSearches.persona, PERSONA), sql`${peopleSearches.searchedAt} > ${new Date(Date.now() - CHECK_DAYS * DAY)}`,
   ))).map((r) => r.a));

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
 import {
-  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, type DeliveryHistory, timing as timingScore,
+  buildEvidence, scoreAccount, rankAccounts, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, bestCaseDisplayScore, type DeliveryHistory, timing as timingScore,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
 import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -31,6 +31,8 @@ export interface ScoreRunResult {
   criticDropped: Record<string, number>;
   /** eligible accounts under delivery.digest.min_score (never sent) */
   belowMinScore: number;
+  /** eligible accounts under the floor with unknown size or segment that could pass with full fit, closest first */
+  factsCandidates: string[];
   /** account id -> critic checks it failed (eligible accounts only) */
   criticFailed?: Record<string, string[]>;
   /** every scored account (for tuning and evals; not rendered) */
@@ -149,6 +151,14 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   // score threshold: below it never reaches the email or Sheet (the next lead above it takes the slot)
   const passed = criticPassed.filter((r) => !r.score.eligible || displayScore(r.score) >= minScore);
   const belowMinScore = criticPassed.length - passed.length;
+  // below the floor only because size or segment is unknown: worth a company-facts lookup (the digest fills them and
+  // re-scores). Without this, facts were looked up only for accounts already over the floor, so unknown facts kept
+  // an account under it forever. Closest to the floor first, so the per-run lookup budget goes where it can matter.
+  const factsCandidates = criticPassed
+    .filter((r) => r.score.eligible && !(r.recentlyDelivered && !r.newSinceDelivery) && displayScore(r.score) < minScore && (!r.account.sizeBand || !r.account.segment)
+      && bestCaseDisplayScore(r.score) >= minScore)
+    .sort((a, b) => b.score.intent - a.score.intent)
+    .map((r) => r.account.id);
 
   const ranking = rankAccounts(passed, opts.maxLeads ?? pack.delivery.digest.max_leads, 5, {
     reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days,
@@ -187,7 +197,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   return {
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
-    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore,
+    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore, factsCandidates,
     criticFailed: Object.fromEntries([...verdicts].filter(([, v]) => !v.pass).map(([id, v]) => [id, v.failed.map((f) => f.check)])), all: results.map((r) => ({ account: r.account, score: r.score })),
   };
 }
