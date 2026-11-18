@@ -63,6 +63,7 @@ export function describe(e: Evidence): string {
     case "role_reposted": return `Reposted: "${e.quote}"`;
     case "ops_owner_known": case "ops_team_2plus": case "leaky_capture": case "has_gtm_agency": case "new_gtm_leader": case "ops_person_left": case "marketing_subdomain": case "outbound_domain": return e.quote;
     case "jd_mentions": return `Job ad says: ${e.quote}`;
+    case "role_gap": return `${e.quote} (people search: check their team page before you write)`;
     case "champion_moved": case "freeze_to_contract": case "email_auth_gap": case "attribution_gap": case "site_health_poor": case "content_motion": return e.quote;
     default: return `${e.type}: ${t}`;
   }
@@ -155,6 +156,21 @@ function reachHtml(c: Contact): string {
   return parts.join(` <span style="color:${C.line}">|</span> `);
 }
 
+/** The need check's finding ("Missing: GTM, Product Marketing", "has Founder's Office: ..."), when there is one. */
+export function gapLine(s: Lead["score"]): { missing: string; has: string } | null {
+  const g = s.evidence.find((e) => e.type === "role_gap");
+  if (!g) return null;
+  const [missing, has] = g.quote.split(" · ");
+  return { missing: missing ?? g.quote, has: has ?? "" };
+}
+
+/** "Score 68 = need 34 · fit 16 · timing 12 · buyer 6": what the number is made of. */
+export const scoreLine = (s: Lead["score"]) =>
+  `Score ${displayScore(s)} = need ${Math.round(s.parts.need)} · fit ${Math.round(s.parts.fit)} · timing ${Math.round(s.parts.timing)} · buyer ${Math.round(s.parts.buyer)}`;
+
+/** The buyer's department, from buyers.yaml, for the name line. */
+const buyerDept = (c: Contact | null | undefined, personas: Pack["icp"]["personas"]) => (c?.persona ? personas.find((p) => p.title === c.persona)?.department : undefined);
+
 function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]["personas"] = [], notes?: Notes, tap?: { good: string; bad: string; enrich?: string }, when?: SendWindow): string {
   const a = l.account, s = l.score;
   const c = contacts?.get(a.id);
@@ -165,7 +181,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   const companyLine = `${A(`https://${a.domain}`, `<b style="color:${C.ink}">${esc(company)}</b>`)}${facts ? ` <span style="color:${C.muted}">· ${esc(facts)}</span>` : ""}`;
 
   const head = c
-    ? `<div style="font-size:17px;font-weight:600;color:${C.ink}">${esc(c.person.name)} <span style="font-weight:400;color:${C.muted};font-size:14px">${esc(c.person.role ?? c.persona ?? "")}</span></div>
+    ? `<div style="font-size:17px;font-weight:600;color:${C.ink}">${esc(c.person.name)} <span style="font-weight:400;color:${C.muted};font-size:14px">${esc(c.person.role ?? c.persona ?? "")}${buyerDept(c, personas) ? ` · ${esc(buyerDept(c, personas)!)}` : ""}</span></div>
        <div style="font-size:14px;margin-top:2px">${companyLine}</div>
        ${reachHtml(c) ? `<div style="font-size:13px;margin-top:6px">${reachHtml(c)}</div>` : ""}
        ${c.warm?.length ? `<div style="font-size:13px;margin-top:4px;color:${C.ink}">🤝 ${esc(c.warm[0]!.text)}</div>` : ""}
@@ -173,8 +189,12 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
     : `<div style="font-size:17px;font-weight:600">${companyLine}</div>
        <div style="font-size:13px;margin-top:6px;color:${C.muted}">No contact yet. Search: ${personaSearchLinks(personas, a.sizeBand, company, null).slice(0, 2).map((x) => A(x.url, esc(x.persona))).join(", ") || "none"}</div>`;
 
+  // the need check, as in "Missing: GTM, Product Marketing · has Founder's Office: ..."
+  const gap = gapLine(s);
+  const gapHtml = gap ? `<div style="font-size:14px;margin-top:8px"><b style="color:#b91c1c">${esc(gap.missing)}</b>${gap.has ? ` <span style="color:${C.muted}">· ${esc(gap.has)}</span>` : ""}</div>` : "";
+  const scoreHtml = `<div style="font-size:12px;margin-top:6px;color:${C.faint}">${esc(scoreLine(s))}</div>`;
   // why now: the analyst's sentence with the evidence as sources, or (without it) the evidence itself
-  const ev = s.drivers.slice(0, 3);
+  const ev = s.drivers.filter((e) => e.type !== "role_gap").slice(0, 3);
   const why = n
     ? `<div style="font-size:14px;line-height:1.5;margin-top:12px;color:${C.ink}">${esc(n.hypothesis)}</div>
        <div style="font-size:12px;margin-top:4px;color:${C.muted}">Sources: ${ev.map((e, k) => A(e.url, `${k + 1}. ${esc(describe(e).slice(0, 60))}${describe(e).length > 60 ? "…" : ""}`)).join(" &nbsp; ")}</div>`
@@ -197,7 +217,7 @@ function leadHtml(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr>
     <td width="28" valign="top" style="font-size:13px;font-weight:700;color:${C.faint};padding-top:3px">${i + 1}</td>
     <td valign="top">
-      ${head}${whenHtml}${back}${why}${opener}${pitch}${warn}
+      ${head}${gapHtml}${scoreHtml}${whenHtml}${back}${why}${opener}${pitch}${warn}
       <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:10px"><tr>
         <td valign="middle">${tags}</td>
         ${tap ? `<td valign="middle" align="right" style="white-space:nowrap">${tap.enrich && needsEmail(c) ? btn(tap.enrich, "✉️&nbsp; Find email", "#1d4ed8") : ""}${btn(tap.good, "👍&nbsp; Good", "#047857")}${btn(tap.bad, "👎&nbsp; Bad", "#b91c1c")}</td>` : ""}
@@ -221,10 +241,12 @@ function leadText(l: Lead, i: number, contacts?: Contacts, personas: Pack["icp"]
     c?.warm?.length ? `   Warm path: ${c.warm[0]!.text}` : "",
     ...(c?.others ?? []).map((o) => `   Also: ${o.person.name}, ${o.person.role ?? o.persona}${o.person.linkedin ? ` ${o.person.linkedin}` : ""}`),
     ...(c ? [] : personaSearchLinks(personas, a.sizeBand, company, null).slice(0, 2).map((x) => `   Search ${x.persona}: ${x.url}`)),
+    gapLine(s) ? `   ${[gapLine(s)!.missing, gapLine(s)!.has].filter(Boolean).join(" · ")}` : "",
+    `   ${scoreLine(s)}`,
     when ? `   When: ${sendWindowText(when)}` : "",
     l.backReason ? `   Back on your list. ${l.backReason}` : "",
     n ? `   Why now: ${n.hypothesis}` : "",
-    ...s.drivers.slice(0, 3).map((e) => `   - ${describe(e)}  ${e.url}`),
+    ...s.drivers.filter((e) => e.type !== "role_gap").slice(0, 3).map((e) => `   - ${describe(e)}  ${e.url}`),
     open ? `   Opener: ${open}` : "",
     angle ? `   Angle: ${angle}` : "",
     n?.counterEvidence ? `   Watch out: ${n.counterEvidence}` : "",
@@ -334,13 +356,14 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     Date: date,
     Company: company,
     Website: `https://${a.domain}`,
-    Score: String(displayScore(s)), // 0-100: how far above the base rate (50 = twice as likely as an average account)
+    Score: String(displayScore(s)), // 0-100 = need + fit + timing + buyer points (scoreLine in "Why now")
     "ICP fit": String(Math.round(s.fit * 100)), // 0-100: size and segment against your ICP
     Timing: calendar ? sendWindowText(sendWindow(s.evidence, dayDate(date), calendar)) : "",
     Size: a.sizeBand ?? "",
     Segment: a.segment ?? "",
     Region: a.region ?? "",
-    "Why now": [l.backReason ? `Back: ${l.backReason}` : "", contact?.warm?.length ? `Warm path: ${contact.warm[0]!.text}` : "", ...s.drivers.slice(0, 3).map((x) => `${describe(x)} (${x.url})`)].filter(Boolean).join("\n"),
+    "Why now": [scoreLine(s), gapLine(s) ? [gapLine(s)!.missing, gapLine(s)!.has].filter(Boolean).join(" · ") : "", l.backReason ? `Back: ${l.backReason}` : "", contact?.warm?.length ? `Warm path: ${contact.warm[0]!.text}` : "",
+      ...s.drivers.filter((x) => x.type !== "role_gap").slice(0, 3).map((x) => `${describe(x)} (${x.url})`)].filter(Boolean).join("\n"),
     Signals: signalSummary(s.evidence),
     Plays: s.plays.map((p) => p.title).join(" + "),
     Person: contact?.person.name ?? "",
@@ -361,7 +384,7 @@ const SIGNAL_LABEL: Record<string, string> = {
   contract_role: "Contract/fractional role", adjacent_role_open: "Sales/marketing hiring", core_role_filled: "Core role filled (against)",
   explicit_hire_request: "Asked for help", pain_post: "Pain in public", funding_raise: "Recently raised", product_launch: "Product launch",
   cta_sales_led: "Site went sales-led", pricing_page_added: "Pricing page added", gtm_tool_added: "New GTM tool", stack_sprawl: "Tool sprawl",
-  tool_overlap: "Overlapping tools", role_reposted: "Role reposted", ops_owner_known: "Has an ops owner (against)", ops_team_2plus: "Ops team of 2+ (against)",
+  tool_overlap: "Overlapping tools", role_reposted: "Role reposted", role_gap: "Empty GTM seats", ops_owner_known: "Has an ops owner (against)", ops_team_2plus: "Ops team of 2+ (against)",
   jd_mentions: "Job ad names the pain", leaky_capture: "Leaky lead capture", has_gtm_agency: "Credits a GTM agency (against)",
   new_gtm_leader: "New leader with budget", ops_person_left: "Ops person left", marketing_subdomain: "New marketing subdomain", outbound_domain: "Cold-email domain set up",
   champion_moved: "Past client joined", freeze_to_contract: "Couldn't hire, now contract", email_auth_gap: "Cold email without DMARC/SPF",

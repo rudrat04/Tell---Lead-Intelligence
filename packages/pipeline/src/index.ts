@@ -21,3 +21,5 @@ export * from "./scope.js";
 export * from "./network.js";
 export * from "./waterfall.js";
 export * from "./company-facts.js";
+export * from "./role-gap.js";
+export * from "./discover-funding.js";

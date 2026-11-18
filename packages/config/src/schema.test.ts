@@ -17,7 +17,7 @@ describe("pack cross-file checks", () => {
     const p = await base();
     const [id] = Object.keys(p.plays.plays);
     p.plays.plays[id!].personas = ["Chief Vibes Officer"];
-    expect(issues(p).join()).toMatch(/unknown persona "Chief Vibes Officer"/);
+    expect(issues(p).join()).toMatch(/unknown buyer "Chief Vibes Officer"/);
   });
   it("min_count for a type the play doesn't require", async () => {
     const p = await base();

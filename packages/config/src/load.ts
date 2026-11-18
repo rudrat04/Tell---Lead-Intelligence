@@ -63,6 +63,15 @@ export function parsePack(files: Record<string, string>): Pack {
   for (const [f, text] of Object.entries(files)) {
     try { raw[f === "pack" ? "meta" : f] = parse(text); } catch (e) { throw new PackError(`${f}.yaml is not valid YAML: ${(e as Error).message}`); }
   }
+  // buyers.yaml (`buyers: [...]`): who to reach, kept apart from the ICP (which companies); stored as icp.personas
+  if (raw.buyers != null) {
+    const list = (raw.buyers as { buyers?: unknown }).buyers;
+    const icp = (raw.icp ?? {}) as Record<string, unknown>;
+    if (!Array.isArray(list)) throw new PackError("buyers.yaml must hold a `buyers:` list");
+    if (Array.isArray(icp.personas) && icp.personas.length) throw new PackError("buyers are set twice: in buyers.yaml and icp.yaml personas (keep buyers.yaml)");
+    raw.icp = { ...icp, personas: list };
+    delete raw.buyers;
+  }
   const r = PackSchema.safeParse(raw);
   if (!r.success) {
     const issues = r.error.issues.map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n");

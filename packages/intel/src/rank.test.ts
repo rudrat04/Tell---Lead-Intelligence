@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import { compileRoles } from "./jobs.js";
-import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, rankByRegionGroups, displayScore, bestCaseDisplayScore, redelivery, STATE_MAX_AGE_DAYS, type JobRow, type SignalRow, type AccountFacts, type DeliveryHistory } from "./rank.js";
+import { buildEvidence, scoreAccount, softFit, matchPlays, rankAccounts, rankByRegionGroups, displayScore, bestCaseDisplayScore, needLevel, withBuyer, UNKNOWN_BUYER, redelivery, STATE_MAX_AGE_DAYS, type JobRow, type SignalRow, type AccountFacts, type DeliveryHistory } from "./rank.js";
 
 const pack = await loadFixturePack();
 const roles = compileRoles(pack.roles);
@@ -60,27 +60,45 @@ describe("watch findings are states (signals.last_seen_at)", () => {
   });
 });
 
-describe("priority decays once", () => {
-  it("an old signal is decayed by its own half-life only, not again by timing", () => {
-    const s = score([], [sig("stack_sprawl", 60, { lastSeenAt: ago(60) })]);
-    expect(s.timing).toBeLessThan(0.1); // still reported as freshness
-    const intentOnly = s.intent * (1 - (pack.icp.soft_fit.influence ?? 1) + (pack.icp.soft_fit.influence ?? 1) * s.fit);
-    expect(s.priority).toBeCloseTo(intentOnly, 10);
+describe("score = need + fit + timing + buyer points", () => {
+  it("an old signal decays once, inside need; timing is a small separate part", () => {
+    const fresh = score([], [sig("stack_sprawl", 0, { lastSeenAt: ago(0) })]);
+    const old = score([], [sig("stack_sprawl", 60, { lastSeenAt: ago(60) })]);
+    expect(old.timing).toBeLessThan(0.1);
+    expect(old.parts.need).toBeLessThan(fresh.parts.need);
+    expect(old.parts.timing).toBeLessThan(fresh.parts.timing);
   });
-  it("displayScore: 0 at the base rate, 50 at twice it, same order as priority", () => {
-    expect(displayScore({ priority: 0.02, baseRate: 0.02 })).toBe(0);
-    expect(displayScore({ priority: 0.04, baseRate: 0.02 })).toBe(50);
-    expect(displayScore({ priority: 0.01, baseRate: 0.02 })).toBe(0);
-    expect(displayScore({ priority: 0.2, baseRate: 0.02 })).toBeGreaterThan(displayScore({ priority: 0.1, baseRate: 0.02 }));
+  it("the parts add up to the score, and priority is the score / 100", () => {
+    const s = score([job("RevOps Manager", 10)]);
+    expect(displayScore(s)).toBe(Math.round(s.parts.need + s.parts.fit + s.parts.timing + s.parts.buyer));
+    expect(s.priority).toBeCloseTo((s.parts.need + s.parts.fit + s.parts.timing + s.parts.buyer) / 100, 10);
+    // before contacts are known the buyer part is half
+    expect(s.parts.buyer).toBeCloseTo(pack.signals.score.buyer * UNKNOWN_BUYER, 5);
   });
-
-  it("bestCaseDisplayScore: an account under the floor only because size/segment is unknown is worth a facts lookup", () => {
-    // one fresh LR-3 signal (intent 0.0577), unknown size + segment (fit 0.45) at influence 0.5: 52 now, 65 with full fit
-    const s = { intent: 0.0577, baseRate: 0.02, priority: 0.0577 * (0.5 + 0.5 * 0.45) };
-    expect(displayScore(s)).toBeLessThan(60);
-    expect(bestCaseDisplayScore(s)).toBeGreaterThanOrEqual(60);
-    // a 20-day-old signal can't reach 60 even with perfect fit: no lookup spent on it
-    expect(bestCaseDisplayScore({ intent: 0.0392, baseRate: 0.02 })).toBeLessThan(60);
+  it("need: 0 at the base rate, full at full_need_lift, never negative", () => {
+    expect(needLevel(0.02, 0.02, 25)).toBe(0);
+    expect(needLevel(0.01, 0.02, 25)).toBe(0);
+    const odds = 0.02 / 0.98 * 25;
+    expect(needLevel(odds / (1 + odds), 0.02, 25)).toBeCloseTo(1, 6);
+    expect(needLevel(0.2, 0.02, 25)).toBeGreaterThan(needLevel(0.1, 0.02, 25));
+  });
+  it("a strong need ranks above a perfect-fit company with one weak signal", () => {
+    const strong = scoreAccount(buildEvidence([job("RevOps Consultant", 3, { employmentType: "Contract" })], [], pack, roles, now), { ...facts, sizeBand: null, segment: null }, pack);
+    const weak = scoreAccount(buildEvidence([job("SDR", 40)], [], pack, roles, now), facts, pack);
+    expect(strong.priority).toBeGreaterThan(weak.priority);
+  });
+  it("withBuyer fills the buyer part and moves the score", () => {
+    const s = score([job("RevOps Manager", 10)]);
+    const hi = withBuyer(s, 1, pack.signals.score), lo = withBuyer(s, 0.3, pack.signals.score);
+    expect(hi.parts.buyer).toBe(pack.signals.score.buyer);
+    expect(hi.priority).toBeGreaterThan(lo.priority);
+    expect(hi.parts.need).toBe(s.parts.need);
+  });
+  it("bestCaseDisplayScore: the score with fit at full points", () => {
+    const s = score([job("RevOps Manager", 10)]);
+    const unknown = scoreAccount(s.evidence, { ...facts, sizeBand: null, segment: null }, pack);
+    expect(bestCaseDisplayScore(unknown, pack.signals.score)).toBeGreaterThan(displayScore(unknown));
+    expect(bestCaseDisplayScore(unknown, pack.signals.score)).toBe(Math.round((unknown.parts.need + pack.signals.score.fit + unknown.parts.timing + unknown.parts.buyer)));
   });
 });
 
@@ -260,10 +278,11 @@ describe("plays: min_count, qualifies, and fit influence", () => {
     expect(three.plays.map((p) => p.id)).toContain("sales_without_ops");
     expect(three.eligible).toBe(true);
   });
-  it("influence 0 makes size irrelevant to priority", () => {
-    const flat = { ...pack, icp: { ...pack.icp, soft_fit: { ...pack.icp.soft_fit, influence: 0 } } };
-    const p = (sizeBand: string) => scoreAccount(buildEvidence([job("RevOps Manager", 10)], [], flat, roles, now), { ...facts, sizeBand }, flat).priority;
-    expect(p("2-10")).toBe(p("51-150"));
+  it("require_play: signals alone never make a lead", () => {
+    const strict = { ...pack, plays: { ...pack.plays, require_play: true, plays: {} } };
+    const ev = buildEvidence([job("RevOps Manager", 60)], [], strict, roles, now);
+    expect(scoreAccount(ev, facts, pack).eligible).toBe(true);
+    expect(scoreAccount(ev, facts, strict).eligible).toBe(false);
   });
 });
 

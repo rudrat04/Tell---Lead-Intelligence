@@ -25,7 +25,7 @@ export const FAST_LANE_MAX_AGE_DAYS = 14;
  * keeps seeing it (signals.last_seen_at). Seen within STATE_SEEN_DAYS (a weekly watch plus one missed run) = current, and
  * its age stops at STATE_MAX_AGE_DAYS. Once it stops being seen it ages from the last time it was.
  */
-export const STATE_SIGNAL_TYPES = new Set(["tool_overlap", "stack_sprawl", "leaky_capture", "has_gtm_agency", "email_auth_gap", "attribution_gap", "site_health_poor"]);
+export const STATE_SIGNAL_TYPES = new Set(["tool_overlap", "stack_sprawl", "leaky_capture", "has_gtm_agency", "email_auth_gap", "attribution_gap", "site_health_poor", "role_gap"]);
 export const STATE_SEEN_DAYS = 15;
 export const STATE_MAX_AGE_DAYS = 30;
 
@@ -224,13 +224,40 @@ export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayM
   return out;
 }
 
+export interface ScoreParts { need: number; fit: number; timing: number; buyer: number }
+
+/** Need as 0..1: log lift of intent over the base rate, full at `fullLift` x (negative signals can take it to 0). */
+export function needLevel(intent: number, baseRate: number, fullLift: number): number {
+  const odds = (p: number) => p / (1 - p);
+  const lift = Math.log(odds(intent) / odds(baseRate));
+  return Math.max(0, Math.min(1, lift / Math.log(fullLift)));
+}
+
+/** Points for each part (rounded to 0.1) from 0..1 levels and the pack's weights. */
+export function scoreParts(levels: { need: number; fit: number; timing: number; buyer: number }, w: Pack["signals"]["score"]): ScoreParts {
+  const r = (x: number) => Math.round(x * 10) / 10;
+  return { need: r(levels.need * w.need), fit: r(levels.fit * w.fit), timing: r(levels.timing * w.timing), buyer: r(levels.buyer * w.buyer) };
+}
+export const partsTotal = (p: ScoreParts) => p.need + p.fit + p.timing + p.buyer;
+
+/** Buyer level before contacts are looked up: half (unknown). */
+export const UNKNOWN_BUYER = 0.5;
+
+/** The same score with a new buyer level (0..1), after the contact and email are known. */
+export function withBuyer<S extends Pick<AccountScore, "parts" | "priority">>(s: S, buyer: number, w: Pack["signals"]["score"]): S {
+  const parts = { ...s.parts, buyer: Math.round(Math.max(0, Math.min(1, buyer)) * w.buyer * 10) / 10 };
+  return { ...s, parts, priority: partsTotal(parts) / 100 };
+}
+
 export interface AccountScore {
   intent: number;
   fit: number;
   /** freshness of the newest positive signal (0.5^(days/14)): for display and the fast lane, not multiplied into priority */
   timing: number;
-  /** ranking value: intent (each signal already decayed by its own half-life) x fit; reach may scale it later */
+  /** ranking value: the 0-100 score / 100 (need + fit + timing + buyer points); the reach step fills in the buyer part */
   priority: number;
+  /** the score's parts in points (signals.score weights): what the 0-100 is made of, shown on every lead */
+  parts: ScoreParts;
   /** the pack's base rate, to show priority as a 0-100 score (displayScore) */
   baseRate: number;
   lane: "fast" | "combined";
@@ -274,11 +301,15 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   });
   const intent = intentProbability(pack.signals.base_rate, scored);
   const positives = counted.filter((e) => e.class !== "negative");
-  const newestAge = positives.length ? Math.min(...positives.map((e) => e.ageDays)) : Infinity;
+  // timing = how fresh the newest *event* is: a state that is still true (two CRMs, an empty seat) is not news, so it
+  // only sets timing when there is nothing else (otherwise every account with a state looked brand new)
+  const events = positives.filter((e) => !STATE_SIGNAL_TYPES.has(e.type));
+  const newestAge = (events.length ? events : positives).length ? Math.min(...(events.length ? events : positives).map((e) => e.ageDays)) : Infinity;
   const timing = Number.isFinite(newestAge) ? timingScore(newestAge) : 0;
   const fit = softFit(facts, pack.icp);
 
-  const plays = matchPlays(counted, pack.plays.plays);
+  const plays = matchPlays(counted, pack.plays.plays).sort((a, b) => playStrength(b) - playStrength(a));
+  function playStrength(p: PlayMatch) { return p.evidence.reduce((n, e) => n + Math.log(specs[e.type]?.lr ?? 1) * 0.5 ** (e.ageDays / (specs[e.type]?.half_life_days ?? 30)), 0); }
   // fast lane = one strong, fresh signal is enough to deliver (plan 8d-2); stale "strong" signals aren't urgent
   const fast = counted.some((e) => (specs[e.type]?.fast_lane || specs[e.type]?.strength === 5) && e.ageDays <= FAST_LANE_MAX_AGE_DAYS);
   // eligible: one fresh signal of a class the pack trusts alone, or enough independent fresh triggers
@@ -287,33 +318,33 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const strong = (e: Evidence) => (elig.alone as string[]).includes(e.class) && (specs[e.type]?.strength ?? 3) >= (elig.alone_min_strength ?? 1);
   const weakTypes = new Set(fresh.filter((e) => !strong(e) && (e.class === "trigger" || (elig.alone as string[]).includes(e.class))).map((e) => e.type));
   // a play marked `qualifies` is a need on its own (e.g. 3+ sales roles open and no ops role or owner)
-  const eligible = fresh.some(strong) || weakTypes.size >= elig.triggers_needed || plays.some((p) => p.qualifies && p.evidence.some((e) => e.current || e.ageDays <= elig.fresh_days));
+  const eligibleBySignals = fresh.some(strong) || weakTypes.size >= elig.triggers_needed || plays.some((p) => p.qualifies && p.evidence.some((e) => e.current || e.ageDays <= elig.fresh_days));
+  // no play = no angle: with plays.require_play, signals alone never make a lead
+  const eligible = eligibleBySignals && (!pack.plays.require_play || plays.length > 0);
   const drivers = [...positives].sort((a, b) => Math.log(specs[b.type]!.lr) * 0.5 ** (b.ageDays / specs[b.type]!.half_life_days) - Math.log(specs[a.type]!.lr) * 0.5 ** (a.ageDays / specs[a.type]!.half_life_days));
 
-  // fit's weight on priority is the pack's call: 1 = multiplies (default), 0.3 = tie-break, 0 = ignored.
-  // No separate timing factor: each signal already decays by its own half_life_days inside intent, and a second flat
-  // 14-day decay crushed slow states (a still-true tool overlap) and open roles to ~0.
-  const influence = pack.icp.soft_fit.influence ?? 1;
+  // The score is a sum of readable parts, not a product: a strong need at an unknown-size company still ranks, and a
+  // perfect-fit company with one weak signal doesn't. Each signal already decays by its own half-life inside need;
+  // timing adds a small bonus for the freshest one (a still-true state is fresh).
+  const w = pack.signals.score;
+  const parts = scoreParts({ need: needLevel(intent, pack.signals.base_rate, w.full_need_lift), fit, timing, buyer: UNKNOWN_BUYER }, w);
   return {
-    intent, fit, timing, priority: intent * (1 - influence + influence * fit), baseRate: pack.signals.base_rate,
+    intent, fit, timing, priority: partsTotal(parts) / 100, parts, baseRate: pack.signals.base_rate,
     lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers,
   };
 }
 
-/**
- * Priority as 0-100 for people: how far above the base rate this lead is (0 = no better than a random account,
- * 50 = twice the base rate, 80 = five times, 90 = ten times). Same order as priority; probabilities are uncalibrated.
- */
-export function displayScore(s: { priority: number; baseRate: number }): number {
-  return s.priority > 0 ? Math.round(100 * Math.max(0, 1 - s.baseRate / s.priority)) : 0;
+/** The 0-100 score people see: need + fit + timing + buyer points (same order as priority). */
+export function displayScore(s: { priority: number }): number {
+  return Math.round(Math.max(0, Math.min(1, s.priority)) * 100);
 }
 
 /**
- * Best display score this account could reach once its unknown company facts are filled in: the score with fit 1.
- * Used to pick which below-floor accounts are worth a company-facts lookup (unknown size and segment cost ~10 points).
+ * Best score this account could reach once its unknown company facts are filled in: fit at full points.
+ * Used to pick which below-floor accounts are worth a company-facts lookup.
  */
-export function bestCaseDisplayScore(s: { intent: number; baseRate: number }): number {
-  return displayScore({ priority: s.intent, baseRate: s.baseRate });
+export function bestCaseDisplayScore(s: { priority: number; parts: ScoreParts }, w: { fit: number }): number {
+  return displayScore({ priority: s.priority + (w.fit - s.parts.fit) / 100 });
 }
 
 export interface RankInput<A> {

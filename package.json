@@ -22,6 +22,7 @@
     "gmail:auth": "tsx scripts/gmail-auth.ts",
     "gigs": "tsx scripts/gigs.ts",
     "jsearch": "tsx scripts/jsearch.ts",
+    "funding": "tsx scripts/funding.ts",
     "sheet:setup": "tsx scripts/sheet.ts setup",
     "sheet:sync": "tsx scripts/sheet.ts sync",
     "sheet:rebuild": "tsx scripts/sheet-rebuild.ts",

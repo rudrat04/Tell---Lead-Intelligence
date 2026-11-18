@@ -1,0 +1,21 @@
+# Target buyers: who to reach at an ICP company, most preferred first (plays can name their own order).
+# decision_power (0-1) sets the buyer part of the score with how sure the email is; years is checked only when
+# people search shows a dated work history.
+buyers:
+  - title: Founder / CEO
+    department: Leadership
+    seniority: founder
+    decision_power: 1.0
+    patterns: ["(?i)\\b(co-?founder|founder(?!['’]?s?[ -]+(office|associate))|ceo)\\b"]
+    size_bands: ["2-10", "11-50"]
+  - title: Head of GTM / Revenue
+    department: Revenue
+    seniority: head
+    years: { min: 4, max: 30 }
+    decision_power: 0.85
+    patterns: ["(?i)\\b(head of (gtm|growth|revenue)|vp,? (of )?(sales|revenue)|chief revenue officer)\\b"]
+  - title: RevOps lead
+    department: Revenue Operations
+    seniority: manager
+    decision_power: 0.6
+    patterns: ["(?i)\\b(rev ?ops|revenue operations|sales operations)\\b"]

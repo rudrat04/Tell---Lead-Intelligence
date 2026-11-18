@@ -57,6 +57,11 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   mca: { enabled: false, allowedMappings: [], note: "403 to automated fetches; no free incorporation list confirmed" },
   karnataka_startup: { enabled: false, allowedMappings: [], note: "portal did not resolve" },
   kerala_startup_mission: { enabled: false, allowedMappings: [], note: "robots allows all; listing host's terms unchecked" },
+  // Funding news (Nov 2026): Serper's news API (Google News results): headline, link, date and outlet only; articles
+  // are never fetched. Google News RSS itself is NOT used: news.google.com/robots.txt disallows everything but the home
+  // and topic pages, and names AI crawlers (ClaudeBot, GPTBot) with Disallow: /.
+  funding_news: { enabled: true, allowedMappings: ["explicit"], note: "news search API: headline + link only; domain proven by company search" },
+  google_news_rss: { enabled: false, allowedMappings: [], note: "robots.txt disallows /rss and blocks AI crawlers" },
   hubspot_community: { enabled: false, allowedMappings: [], note: "terms page needs JS; HubSpot site terms bar robots" },
 };
 

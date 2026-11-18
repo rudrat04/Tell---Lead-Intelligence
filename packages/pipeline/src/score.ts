@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { leadCap, minScoreFor, type Pack } from "@tell/config";
 import {
-  buildEvidence, scoreAccount, rankAccounts, rankByRegionGroups, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, bestCaseDisplayScore, type DeliveryHistory, timing as timingScore,
+  buildEvidence, scoreAccount, rankAccounts, rankByRegionGroups, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, bestCaseDisplayScore, type DeliveryHistory, timing as timingScore, matchPlays, icpRecheck,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
 import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, eq, and, inArray, sql } from "@tell/db";
@@ -33,6 +33,8 @@ export interface ScoreRunResult {
   belowMinScore: number;
   /** eligible accounts under the floor with unknown size or segment that could pass with full fit, closest first */
   factsCandidates: string[];
+  /** accounts where an empty GTM / Founder's Office / Product Marketing seat would complete a play: worth a need check */
+  gapCandidates: string[];
   /** account id -> critic checks it failed (eligible accounts only) */
   criticFailed?: Record<string, string[]>;
   /** every scored account (for tuning and evals; not rendered) */
@@ -162,9 +164,19 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   // an account under it forever. Closest to the floor first, so the per-run lookup budget goes where it can matter.
   const factsCandidates = criticPassed
     .filter((r) => r.score.eligible && !(r.recentlyDelivered && !r.newSinceDelivery) && displayScore(r.score) < floorOf(r) && (!r.account.sizeBand || !r.account.segment)
-      && bestCaseDisplayScore(r.score) >= floorOf(r))
+      && bestCaseDisplayScore(r.score, pack.signals.score) >= floorOf(r))
     .sort((a, b) => b.score.intent - a.score.intent)
     .map((r) => r.account.id);
+
+  // a role_gap would complete a play here (e.g. just raised + nobody in the GTM seat): check who holds the seats
+  const gapPlays = Object.fromEntries(Object.entries(pack.plays.plays).filter(([, p]) => p.requires.includes("role_gap") || p.requires_any.includes("role_gap")));
+  const probe = { type: "role_gap", class: "implicit", ageDays: 0, current: true, quote: "", url: "", ref: { kind: "signal" as const, id: "probe" } };
+  const gapCandidates = Object.keys(gapPlays).length ? results
+    .filter((r) => !(r.recentlyDelivered && !r.newSinceDelivery) && !r.score.evidence.some((e) => e.type === "role_gap")
+      && !icpRecheck({ domain: r.account.domain, sizeBand: r.account.sizeBand, segment: r.account.segment, ycFitFailed: null }, pack)
+      && matchPlays([...r.score.evidence, probe], gapPlays).length > 0)
+    .sort((a, b) => b.score.intent - a.score.intent)
+    .map((r) => r.account.id) : [];
 
   const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days };
   const groups = pack.delivery.digest.region_groups;
@@ -207,7 +219,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   return {
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
-    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore, factsCandidates,
+    ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore, factsCandidates, gapCandidates,
     criticFailed: Object.fromEntries([...verdicts].filter(([, v]) => !v.pass).map(([id, v]) => [id, v.failed.map((f) => f.check)])), all: results.map((r) => ({ account: r.account, score: r.score })),
   };
 }

@@ -1,9 +1,9 @@
 import { minScoreFor, type Pack } from "@tell/config";
-import { rankAccounts, rankByRegionGroups, enterpriseTitle, displayScore, type Ranking, type RankInput } from "@tell/intel";
+import { rankAccounts, rankByRegionGroups, enterpriseTitle, displayScore, withBuyer, type Ranking, type RankInput } from "@tell/intel";
 import type { Contact } from "@tell/people";
 import type { ScoredAccount } from "./score.js";
 
-/** Reach is on when any multiplier in the pack's icp.reach is below 1. */
+/** Reach factors are on when any multiplier in the pack's icp.reach is below 1 (the buyer part is always scored). */
 export const reachEnabled = (pack: Pack) => Object.entries(pack.icp.reach).some(([k, v]) => (k === "warm_path" ? v > 1 : v < 1));
 
 /** Persona titles that own each lead's problem, from its strongest play that names any. */
@@ -27,8 +27,24 @@ export function reachFactor(contact: Contact | null | undefined, owners: string[
   return f;
 }
 
+/** How much the contact decides (buyers.yaml decision_power); someone off your buyer list counts as a weak 0.4. */
+export function decisionPower(contact: Contact | null | undefined, pack: Pack): number {
+  if (!contact) return 0;
+  if (contact.person.source === "network") return 1; // a past client who just joined: they know your work
+  const b = contact.persona ? pack.icp.personas.find((p) => p.title === contact.persona) : null;
+  return b ? b.decision_power : 0.4;
+}
+
 /**
- * Re-rank the pool (2x max_leads) by priority x reach, keeping the usual guarantees (fast lane, reserved slots).
+ * The buyer part of the score (0..1): decision power x how reachable they are (email confidence, on/off the play's
+ * buyers, warm path). Capped at 1.
+ */
+export function buyerLevel(contact: Contact | null | undefined, owners: string[], pack: Pack): number {
+  return Math.min(1, decisionPower(contact, pack) * reachFactor(contact, owners, pack.icp.reach));
+}
+
+/**
+ * Re-rank the pool (2x max_leads) with the buyer part of the score filled in, keeping the usual guarantees (fast lane, reserved slots).
  * A lead with no named contact is dropped, not shown: its slot goes to the next one in the pool.
  */
 export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string, Contact | null>, pack: Pack, max: number): { ranking: Ranking<ScoredAccount>; factors: Map<string, number>; noContact: number; enterprise: number } {
@@ -38,9 +54,9 @@ export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string
   const isEnterprise = (r: RankInput<ScoredAccount>) => !r.account.sizeBand && enterpriseTitle(contacts.get(r.account.id)?.person.role, pack);
   const enterprise = [...pool.leads, ...pool.watchlist].filter(isEnterprise).length;
   const rows = [...pool.leads, ...pool.watchlist].filter((r) => contacts.get(r.account.id) && !isEnterprise(r)).map((r) => {
-    const f = reachFactor(contacts.get(r.account.id), owners.get(r.account.id) ?? [], pack.icp.reach);
+    const f = buyerLevel(contacts.get(r.account.id), owners.get(r.account.id) ?? [], pack);
     factors.set(r.account.id, f);
-    return { ...r, score: { ...r.score, priority: r.score.priority * f } };
+    return { ...r, score: withBuyer(r.score, f, pack.signals.score) };
   }).filter((r) => displayScore(r.score) >= minScoreFor(pack, r.account.region)); // a hard-to-reach lead can fall under the threshold
   const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days };
   const groups = pack.delivery.digest.region_groups;

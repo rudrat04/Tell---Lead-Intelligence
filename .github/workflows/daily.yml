@@ -48,6 +48,14 @@ jobs:
       - name: Config pack
         run: pnpm pack:check
 
+      # funding news first: freshly funded companies become accounts before scoring
+      - name: Funding news (freshly funded companies)
+        continue-on-error: true
+        run: pnpm funding
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
       # JSearch (Google for Jobs: LinkedIn/Naukri/Indeed listings) before the diff, so boards it finds get today's baseline
       - name: JSearch roles
         continue-on-error: true

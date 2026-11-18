@@ -1,7 +1,7 @@
 import { leadCap, type Pack } from "@tell/config";
 import {
   runScoring, istDay, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
-  loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, type ScoreRunResult, type ChampionMove,
+  loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
@@ -88,13 +88,21 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     factsNote = f.skipped ? `company facts: ${f.skipped}` : `company facts: ${f.looked} looked up, ${f.sized} sized, ${f.segmented} segmented`;
     if (f.changed.length) score = await scoreRun(false);
   } catch { factsNote = "company facts failed"; }
+  // validate the need: who holds the GTM / Founder's Office / Product Marketing seats today (roles.yaml gaps). A gap
+  // adds evidence (and can complete a play); a holder of a core role counts against the lead. Re-score when any changed.
+  let gapNote = "need check: off";
+  try {
+    const g = await checkRoleGaps([...new Set([...[...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), ...score.gapCandidates])], pack);
+    gapNote = g.skipped ? `need check: ${g.skipped}` : `need check: ${g.checked} checked, ${g.gaps} with empty seats`;
+    if (g.changed.length) score = await scoreRun(false);
+  } catch { gapNote = "need check failed"; }
   if (!opts.dryRun && !opts.test) score = await scoreRun(true);
   const preferred = preferredPersonas([...score.ranking.leads, ...score.ranking.watchlist]);
   // people search only for the leads (not the watchlist) to stay inside the search API's free tier
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id), preferred,
   });
-  const enrich: string[] = [factsNote];
+  const enrich: string[] = [factsNote, gapNote];
   // Air Waterfall lookup: a lead nobody is known for gets one people search there (it would be dropped otherwise)
   try {
     const w = await waterfallContacts(contacts, score.ranking.leads.map((l) => l.account.id), pack, { write: !opts.dryRun, preferred });
@@ -116,7 +124,8 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   } catch { enrich.push("network failed"); }
   const r = rerankByReach(score.ranking, contacts, pack, max);
   score.ranking = r.ranking;
-  enrich.push(`reach: ${[...r.factors.values()].filter((f) => f < 1).length} of ${r.factors.size} pool leads down-weighted; ${r.noContact} dropped for no contact; ${r.enterprise} dropped as enterprise (contact title)`);
+  const avg = r.factors.size ? [...r.factors.values()].reduce((a, b) => a + b, 0) / r.factors.size : 0;
+  enrich.push(`buyer: average ${(avg * 100).toFixed(0)}% over ${r.factors.size} pool leads; ${r.noContact} dropped for no contact; ${r.enterprise} dropped as enterprise (contact title)`);
   // analyst only for today's leads; cached by evidence, so test sends and re-runs don't pay again
   let notes: Awaited<ReturnType<typeof analyzeLeads>>["analyses"] | undefined;
   try {

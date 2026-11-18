@@ -76,3 +76,20 @@ describe("people events from dated roles", () => {
     expect(peopleEvents(hit, "Tanmark", "tanmark.test", [], now, [/\b(chief operating officer|coo)\b/i]).map((e) => e.quote)).toEqual(["New Chief Operating Officer since Oct 2026"]);
   });
 });
+
+describe("buyer years of experience", async () => {
+  const { pickContact, yearsOfExperience } = await import("./contacts.js");
+  const now = new Date("2026-11-19T00:00:00Z");
+  const person = (name: string, role: string, from?: string) => ({ name, role, source: "exa", workHistory: from ? [{ company: "Fictiva", from }] : null });
+  it("years from the earliest dated role; unknown without dates", () => {
+    expect(Math.round(yearsOfExperience(person("A", "Head of Sales", "2016-11-01"), now)!)).toBe(10);
+    expect(yearsOfExperience(person("A", "Head of Sales"), now)).toBeNull();
+  });
+  it("a buyer's years range skips people outside it, never people with no history", () => {
+    const buyers = [{ title: "Head of Sales", patterns: ["(?i)head of sales"], size_bands: [], years: { min: 5, max: 30 }, decision_power: 0.8 }];
+    const junior = person("Nia Rao", "Head of Sales", new Date().getFullYear() - 1 + "-01-01");
+    const unknown = person("Dev Shah", "Head of Sales");
+    expect(pickContact([junior], buyers, null)?.persona).toBeNull();
+    expect(pickContact([junior, unknown], buyers, null)?.person.name).toBe("Dev Shah");
+  });
+});

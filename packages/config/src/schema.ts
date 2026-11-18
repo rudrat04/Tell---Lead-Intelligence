@@ -29,6 +29,28 @@ export const PackMetaSchema = z.object({
   timezone: z.string().default("Asia/Kolkata"),
 });
 
+/**
+ * A target buyer: the person to reach at an ICP company (buyers.yaml). The ICP (icp.yaml) describes companies; this
+ * describes people: title, department, seniority, years of experience and how much they decide.
+ */
+export const BuyerSchema = z.object({
+  title: z.string(),
+  /** title patterns that count as this buyer */
+  patterns: z.array(pattern).min(1),
+  /** company size bands where this buyer is the right first contact (empty = any) */
+  size_bands: z.array(z.string()).default([]),
+  /** what to search for on LinkedIn when nobody with this title is known (defaults to the title) */
+  search: z.string().optional(),
+  /** department they sit in (shown in the digest; e.g. "Leadership", "Sales", "Marketing", "Revenue Operations") */
+  department: z.string().optional(),
+  seniority: z.enum(["founder", "c_level", "vp", "head", "manager", "individual"]).optional(),
+  /** years of working experience, when people search shows a work history; unknown = never filtered out */
+  years: z.object({ min: z.number().int().min(0).default(0), max: z.number().int().min(0).default(60) }).optional(),
+  /** how much this person decides a purchase like yours: 1 = signs it, 0.5 = shapes it, 0.2 = uses it.
+   *  Sets the "buyer" part of the score (with how sure the email is); never changes which companies need you. */
+  decision_power: z.number().min(0).max(1).default(0.7),
+});
+
 export const IcpSchema = z.object({
   hard_filters: z.object({
     team_size: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }),
@@ -55,7 +77,7 @@ export const IcpSchema = z.object({
     region_default: z.number().min(0).max(1).default(0.5),
     segment: z.record(z.string(), z.number().min(0).max(1)).default({}),
     segment_default: z.number().min(0).max(1).default(0.5),
-    /** how much fit moves priority: 1 = multiplies it fully (default), 0 = ignored, 0.3 = a tie-break */
+    /** unused since the score became need + fit + timing + buyer points (signals.score); kept so old packs load */
     influence: z.number().min(0).max(1).default(1),
   }),
   /** ranking by whether you can actually reach the problem owner: multiplier on priority, applied to a pool of
@@ -80,16 +102,9 @@ export const IcpSchema = z.object({
       from: z.string().regex(/^\d{2}-\d{2}$/), to: z.string().regex(/^\d{2}-\d{2}$/), reason: z.string().min(1),
     })).default([]),
   }).default({ fiscal_year_start_month: 1, quarter_end_days: 10, quiet_periods: [] }),
-  /** who to contact at a matching company, in order of preference, by company size */
-  personas: z.array(z.object({
-    title: z.string(),
-    /** title patterns that count as this persona */
-    patterns: z.array(pattern).min(1),
-    /** company size bands where this persona is the right first contact (empty = any) */
-    size_bands: z.array(z.string()).default([]),
-    /** what to search for on LinkedIn when nobody with this persona is known (defaults to the title) */
-    search: z.string().optional(),
-  })).default([]),
+  /** who to contact at a matching company, in order of preference. Prefer a separate `buyers.yaml` (`buyers:` list, same
+   *  shape): the ICP says which companies, the buyers say which people. The loader moves buyers.yaml here. */
+  personas: z.array(BuyerSchema).default([]),
 });
 
 /** Signal types the code emits; a pack must define each of them in signals.yaml. */
@@ -108,6 +123,21 @@ export const SignalsSchema = z.object({
   max_events_per_type: z.number().int().min(1).default(3),
   /** each further event of the same type counts this much of the one before (a hiring spree is one story, not five) */
   repeat_dampening: z.number().gt(0).max(1).default(1),
+  /**
+   * The 0-100 lead score is the sum of four parts you can read on every lead (weights are points and sum to 100):
+   *   need:   how strongly the signals say they need you now (log lift of intent over base_rate; `full_need_lift` x = all points)
+   *   fit:    how well the company matches the ICP (icp.soft_fit)
+   *   timing: how fresh the newest signal is (half-life 14 days; a state that is still true is fresh)
+   *   buyer:  whether you can reach someone who decides (buyers.yaml decision_power x email confidence); half points until
+   *           contacts are looked up
+   */
+  score: z.object({
+    need: z.number().min(0).default(50),
+    fit: z.number().min(0).default(20),
+    timing: z.number().min(0).default(15),
+    buyer: z.number().min(0).default(15),
+    full_need_lift: z.number().gt(1).default(25),
+  }).default({ need: 50, fit: 20, timing: 15, buyer: 15, full_need_lift: 25 }),
   signals: z.record(z.string(), z.object({
     class: z.enum(["explicit", "implicit", "trigger", "pain", "negative"]),
     lr: z.number().gt(0),
@@ -146,6 +176,8 @@ export const SignalsSchema = z.object({
 });
 
 export const PlaysSchema = z.object({
+  /** true: an account with no matching play is never a lead (no play = no angle = nothing to say) */
+  require_play: z.boolean().default(false),
   plays: z.record(z.string(), z.object({
     title: z.string(),
     /** all of these signal types within window_days */
@@ -179,6 +211,13 @@ export const RolesSchema = z.object({
   /** titles of leaders who hold a budget: one who started at an account in the last 90 days fires new_gtm_leader
    *  (seen in people-search results). Empty = the built-in GTM leader titles. */
   leaders: z.array(pattern).default([]),
+  /**
+   * Need check: role groups you substitute for, by plain title (e.g. "GTM": ["GTM Engineer", "Head of Growth"]). For
+   * leads in the digest pool, one people search per account looks for anyone currently holding them. Nobody in a group
+   * = `role_gap` (if signals.yaml defines it), shown as "Missing: X · has: Y"; a holder of a core role becomes a known
+   * owner. Empty = off.
+   */
+  gaps: z.record(z.string(), z.array(z.string().min(2)).min(1)).default({}),
 });
 
 export const ExtractorSchema = z.object({
@@ -213,6 +252,22 @@ export const SourcesSchema = z.object({
     /** results older than this (when the search shows a date) are dropped */
     max_age_days: z.number().int().min(1).default(14),
   }).default({ enabled: false, queries: [], per_day: 8, per_tick: 1, time_range: "w", country: "in", countries: [], max_age_days: 14 }),
+  /** Funding news (Serper news API, headline + link + date only; articles are never fetched): companies named in "X
+   *  raises ..." headlines become accounts once a company search proves their website, with a funding_raise signal. */
+  funding_news: z.object({
+    enabled: z.boolean().default(false),
+    queries: z.array(z.string()).default([]),
+    /** Google country code (in = India) and how far back: d / w / m */
+    country: z.string().default("in"),
+    time_range: z.enum(["d", "w", "m"]).default("w"),
+    /** headlines must match one of these (regex, case-insensitive) and none of `exclude` (whole words) */
+    keywords: z.array(z.string()).default(["rais", "funding", "seed", "series [a-d]", "pre-series"]),
+    exclude: z.array(z.string()).default(["roundup", "round-up", "weekly", "this week", "funding wrap", "fund", "first close", "startups raised", "startups raise"]),
+    /** news searches per day (Serper, usage_daily "serper_news"; the queries rotate across days) */
+    per_day: z.number().int().min(1).max(50).default(3),
+    /** company searches per run for new names (Exa, ~$0.007 each) */
+    per_run: z.number().int().min(1).max(100).default(20),
+  }).default({ enabled: false, queries: [], country: "in", time_range: "w", keywords: ["rais", "funding", "seed", "series [a-d]", "pre-series"], exclude: ["roundup", "round-up", "weekly", "this week", "funding wrap", "fund", "first close", "startups raised", "startups raise"], per_day: 3, per_run: 20 }),
   /** Workable job search: companies hiring these roles in `location` (or each of `locations`) become accounts + boards.
    *  Weekly runs every query x location; the daily discovery slice runs a rotating few (new companies every day). */
   workable: z.object({
@@ -436,7 +491,7 @@ export const PackSchema = z.object({
   const bands = new Set(p.icp.size_bands.map((b) => b.band));
   for (const [name, play] of Object.entries(p.plays.plays)) {
     for (const t of play.personas) {
-      if (!personaTitles.has(t)) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "personas"], message: `unknown persona "${t}" (icp.personas titles: ${[...personaTitles].join(", ")})` });
+      if (!personaTitles.has(t)) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "personas"], message: `unknown buyer "${t}" (buyers.yaml titles: ${[...personaTitles].join(", ")})` });
     }
     for (const t of Object.keys(play.min_count)) {
       if (!play.requires.includes(t)) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "min_count"], message: `min_count "${t}" is not in requires` });
@@ -456,6 +511,9 @@ export const PackSchema = z.object({
   if ((p.icp.soft_fit.weights.region ?? 0) > 0) for (const r of p.icp.hard_filters.regions_any) {
     if (p.icp.soft_fit.region[r] == null) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "region"], message: `regions_any has "${r}" but soft_fit.region doesn't weigh it` });
   }
+  const sw = p.signals.score;
+  if (Math.abs(sw.need + sw.fit + sw.timing + sw.buyer - 100) > 0.01) ctx.addIssue({ code: "custom", path: ["signals", "score"], message: "need + fit + timing + buyer must sum to 100" });
+  p.icp.personas.forEach((x, i) => { if (x.years && x.years.min > x.years.max) ctx.addIssue({ code: "custom", path: ["buyers", i, "years"], message: "min > max" }); });
   const w = Object.values(p.icp.soft_fit.weights).reduce((a, b) => a + b, 0);
   if (Math.abs(w - 1) > 0.01) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "weights"], message: `weights must sum to 1 (got ${w.toFixed(2)})` });
   const groups = p.delivery.digest.region_groups;
@@ -487,4 +545,4 @@ export function leadCap(pack: Pick<Pack, "delivery">): number {
   if (g.length) return g.reduce((n, x) => n + x.max_leads, 0);
   return pack.delivery.digest.max_leads === 0 ? Infinity : pack.delivery.digest.max_leads;
 }
-export const PACK_FILES = ["pack", "icp", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;
+export const PACK_FILES = ["pack", "icp", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;

@@ -49,11 +49,24 @@ export function pickContact(people: Person[], personas: Pack["icp"]["personas"],
   for (const p of ordered) {
     if (!preferred.includes(p.title) && p.size_bands.length && sizeBand && !p.size_bands.includes(sizeBand)) continue;
     const rx = p.patterns.map(toRegex);
-    const matches = people.filter((x) => x.role && rx.some((r) => r.test(x.role!))).sort((a, b) => seniority(b.role) - seniority(a.role));
+    const matches = people.filter((x) => x.role && rx.some((r) => r.test(x.role!)) && yearsFit(x, p.years)).sort((a, b) => seniority(b.role) - seniority(a.role));
     if (matches[0]) return { person: matches[0], persona: p.title, note: `${p.title}` };
   }
   const best = [...people].sort((a, b) => seniority(b.role) - seniority(a.role))[0]!;
   return { person: best, persona: null, note: "no listed person matches your personas for this company size; best available" };
+}
+
+/** Years since the earliest dated role in a person's work history; null when no role has a start date. */
+export function yearsOfExperience(p: Pick<Person, "workHistory">, now = new Date()): number | null {
+  const starts = (p.workHistory ?? []).map((r) => (r.from ? Date.parse(r.from) : NaN)).filter((t) => Number.isFinite(t) && t <= now.getTime());
+  return starts.length ? (now.getTime() - Math.min(...starts)) / (365.25 * 86_400_000) : null;
+}
+
+/** A buyer's years range; unknown experience always fits (people search rarely has a full history). */
+function yearsFit(p: Person, years: { min: number; max: number } | undefined): boolean {
+  if (!years) return true;
+  const y = yearsOfExperience(p);
+  return y == null || (y >= years.min && y <= years.max);
 }
 
 export const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? name;

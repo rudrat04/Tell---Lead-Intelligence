@@ -26,7 +26,7 @@ if (show) {
     const plays = s.plays.map((p) => p.title).join(", ") || "-";
     const why = s.drivers.slice(0, 3).map((e) => `${e.type}: "${e.quote}"${e.current ? "" : ` (${Math.round(e.ageDays)}d)`}`).join(" | ");
     return `${String(i + 1).padStart(2)}. ${l.account.name ?? l.account.domain} (${l.account.domain}) [${l.account.sizeBand ?? "?"}, ${l.account.segment ?? "?"}, ${l.account.region ?? "?"}]\n` +
-      `    score=${displayScore(s)}/100 (${(s.priority / (1 - s.priority) / (s.baseRate / (1 - s.baseRate))).toFixed(1)}x base) intent=${s.intent.toFixed(3)} fit=${s.fit.toFixed(2)} fresh=${s.timing.toFixed(2)} lane=${s.lane}\n    plays: ${plays}\n    why: ${why}`;
+      `    score=${displayScore(s)}/100 = need ${s.parts.need} + fit ${s.parts.fit} + timing ${s.parts.timing} + buyer ${s.parts.buyer} (buyer is half until contacts are known) lane=${s.lane}\n    plays: ${plays}\n    why: ${why}`;
   };
   console.log("\nTOP LEADS"); r.ranking.leads.forEach((l, i) => console.log(line(l, i)));
   console.log("\nWATCHLIST"); r.ranking.watchlist.forEach((l, i) => console.log(line(l, i)));
