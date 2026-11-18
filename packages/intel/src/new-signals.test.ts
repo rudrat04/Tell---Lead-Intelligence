@@ -19,7 +19,7 @@ const pack: Pack = {
     content_motion: { class: "trigger", lr: 1.8, half_life_days: 45, strength: 3, fast_lane: false },
     leaky_capture: { class: "implicit", lr: 2.5, half_life_days: 120, strength: 3, fast_lane: false, max_events: 1 },
   } },
-  plays: { plays: {
+  plays: { ...base.plays, plays: {
     ...base.plays.plays,
     attention_no_capture: { title: "Attention, nowhere to land", requires: ["leaky_capture"], requires_any: ["content_motion", "product_launch", "funding_raise"], absent: [], window_days: 60, angle: "a", min_count: {}, qualifies: true, personas: [] },
     freeze_to_contract: { title: "Couldn't hire", requires: ["freeze_to_contract"], requires_any: [], absent: ["core_role_filled"], window_days: 45, angle: "b", min_count: {}, qualifies: true, personas: [] },

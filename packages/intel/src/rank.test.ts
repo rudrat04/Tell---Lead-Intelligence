@@ -271,7 +271,7 @@ describe("ranking bias: tiny team matching two plays vs big company with many sa
 describe("plays: min_count, qualifies, and fit influence", () => {
   it("a qualifying play (3+ sales roles, no ops) makes an account eligible even under a strict floor", () => {
     const strict = { ...pack, signals: { ...pack.signals, eligibility: { ...pack.signals.eligibility, alone_min_strength: 5 } },
-      plays: { plays: { ...pack.plays.plays, sales_without_ops: { title: "Sales without ops", requires: ["adjacent_role_open"], requires_any: [], min_count: { adjacent_role_open: 3 }, absent: ["core_role_open", "core_role_open_45d"], window_days: 60, angle: "a", qualifies: true, personas: [] } } } };
+      plays: { ...pack.plays, plays: { ...pack.plays.plays, sales_without_ops: { title: "Sales without ops", requires: ["adjacent_role_open"], requires_any: [], min_count: { adjacent_role_open: 3 }, absent: ["core_role_open", "core_role_open_45d"], window_days: 60, angle: "a", qualifies: true, personas: [] } } } };
     const s = (jobs: JobRow[]) => scoreAccount(buildEvidence(jobs, [], strict, roles, now), facts, strict);
     expect(s([job("Account Executive", 3), job("SDR", 4)]).eligible).toBe(false);
     const three = s([job("Account Executive", 3), job("SDR", 4), job("BDR", 5)]);
@@ -358,7 +358,7 @@ describe("re-delivery: leads you've seen come back only with something new", () 
 describe("region groups", () => {
   const row = (id: string, region: string | null, priority: number) => ({
     account: { id, region }, incomplete: false, recentlyDelivered: false, newSinceDelivery: false,
-    score: { intent: priority, fit: 1, timing: 1, priority, baseRate: 0.02, lane: "combined" as const, eligible: true, evidence: [], plays: [], drivers: [] },
+    score: { intent: priority, fit: 1, timing: 1, priority, parts: { need: 0, fit: 0, timing: 0, buyer: 0 }, baseRate: 0.02, lane: "combined" as const, eligible: true, evidence: [], plays: [], drivers: [] },
   });
   const groups = [{ name: "India", regions: ["India"], max_leads: 2 }, { name: "Other regions", regions: [], max_leads: 2 }];
   it("each group gets its own top N, India first, even when other regions score higher", () => {
