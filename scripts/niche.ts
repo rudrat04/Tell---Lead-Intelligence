@@ -1,13 +1,13 @@
 /**
  * Niche public-record discovery (pack sources.niche): FDA shortages x ANDA holders, expiring federal contracts, new
  * Medicare-certified providers. Counts only (Actions logs are public).
- *   pnpm niche [fda|govcon|cms]                       (no argument = every enabled source)
+ *   pnpm niche [fda|govcon|cms|510k|anda|awards|formd|socrata]   (no argument = every enabled source)
  *   pnpm niche import <file.csv> [--region India] [--segment pharma]   (local only: your own exports, e.g. GeM / RERA / customs)
  */
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { loadPack } from "@tell/config";
-import { runFdaShortage, runUsaSpending, runCmsNewProviders, persistNicheRecords, parseCsv, importRecords, type NicheResult } from "@tell/pipeline";
+import { runFdaShortage, runUsaSpending, runCmsNewProviders, runFda510k, runAndaApprovals, runNewAwards, runFormD, runSocrata, persistNicheRecords, parseCsv, importRecords, type NicheResult } from "@tell/pipeline";
 
 const pack = await loadPack();
 const [cmd, file] = process.argv.slice(2);
@@ -26,11 +26,16 @@ if (cmd === "import") {
 
 const runs: Record<string, () => Promise<NicheResult>> = {
   fda: () => runFdaShortage({ pack }), govcon: () => runUsaSpending({ pack }), cms: () => runCmsNewProviders({ pack }),
+  "510k": () => runFda510k({ pack }), anda: () => runAndaApprovals({ pack }), awards: () => runNewAwards({ pack }), formd: () => runFormD({ pack }),
 };
 let failed = 0;
 for (const [name, run] of Object.entries(runs)) {
   if (cmd && cmd !== name) continue;
   try { const r = await run(); console.log(line(r)); if (!r.skipped && r.records === 0 && r.errors > 0) failed++; }
   catch (e) { console.log(`${name}: failed (${(e as Error).message.slice(0, 120)})`); failed++; }
+}
+if (!cmd || cmd === "socrata") {
+  try { for (const r of await runSocrata({ pack })) { console.log(line(r)); if (!r.skipped && r.records === 0 && r.errors > 0) failed++; } }
+  catch (e) { console.log(`socrata: failed (${(e as Error).message.slice(0, 120)})`); failed++; }
 }
 process.exit(failed ? 1 : 0);

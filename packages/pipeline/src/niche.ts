@@ -1,7 +1,8 @@
 import type { Pack } from "@tell/config";
 import {
   fetchShortages, fetchAndaHolders, holderCounts, fetchExpiringAwards, fetchNewProviders, exaCompanySearch, companyKey, isSourceEnabled,
-  type Shortage, type AndaHolder, type ExpiringAward, type NewProvider, type CompanyHit,
+  fetchClearances, fetchAndaApprovals, fetchNewAwards, socrataRows, fillTemplate, fetchFormDFilings, fetchFormDDetail,
+  type Shortage, type AndaHolder, type ExpiringAward, type NewProvider, type CompanyHit, type DeviceClearance, type AndaApproval, type NewAward, type FormDDetail, type FormDFiling,
 } from "@tell/watchers";
 import { passesHardFilters, regionInScope } from "@tell/intel";
 import { registrableDomain, nameMatchesDomain, checkHomepage, domainLists, type DomainLists } from "@tell/people";
@@ -327,4 +328,165 @@ export function importRecords(rows: Record<string, string>[], pack: Pack, defaul
     return [{ source: "niche_import", name: r.company, query: r.query || (r.domain ? r.domain : `${r.company} company`), segment, regions: [region], signal: { type, quote: r.quote, url: r.url!, observedAt: date } }];
   });
   return { records, skipped };
+}
+
+// ------------------------------------------------------------------------------------------------ more sources (pure builders + runners)
+
+type Niche = Pack["sources"]["niche"];
+const PHARMA = /pharm|drug|generic|formulation|api\b|active pharmaceutical|injectable|healthcare|medicine/i;
+const MEDTECH = /medical|device|health|surgical|diagnostic|orthop|dental|implant|hospital|clinical|imaging|catheter|wound|patient/i;
+const fullName = (labelers: string[], sponsor: string) => (labelers.find((l) => !likelyForeign(l)) ?? labelers[0] ?? sponsor).replace(/\s+/g, " ").trim();
+const titleName = (n: string) => n.toLowerCase().replace(/\b[a-z]/g, (ch) => ch.toUpperCase()).replace(/\b(Llc|Lp|Llp|Pllc)\b/g, (m) => m.toUpperCase());
+
+export function clearanceRecords(cs: DeviceClearance[], cfg: NonNullable<Niche["fda_510k"]>): NicheRecord[] {
+  return cs.map((c) => {
+    const name = titleName(c.applicant);
+    return {
+      source: "fda_510k", name, query: `${name} medical device company`, segment: cfg.segment, regions: cfg.regions, mustMention: MEDTECH,
+      signal: { type: "device_cleared", quote: `${name} received FDA 510(k) clearance ${c.kNumber} for ${c.device.toLowerCase()}${c.panel ? ` (${c.panel.toLowerCase()})` : ""} on ${monthYear(c.decidedAt)} (${isoDay(c.decidedAt)}).`, url: c.url, observedAt: c.decidedAt },
+    };
+  }).sort((a, b) => Number(likelyForeign(a.name)) - Number(likelyForeign(b.name)));
+}
+
+export function approvalRecords(as: AndaApproval[], cfg: NonNullable<Niche["anda_approvals"]>): NicheRecord[] {
+  return as.map((a) => {
+    const name = fullName(a.labelers, titleName(a.sponsor));
+    return {
+      source: "anda_approvals", name, query: `${name} pharmaceutical company`, segment: cfg.segment, regions: cfg.regions, mustMention: PHARMA,
+      signal: { type: "anda_approved", quote: `${name} received FDA approval for ANDA ${a.appNo} (${a.ingredient}${a.form ? `, ${a.form}` : ""}) on ${monthYear(a.approvedAt)} (${isoDay(a.approvedAt)}).`, url: a.url, observedAt: a.approvedAt },
+    };
+  }).sort((a, b) => Number(likelyForeign(a.name)) - Number(likelyForeign(b.name)));
+}
+
+export function newAwardRecords(aw: NewAward[], segment: string, region: string, now: Date): NicheRecord[] {
+  const best = new Map<string, NewAward>();
+  for (const a of aw) { const k = companyKey(a.recipient); const p = best.get(k); if (!p || a.amount > p.amount) best.set(k, a); }
+  return [...best.values()].sort((x, y) => y.amount - x.amount).map((a) => {
+    const name = titleName(a.recipient);
+    return {
+      source: "usaspending_awards", name, query: `${name} contractor`, segment, regions: [region],
+      signal: {
+        type: "contract_won",
+        quote: `${name} won a ${fmtUsd(a.amount)} contract from the ${a.agency}${a.description ? ` (${shortDesc(a.description)})` : ""}${a.startDate ? `, starting ${monthYear(a.startDate)}` : ""}${a.endDate ? ` and running to ${monthYear(a.endDate)}` : ""} (award ${a.awardId}, NAICS ${a.naics}).`,
+        url: a.url, observedAt: a.startDate && a.startDate < now ? a.startDate : now,
+      },
+    };
+  });
+}
+
+/** Form D issuer region: a US state code, or K7 (India); null = elsewhere. Exported for tests. */
+export const formDRegion = (s: string) => (/^[A-Z]{2}$/.test(s) ? "United States of America" : s === "K7" ? "India" : null); // EDGAR: US states are 2 letters, other countries letter+digit
+
+export function formDRecords(ds: FormDDetail[], cfg: NonNullable<Niche["form_d"]>): NicheRecord[] {
+  return ds.flatMap((d) => {
+    const segment = cfg.industries[d.industry];
+    const region = formDRegion(d.state);
+    if (!segment || !region || d.amendment || /pooled investment/i.test(d.industry) || (d.sold ?? 0) < cfg.min_sold) return [];
+    if (/\b(fund|investors|holdings|spv|series [a-z0-9]+|portfolio|capital partners|lp)\b/i.test(d.entity) && segment === "real_estate") return []; // property SPVs: no website, no buyer
+    const name = titleName(d.entity);
+    const raised = d.sold != null && d.sold > 0 ? `${fmtUsd(d.sold)} sold${d.offering ? ` of a ${fmtUsd(d.offering)} offering` : ""}` : d.offering ? `a ${fmtUsd(d.offering)} offering` : "an offering of undisclosed size";
+    return [{
+      source: "form_d", name, query: `${name} ${d.city} company`, segment, regions: [region],
+      signal: { type: "form_d_raise", quote: `${name} (${d.city}${d.state.length === 2 ? `, ${d.state}` : ""}) filed a Form D with the SEC on ${isoDay(d.filedAt)}: ${raised} (industry: ${d.industry.toLowerCase()}).`, url: d.url, observedAt: d.filedAt },
+    }];
+  });
+}
+
+type SocrataCfg = Niche["socrata"][number];
+
+/** One Socrata row -> a record (pure; exported for tests). Null when no company name or the name is a person / owner. */
+export function socrataRecord(row: Record<string, unknown>, cfg: SocrataCfg, now: Date): NicheRecord | null {
+  let company = cfg.company_field ? String(row[cfg.company_field] ?? "").trim() : "";
+  if (!company && cfg.company_pairs) {
+    const re = new RegExp(cfg.company_pairs.match, "i");
+    for (let i = 1; i <= cfg.company_pairs.max; i++) {
+      if (re.test(String(row[cfg.company_pairs.type.replace("{i}", String(i))] ?? ""))) { company = String(row[cfg.company_pairs.name.replace("{i}", String(i))] ?? "").trim(); break; }
+    }
+  }
+  company = company.replace(/\s+,/g, ",").replace(/\s+/g, " ").replace(/\s*(d\/b\/a|dba)\s.*$/i, "").trim();
+  // people are "LAST, FIRST": never a company
+  if (!company || new RegExp(cfg.skip_company, "i").test(company) || /^[a-z'-]+,\s*[a-z'-]+( [a-z]\.?)?$/i.test(company)) return null;
+  const name = titleName(company);
+  const at = (() => { const v = String(row[cfg.date_field] ?? ""); const m = v.match(/^(\d{4})-?(\d{2})-?(\d{2})/); return m ? new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`) : now; })();
+  const fields = { ...row, company: name };
+  const key = String(row[cfg.key_field] ?? "").trim();
+  if (!key) return null;
+  const url = cfg.url ? fillTemplate(cfg.url, fields) : `https://${cfg.domain}/resource/${cfg.dataset}.json?${encodeURIComponent(cfg.key_field)}=${encodeURIComponent(key)}`;
+  return {
+    source: `socrata_${cfg.id}`, name, query: fillTemplate(cfg.query, fields), segment: cfg.segment, regions: [cfg.region],
+    ...(cfg.must_mention ? { mustMention: new RegExp(cfg.must_mention, "i") } : {}),
+    signal: { type: cfg.signal_type, quote: fillTemplate(cfg.quote, fields), url, observedAt: at },
+  };
+}
+
+const guard = (source: string, policy: string, enabled: boolean | undefined, deps: Deps): NicheResult | null => {
+  if (!enabled) return { ...empty(source), skipped: "disabled in the pack" };
+  if (!isSourceEnabled(policy)) return { ...empty(source), skipped: "disabled by source policy" };
+  if (!deps.companies && !process.env.EXA_API_KEY) return { ...empty(source), skipped: "EXA_API_KEY not set" };
+  applyPackIdentity(deps.pack);
+  return null;
+};
+
+export async function runFda510k(deps: Deps & { fetch?: (since: Date) => Promise<DeviceClearance[]> }): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.fda_510k;
+  const g = guard("fda_510k", "openfda", cfg?.enabled, deps); if (g) return g;
+  const now = deps.now ?? new Date(), since = new Date(now.getTime() - cfg!.max_age_days * DAY);
+  const res = empty("fda_510k");
+  try { return await persistNicheRecords(clearanceRecords(await (deps.fetch ?? ((s) => fetchClearances(s, cfg!.countries, now)))(since), cfg!), deps, res); }
+  catch { res.errors++; return res; }
+}
+
+export async function runAndaApprovals(deps: Deps & { fetch?: (since: Date) => Promise<AndaApproval[]> }): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.anda_approvals;
+  const g = guard("anda_approvals", "openfda", cfg?.enabled, deps); if (g) return g;
+  const now = deps.now ?? new Date(), since = new Date(now.getTime() - cfg!.max_age_days * DAY);
+  const res = empty("anda_approvals");
+  try { return await persistNicheRecords(approvalRecords(await (deps.fetch ?? ((s) => fetchAndaApprovals(s, now)))(since), cfg!), deps, res); }
+  catch { res.errors++; return res; }
+}
+
+export async function runNewAwards(deps: Deps & { fetch?: (naics: string, since: Date) => Promise<NewAward[]> }): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.usaspending_awards;
+  const g = guard("usaspending_awards", "usaspending", cfg?.enabled && !!cfg.groups.length, deps); if (g) return g;
+  const now = deps.now ?? new Date(), since = new Date(now.getTime() - cfg!.max_age_days * DAY);
+  const res = empty("usaspending_awards");
+  const records: NicheRecord[] = [];
+  for (const grp of cfg!.groups) for (const naics of grp.naics) {
+    try { records.push(...newAwardRecords(await (deps.fetch ?? ((n, s) => fetchNewAwards({ naics: n, setAsides: cfg!.set_asides, since: s, now, minAmount: cfg!.min_amount, maxPages: cfg!.max_pages })))(naics, since), grp.segment, cfg!.region, now)); }
+    catch { res.errors++; }
+  }
+  // biggest awards first across groups: the search cap goes to the winners with the most at stake
+  records.sort((a, b) => (Number(b.signal.quote.match(/\$([\d.]+)M/)?.[1] ?? 0)) - (Number(a.signal.quote.match(/\$([\d.]+)M/)?.[1] ?? 0)));
+  return persistNicheRecords(records, deps, res);
+}
+
+export async function runFormD(deps: Deps & { filings?: (days: number) => Promise<FormDFiling[]>; detail?: (f: FormDFiling) => Promise<FormDDetail | null> }): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.form_d;
+  const g = guard("form_d", "sec_form_d", cfg?.enabled && Object.keys(cfg.industries).length > 0, deps); if (g) return g;
+  if (!deps.filings && !process.env.SEC_USER_AGENT) return { ...empty("form_d"), skipped: "SEC_USER_AGENT not set" };
+  const res = empty("form_d");
+  const filings = (await (deps.filings ?? ((d) => fetchFormDFilings(d, deps.now)))(cfg!.days)).slice(0, cfg!.max_filings);
+  const details: FormDDetail[] = [];
+  for (const f of filings) {
+    try { const d = await (deps.detail ?? ((x) => fetchFormDDetail(x.url, x.filedAt)))(f); if (d) details.push(d); } catch { res.errors++; }
+    if (!deps.detail) await new Promise((r) => setTimeout(r, 150)); // SEC fair access: well under 10 requests/second
+  }
+  return persistNicheRecords(formDRecords(details, cfg!), deps, res);
+}
+
+export async function runSocrata(deps: Deps & { rows?: (cfg: SocrataCfg, where: string) => Promise<Record<string, unknown>[]> }): Promise<NicheResult[]> {
+  const out: NicheResult[] = [];
+  const now = deps.now ?? new Date();
+  for (const cfg of deps.pack.sources.niche.socrata) {
+    const src = `socrata_${cfg.id}`;
+    const g = guard(src, "socrata", cfg.enabled, deps); if (g) { out.push(g); continue; }
+    const since = new Date(now.getTime() - cfg.max_age_days * DAY);
+    const where = cfg.where.replaceAll("{since}", since.toISOString().slice(0, 10)).replaceAll("{since_ymd}", since.toISOString().slice(0, 10).replace(/-/g, ""));
+    const res = empty(src);
+    try {
+      const rows = await (deps.rows ?? ((c, w) => socrataRows(c.domain, c.dataset, w, c.order, c.limit)))(cfg, where);
+      out.push(await persistNicheRecords(rows.flatMap((r) => socrataRecord(r, cfg, now) ?? []), deps, res));
+    } catch { res.errors++; out.push(res); }
+  }
+  return out;
 }

@@ -94,3 +94,48 @@ describe("segment overrides and segment lists", () => {
     expect(r.leads.map((l) => [l.account.id, (l as { group?: string }).group])).toEqual([["a", "Niche"], ["b", "India"]]);
   });
 });
+
+import { clearanceRecords, approvalRecords, newAwardRecords, formDRecords, formDRegion, socrataRecord } from "./niche.js";
+import { fillTemplate, parseFormDXml, formDDocUrl, parseAndaApprovals, parseClearances } from "@tell/watchers";
+
+describe("more public records (fictional companies)", () => {
+  it("510(k) and ANDA approvals: records quote the clearance / approval and its date", async () => {
+    const pack = await loadFixturePack();
+    const cs = parseClearances([{ applicant: "ACMEMED DEVICES PVT LTD", k_number: "K261234", decision_date: "20261015", decision_description: "Substantially Equivalent", device_name: "Infusion Set", advisory_committee_description: "General Hospital", country_code: "IN", city: "PUNE" },
+      { applicant: "X", k_number: "K2", decision_date: "20261015", decision_description: "Not Substantially Equivalent", country_code: "IN" }], ["IN"]);
+    expect(cs).toHaveLength(1);
+    const r = clearanceRecords(cs, { enabled: true, countries: ["IN"], regions: ["India"], max_age_days: 60, segment: "medtech" });
+    expect(r[0]!.signal.quote).toBe("Acmemed Devices Pvt Ltd received FDA 510(k) clearance K261234 for infusion set (general hospital) on October 2026 (2026-10-15).");
+    const as = parseAndaApprovals([{ application_number: "ANDA300001", sponsor_name: "ACMEGEN", submissions: [{ submission_type: "ORIG", submission_status: "AP", submission_status_date: "20261020" }], products: [{ active_ingredients: [{ name: "ZENTROFIL" }], dosage_form: "TABLET" }] }],
+      new Date("2026-10-01T00:00:00Z"), new Date("2026-11-20T00:00:00Z"));
+    expect(approvalRecords(as, { enabled: true, regions: ["India"], max_age_days: 60, segment: "pharma" })[0]!.signal.quote).toBe("Acmegen received FDA approval for ANDA 300001 (Zentrofil, tablet) on October 2026 (2026-10-20).");
+    void pack;
+  });
+  it("new awards: one record per winner, biggest first", () => {
+    const a = (r: string, amount: number) => ({ awardId: "A1", recipient: r, amount, startDate: new Date("2026-11-01T00:00:00Z"), endDate: new Date("2028-01-31T00:00:00Z"), agency: "Department of Examples", description: "ROOF REPAIR", naics: "238160", url: `https://example.org/${r}${amount}` });
+    const r = newAwardRecords([a("SMALL ROOFING LLC", 3e5), a("NORTHWIND BUILDERS INC", 2e6), a("NORTHWIND BUILDERS INC", 1e6)], "construction", "United States of America", new Date("2026-11-20T00:00:00Z"));
+    expect(r.map((x) => x.name)).toEqual(["Northwind Builders Inc", "Small Roofing LLC"]);
+    expect(r[0]!.signal.quote).toBe("Northwind Builders Inc won a $2.0M contract from the Department of Examples (roof repair), starting November 2026 and running to January 2028 (award A1, NAICS 238160).");
+  });
+  it("Form D: industry -> segment, US / India only, no funds or property SPVs", () => {
+    const xml = (name: string, ind: string, state = "TX") => `<edgarSubmission><primaryIssuer><entityName>${name}</entityName><issuerAddress><city>AUSTIN</city><stateOrCountry>${state}</stateOrCountry></issuerAddress></primaryIssuer><offeringData><industryGroup><industryGroupType>${ind}</industryGroupType></industryGroup><offeringSalesAmounts><totalOfferingAmount>5000000</totalOfferingAmount><totalAmountSold>2000000</totalAmountSold></offeringSalesAmounts></offeringData></edgarSubmission>`;
+    const at = new Date("2026-11-18T00:00:00Z");
+    const ds = [xml("Acme Precast Inc", "Construction"), xml("Elm Street Investors LLC", "Residential"), xml("Some Fund LP", "Pooled Investment Fund"), xml("Overseas Co", "Construction", "X0")].map((x) => parseFormDXml(x, at, "https://example.org/d")!);
+    const r = formDRecords(ds, { enabled: true, days: 3, max_filings: 10, industries: { Construction: "construction", Residential: "real_estate" }, min_sold: 0 });
+    expect(r).toHaveLength(1);
+    expect(r[0]!.signal).toMatchObject({ type: "form_d_raise", quote: "Acme Precast Inc (Austin, TX) filed a Form D with the SEC on 2026-11-18: $2.0M sold of a $5.0M offering (industry: construction)." });
+    expect(formDRegion("K7")).toBe("India");
+    expect(formDDocUrl("https://www.sec.gov/Archives/edgar/data/123/0001234567-26-000001.txt")).toBe("https://www.sec.gov/Archives/edgar/data/123/000123456726000001/primary_doc.xml");
+  });
+  it("Socrata rows: templates, contact pairs, people skipped", () => {
+    expect(fillTemplate("{a|title} ({b|money}, {c|date}){missing}", { a: "NORTHWIND BUILDERS LLC", b: "2500000", c: "20261101" })).toBe("Northwind Builders LLC ($2.5M, 2026-11-01)");
+    const cfg = { id: "chi", enabled: true, domain: "data.example.gov", dataset: "abcd-1234", where: "", limit: 10, max_age_days: 21,
+      company_pairs: { name: "contact_{i}_name", type: "contact_{i}_type", match: "GENERAL CONTRACTOR", max: 5 }, skip_company: "^(owner|self)$", key_field: "id", date_field: "issue_date",
+      quote: "{company} is the GC at {addr} ({cost|money})", query: "{company} construction", signal_type: "building_permit", segment: "construction", region: "United States of America" };
+    const now = new Date("2026-11-20T00:00:00Z");
+    const r = socrataRecord({ id: "7", issue_date: "2026-11-19T00:00:00.000", addr: "1 Main St", cost: "4000000", contact_1_type: "ARCHITECT", contact_1_name: "SAMPLE, RIYA", contact_2_type: "CONTRACTOR-GENERAL CONTRACTOR", contact_2_name: "NORTHWIND BUILDERS , INC." }, cfg, now);
+    expect(r?.name).toBe("Northwind Builders, Inc.");
+    expect(r?.signal).toMatchObject({ quote: "Northwind Builders, Inc. is the GC at 1 Main St ($4.0M)", url: "https://data.example.gov/resource/abcd-1234.json?id=7" });
+    expect(socrataRecord({ id: "8", contact_1_type: "CONTRACTOR-GENERAL CONTRACTOR", contact_1_name: "SAMPLE, RIYA" }, cfg, now)).toBeNull(); // a person
+  });
+});

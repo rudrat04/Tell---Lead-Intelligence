@@ -70,6 +70,9 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   usaspending: { enabled: true, allowedMappings: ["explicit"], note: "api.usaspending.gov public API" },
   // CMS Provider Data Catalog: public datastore API (data.cms.gov/provider-data/api), no key.
   cms_provider_data: { enabled: true, allowedMappings: ["explicit"], note: "provider-data datastore API" },
+  // Socrata open-data portals (city building permits, data.transportation.gov FMCSA census): public SODA API, no key
+  // needed (SOCRATA_APP_TOKEN, free, raises the throttle); datasets are published for reuse.
+  socrata: { enabled: true, allowedMappings: ["explicit"], note: "SODA API /resource endpoints only" },
   // Operator-supplied exports (pnpm niche import <csv>): rows the operator downloaded under their own access (GeM, CPPP,
   // RERA, PARIVESH, customs data from a paid provider). Local only: the file never enters the repo or CI.
   niche_import: { enabled: true, allowedMappings: ["explicit"], note: "operator's own exports, local only" },

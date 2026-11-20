@@ -239,3 +239,154 @@ export async function fetchNewProviders(kind: NewProvider["kind"], since: Date, 
   }
   return out;
 }
+
+// ------------------------------------------------------------------------------------------------ more openFDA
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, "");
+/** "20261015" or "2026-10-15" -> Date */
+export const anyDate = (s?: string | null): Date | null => {
+  const m = s?.match(/^(\d{4})-?(\d{2})-?(\d{2})/);
+  return m ? new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`) : null;
+};
+
+export interface DeviceClearance { applicant: string; kNumber: string; device: string; panel: string; country: string; city: string; decidedAt: Date; url: string }
+
+/** 510(k) clearances (substantially equivalent only) in the listed countries (pure; exported for tests). */
+export function parseClearances(results: unknown[], countries: string[]): DeviceClearance[] {
+  return results.flatMap((x) => {
+    const r = x as Record<string, string | undefined>;
+    const at = anyDate(r.decision_date);
+    if (!r.applicant || !r.k_number || !at || !/^substantially equivalent/i.test((r.decision_description ?? "").trim())) return [];
+    if (countries.length && !countries.includes(r.country_code ?? "")) return [];
+    return [{ applicant: r.applicant.trim(), kNumber: r.k_number, device: (r.device_name ?? "").trim(), panel: (r.advisory_committee_description ?? "").trim(), country: r.country_code ?? "", city: title(r.city ?? ""), decidedAt: at,
+      url: `https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfpmn/pmn.cfm?ID=${r.k_number}` }];
+  });
+}
+
+export async function fetchClearances(since: Date, countries: string[], now = new Date(), apiKey = process.env.OPENFDA_API_KEY): Promise<DeviceClearance[]> {
+  const all: unknown[] = [];
+  const cc = countries.length ? `+AND+(${countries.map((c) => `country_code:${c}`).join("+")})` : "";
+  for (let skip = 0; skip < 3000; skip += 1000) {
+    const j = (await json(`https://api.fda.gov/device/510k.json?search=decision_date:%5B${ymd(since)}+TO+${ymd(now)}%5D${cc}&limit=1000&skip=${skip}${apiKey ? `&api_key=${apiKey}` : ""}`)) as { results?: unknown[]; meta?: { results?: { total?: number } } } | null;
+    all.push(...(j?.results ?? []));
+    if (!j?.results?.length || skip + 1000 >= (j.meta?.results?.total ?? 0)) break;
+    await sleep(300);
+  }
+  return parseClearances(all, countries);
+}
+
+export interface AndaApproval { appNo: string; sponsor: string; labelers: string[]; ingredient: string; form: string; approvedAt: Date; url: string }
+
+/** Original ANDA approvals dated inside [since, now] (pure; exported for tests). */
+export function parseAndaApprovals(results: unknown[], since: Date, now = new Date()): AndaApproval[] {
+  return results.flatMap((x) => {
+    const r = x as { application_number?: string; sponsor_name?: string; openfda?: { manufacturer_name?: string[] }; submissions?: { submission_type?: string; submission_status?: string; submission_status_date?: string }[]; products?: { active_ingredients?: { name?: string }[]; dosage_form?: string; route?: string }[] };
+    if (!r.application_number?.startsWith("ANDA") || !r.sponsor_name) return [];
+    const orig = (r.submissions ?? []).find((s) => s.submission_type === "ORIG" && s.submission_status === "AP");
+    const at = anyDate(orig?.submission_status_date);
+    if (!at || at < since || at > now) return [];
+    const p = r.products?.[0];
+    const appNo = r.application_number.replace(/^ANDA/, "");
+    return [{ appNo, sponsor: r.sponsor_name.trim(), labelers: r.openfda?.manufacturer_name ?? [], ingredient: title((p?.active_ingredients ?? []).map((a) => a.name ?? "").filter(Boolean).join(" + ")),
+      form: `${p?.dosage_form ?? ""}`.toLowerCase().replace(/;/g, ", "), approvedAt: at, url: `https://www.accessdata.fda.gov/scripts/cder/daf/index.cfm?event=overview.process&ApplNo=${appNo}` }];
+  });
+}
+
+export async function fetchAndaApprovals(since: Date, now = new Date(), apiKey = process.env.OPENFDA_API_KEY): Promise<AndaApproval[]> {
+  const q = `submissions.submission_status_date:[${ymd(since)} TO ${ymd(now)}] AND submissions.submission_type:ORIG AND application_number:ANDA*`;
+  const all: unknown[] = [];
+  for (let skip = 0; skip < 1000; skip += 100) {
+    const j = (await json(`https://api.fda.gov/drug/drugsfda.json?search=${encodeURIComponent(q)}&limit=100&skip=${skip}${apiKey ? `&api_key=${apiKey}` : ""}`)) as { results?: unknown[]; meta?: { results?: { total?: number } } } | null;
+    all.push(...(j?.results ?? []));
+    if (!j?.results?.length || skip + 100 >= (j.meta?.results?.total ?? 0)) break;
+    await sleep(250);
+  }
+  return parseAndaApprovals(all, since, now);
+}
+
+// ------------------------------------------------------------------------------------------------ USASpending: new awards
+
+export interface NewAward { awardId: string; recipient: string; amount: number; startDate: Date | null; endDate: Date | null; agency: string; description: string; naics: string; url: string }
+
+export function parseNewAwards(results: unknown[], naics: string, minAmount = 0): NewAward[] {
+  return results.flatMap((x) => {
+    const r = x as Record<string, unknown>;
+    const recipient = String(r["Recipient Name"] ?? "").trim(), id = String(r.generated_internal_id ?? ""), amount = Number(r["Award Amount"] ?? 0);
+    if (!recipient || !id || amount < minAmount || /^multiple recipients$/i.test(recipient)) return [];
+    return [{ awardId: String(r["Award ID"] ?? id), recipient, amount, startDate: anyDate(r["Start Date"] as string), endDate: anyDate(r["End Date"] as string), agency: String(r["Awarding Agency"] ?? "").trim(),
+      description: String(r.Description ?? "").replace(/\s+/g, " ").trim(), naics, url: `https://www.usaspending.gov/award/${encodeURIComponent(id)}` }];
+  });
+}
+
+/** Contracts signed in [since, now] in one NAICS code (largest first). */
+export async function fetchNewAwards(opts: { naics: string; setAsides: string[]; since: Date; now?: Date; minAmount: number; maxPages: number }): Promise<NewAward[]> {
+  const now = opts.now ?? new Date();
+  const out: NewAward[] = [];
+  for (let page = 1; page <= opts.maxPages; page++) {
+    const body = {
+      filters: { award_type_codes: ["A", "B", "C", "D"], naics_codes: [opts.naics], ...(opts.setAsides.length ? { set_aside_type_codes: opts.setAsides } : {}),
+        time_period: [{ start_date: opts.since.toISOString().slice(0, 10), end_date: now.toISOString().slice(0, 10), date_type: "date_signed" }] },
+      fields: ["Award ID", "Recipient Name", "Award Amount", "Start Date", "End Date", "Awarding Agency", "Description"],
+      sort: "Award Amount", order: "desc", limit: 100, page,
+    };
+    const j = (await json("https://api.usaspending.gov/api/v2/search/spending_by_award/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })) as { results?: unknown[]; page_metadata?: { hasNext?: boolean } } | null;
+    const rows = parseNewAwards(j?.results ?? [], opts.naics, opts.minAmount);
+    out.push(...rows);
+    if (!j?.page_metadata?.hasNext || rows.length < (j?.results?.length ?? 0)) break; // sorted by amount: the rest are under the minimum
+    await sleep(500);
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------------------------------------ Socrata open-data portals
+
+/** Rows from a Socrata dataset (city permits, FMCSA carrier census...). SoQL `where` is the pack's. No key needed;
+ *  SOCRATA_APP_TOKEN (free) raises the throttle. */
+export async function socrataRows(domain: string, dataset: string, where: string, order: string | undefined, limit: number): Promise<Record<string, unknown>[]> {
+  const q = new URLSearchParams({ $where: where, $limit: String(limit), ...(order ? { $order: order } : {}) });
+  const token = process.env.SOCRATA_APP_TOKEN;
+  const j = await json(`https://${domain}/resource/${dataset}.json?${q}`, token ? { headers: { "X-App-Token": token } } : {});
+  return Array.isArray(j) ? (j as Record<string, unknown>[]) : [];
+}
+
+/** Fill "{field}" / "{field|money}" / "{field|date}" / "{field|title}" placeholders from a row (pure; exported for tests). */
+export function fillTemplate(t: string, row: Record<string, unknown>): string {
+  return t.replace(/\{([a-z0-9_]+)(?:\|(money|date|title|upper))?\}/gi, (_, f: string, fmt?: string) => {
+    const v = row[f];
+    const s = v == null ? "" : typeof v === "object" ? String((v as { url?: string }).url ?? "") : String(v).trim();
+    if (!s) return "";
+    if (fmt === "money") { const n = Number(s); return Number.isFinite(n) ? (n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${n}`) : s; }
+    if (fmt === "date") { const d = anyDate(s); return d ? d.toISOString().slice(0, 10) : s; }
+    if (fmt === "title") return title(s).replace(/\b(Llc|Inc|Lp|Llp|Pllc)\b/g, (m) => m.toUpperCase());
+    if (fmt === "upper") return s.toUpperCase();
+    return s;
+  }).replace(/\s+/g, " ").replace(/\(\s*\)/g, "").trim();
+}
+
+// ------------------------------------------------------------------------------------------------ SEC Form D (details)
+
+export interface FormDDetail { entity: string; city: string; state: string; industry: string; offering: number | null; sold: number | null; filedAt: Date; url: string; amendment: boolean }
+
+const tag = (xml: string, t: string) => xml.match(new RegExp(`<${t}>([^<]*)</${t}>`))?.[1]?.trim() ?? "";
+
+/** primary_doc.xml of a Form D (pure; exported for tests). */
+export function parseFormDXml(xml: string, filedAt: Date, url: string): FormDDetail | null {
+  const entity = tag(xml, "entityName");
+  if (!entity) return null;
+  const num = (s: string) => (/^\d+(\.\d+)?$/.test(s) ? Number(s) : null);
+  const issuer = xml.match(/<primaryIssuer>[\s\S]*?<\/primaryIssuer>/)?.[0] ?? xml;
+  return {
+    entity: entity.replace(/\s+/g, " "), city: title(tag(issuer, "city")), state: tag(issuer, "stateOrCountry"), industry: tag(xml, "industryGroupType"),
+    offering: num(tag(xml, "totalOfferingAmount")), sold: num(tag(xml, "totalAmountSold")), filedAt, url, amendment: tag(xml, "isAmendment") === "true",
+  };
+}
+
+/** The filing's primary_doc.xml URL from its EDGAR .txt URL ("edgar/data/123/0001234567-26-000001.txt"). */
+export const formDDocUrl = (txtUrl: string) => txtUrl.replace(/\/(\d{10})-(\d{2})-(\d{6})\.txt$/, "/$1$2$3/primary_doc.xml");
+
+export async function fetchFormDDetail(txtUrl: string, filedAt: Date, ua = process.env.SEC_USER_AGENT): Promise<FormDDetail | null> {
+  if (!ua) return null;
+  const res = await fetch(formDDocUrl(txtUrl), { headers: { "user-agent": ua }, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) return null;
+  return parseFormDXml(await res.text(), filedAt, txtUrl.replace(/\.txt$/, "-index.htm"));
+}

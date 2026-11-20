@@ -328,7 +328,7 @@ export const SourcesSchema = z.object({
      *  The incumbent becomes an account (segment `segment`) with a contract_expiring signal. */
     usaspending: z.object({
       enabled: z.boolean().default(false),
-      naics: z.array(z.string().regex(/^\d{2,6}$/)).default([]),
+      naics: z.array(z.string().regex(/^(\d{2}|\d{4}|\d{6})$/, "USASpending takes 2, 4 or 6-digit NAICS codes")).default([]),
       /** USASpending set-aside codes, e.g. 8A, 8AN, SDVOSBC, SDVOSBS, WOSB, EDWOSB, HZC, SBA; empty = any */
       set_asides: z.array(z.string()).default([]),
       min_days: z.number().int().min(0).default(60),
@@ -350,11 +350,74 @@ export const SourcesSchema = z.object({
       segment: z.string().default("home_health"),
       region: z.string().default("United States of America"),
     }).default({ enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" }),
+    /** openFDA 510(k) device clearances (substantially equivalent) by applicants in these countries (ISO2) */
+    fda_510k: z.object({
+      enabled: z.boolean().default(false),
+      countries: z.array(z.string().length(2)).default(["IN", "US"]),
+      regions: z.array(z.string()).default(["India", "United States of America"]),
+      max_age_days: z.number().int().min(7).max(365).default(60),
+      segment: z.string().default("medtech"),
+    }).optional(),
+    /** openFDA Drugs@FDA: original ANDA approvals in the last `max_age_days` (a launch needs US buyers) */
+    anda_approvals: z.object({
+      enabled: z.boolean().default(false),
+      regions: z.array(z.string()).default(["India", "United States of America"]),
+      max_age_days: z.number().int().min(7).max(365).default(60),
+      segment: z.string().default("pharma"),
+    }).optional(),
+    /** USASpending: contracts signed in the last `max_age_days`, per NAICS group (the winner becomes an account) */
+    usaspending_awards: z.object({
+      enabled: z.boolean().default(false),
+      groups: z.array(z.object({ naics: z.array(z.string().regex(/^(\d{2}|\d{4}|\d{6})$/, "USASpending takes 2, 4 or 6-digit NAICS codes")).min(1), segment: z.string() })).default([]),
+      set_asides: z.array(z.string()).default([]),
+      max_age_days: z.number().int().min(1).max(120).default(30),
+      min_amount: z.number().min(0).default(500_000),
+      max_pages: z.number().int().min(1).max(10).default(2),
+      region: z.string().default("United States of America"),
+    }).optional(),
+    /** SEC Form D filings (SEC_USER_AGENT with a contact email): issuers in these Form D industries (industryGroupType ->
+     *  segment) become accounts with a form_d_raise signal. Pooled investment funds are never accounts. */
+    form_d: z.object({
+      enabled: z.boolean().default(false),
+      days: z.number().int().min(1).max(14).default(3),
+      max_filings: z.number().int().min(10).max(2000).default(400),
+      industries: z.record(z.string(), z.string()).default({}),
+      min_sold: z.number().min(0).default(0),
+    }).optional(),
+    /** Socrata open-data datasets (city building permits, FMCSA carrier census...): each row names a company; the
+     *  quote is a template over the row's fields ({field}, {field|money}, {field|date}, {field|title}). `where` may use
+     *  {since} (ISO date) and {since_ymd} (YYYYMMDD). */
+    socrata: z.array(z.object({
+      id: z.string().regex(/^[a-z0-9_]+$/),
+      enabled: z.boolean().default(true),
+      domain: z.string(),
+      dataset: z.string().regex(/^[a-z0-9]{4}-[a-z0-9]{4}$/),
+      where: z.string(),
+      order: z.string().optional(),
+      limit: z.number().int().min(1).max(5000).default(1000),
+      max_age_days: z.number().int().min(1).max(365).default(30),
+      /** the company: a field, or the first contact whose type matches (Chicago: contact_1_name / contact_1_type ...) */
+      company_field: z.string().optional(),
+      company_pairs: z.object({ name: z.string(), type: z.string(), match: z.string(), max: z.number().int().min(1).max(30).default(15) }).optional(),
+      /** company names matching this are skipped (people, "OWNER", "SELF") */
+      skip_company: z.string().default("^(owner|self|n/?a|none|homeowner)$"),
+      key_field: z.string(),
+      date_field: z.string(),
+      quote: z.string(),
+      /** evidence URL template; default = the row's own API URL */
+      url: z.string().optional(),
+      query: z.string().default("{company}"),
+      must_mention: z.string().optional(),
+      signal_type: z.string(),
+      segment: z.string(),
+      region: z.string().default("United States of America"),
+    })).default([]),
   }).default({
     per_run: 25,
     fda_shortage: { enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 },
     usaspending: { enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" },
     cms_new_providers: { enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" },
+    socrata: [],
   }),
   /** VC / accelerator portfolio pages (weekly): each company page's "Website" link becomes an account; job boards
    *  are found on that site. Region comes from job locations, never from the investor. */
@@ -600,6 +663,16 @@ export const PackSchema = z.object({
   if (n.fda_shortage.enabled) checkSeg(n.fda_shortage.segment, ["sources", "niche", "fda_shortage", "segment"]);
   if (n.usaspending.enabled) checkSeg(n.usaspending.segment, ["sources", "niche", "usaspending", "segment"]);
   if (n.cms_new_providers.enabled) checkSeg(n.cms_new_providers.segment, ["sources", "niche", "cms_new_providers", "segment"]);
+  if (n.fda_510k?.enabled) checkSeg(n.fda_510k.segment, ["sources", "niche", "fda_510k", "segment"]);
+  if (n.anda_approvals?.enabled) checkSeg(n.anda_approvals.segment, ["sources", "niche", "anda_approvals", "segment"]);
+  if (n.usaspending_awards?.enabled) n.usaspending_awards.groups.forEach((g, i) => checkSeg(g.segment, ["sources", "niche", "usaspending_awards", "groups", i, "segment"]));
+  if (n.form_d?.enabled) for (const [ind, seg] of Object.entries(n.form_d.industries)) checkSeg(seg, ["sources", "niche", "form_d", "industries", ind]);
+  n.socrata.forEach((x, i) => {
+    if (!x.enabled) return;
+    checkSeg(x.segment, ["sources", "niche", "socrata", i, "segment"]);
+    if (!p.signals.signals[x.signal_type]) ctx.addIssue({ code: "custom", path: ["sources", "niche", "socrata", i, "signal_type"], message: `unknown signal type "${x.signal_type}"` });
+    if (!x.company_field && !x.company_pairs) ctx.addIssue({ code: "custom", path: ["sources", "niche", "socrata", i], message: "needs company_field or company_pairs" });
+  });
 });
 
 /** The catch-all digest list: no regions and no segments. */
