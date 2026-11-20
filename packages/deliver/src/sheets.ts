@@ -17,7 +17,7 @@ export const LEAD_COLUMNS = [
   "Date", "Company", "Website", "Score", "ICP fit", "Timing", "Size", "Segment", "Region", "Why now", "Signals", "Plays",
   "Person", "Role", "LinkedIn", "Email", "Verified", "Risky", "Catch-all", "Enrich email",
   "Label", "Reason", "Outcome", "Notes",
-  "Opener", "Angle", "Email draft", "LinkedIn message", "ID",
+  "Opener", "Angle", "Email draft", "LinkedIn message", "Follow-up", "ID",
 ] as const;
 export type LeadColumn = (typeof LEAD_COLUMNS)[number];
 /** One lead row by column name (stored per delivery in deliveries.sheet_row, without ID). */
@@ -195,7 +195,7 @@ const COLUMN_WIDTH: Record<string, number> = {
   Date: 90, Company: 150, Website: 160, Score: 60, "ICP fit": 60, Timing: 220, Size: 70, Segment: 75, Region: 80,
   "Why now": 340, Signals: 240, Plays: 180, Person: 140, Role: 200, LinkedIn: 180, Email: 210, Verified: 70, Risky: 60,
   "Catch-all": 75, "Enrich email": 150, Label: 75, Reason: 110, Outcome: 100, Notes: 200, Opener: 300, Angle: 260,
-  "Email draft": 340, "LinkedIn message": 300,
+  "Email draft": 340, "LinkedIn message": 300, "Follow-up": 320,
 };
 /** Columns whose text wraps (the reading columns); the rest clip to one line so rows stay short. */
 const WRAPPED = ["Timing", "Why now", "Signals"];
