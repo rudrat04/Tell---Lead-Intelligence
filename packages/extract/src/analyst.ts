@@ -208,6 +208,8 @@ export function validateAnalysis(raw: string, input: AnalystInput, opts: { allow
     if (copied) out.push(`copies the brief word for word ("${copied}"): say it in your own words`);
     const meeting = raw.match(MEETING_ASK);
     if (meeting) out.push(`asks for time ("${meeting[0]}"): ask whether they're interested instead`);
+    const over = raw.match(OVERCLAIM);
+    if (over) out.push(`claims more than a public record can show ("${over[0]}"): say only what the evidence says`);
     const intro = raw.match(SELF_INTRO);
     if (intro) out.push(`talks about yourself ("${intro[0]}"): lead with them`);
     if (!/\?\s*$/.test(body)) out.push("doesn't end on a question");
@@ -268,6 +270,8 @@ export function restoreCase(text: string, names: string[]): string {
 const HYPE = /\b(hope (this|you)[^.?]{0,30}(finds|well|doing)|synerg\w*|game[- ]chang\w*|revolutioni[sz]e|unlock\w*|supercharg\w*|skyrocket\w*|seamless\w*|cutting[- ]edge|world[- ]class|best[- ]in[- ]class)/i;
 /** asking for time on a first touch converts worst; ask about interest */
 const MEETING_ASK = /\b(hop|jump|get) on a (quick )?call\b|\b(book|schedule|grab|set up|find) (a |some )?(time|slot|call|meeting|chat)\b|\b\d+\s*-?\s*min(ute)?s?\b|\bcalendar\b|\bmeeting\b|\bcalendly\b/i;
+/** claims no record can prove: who buys from whom, uniqueness, guarantees ("none of them source from India") */
+export const OVERCLAIM = /\b(none of (them|those|these)|no one else|nobody else|no other (supplier|company|vendor|bidder|contractor|provider|firm|distributor|manufacturer)s?|the only (supplier|one|company|vendor|maker|bidder|contractor|provider|player|firm|agency|business|distributor|manufacturer)s?|guarantee[sd]?|exclusive(ly)?|all of them (need|want|buy)|everyone (needs|wants|is looking))\b/i;
 /** self-introductions and "I help companies..." pitches: lead with them, not you */
 const SELF_INTRO = /\bmy name is\b|\b(i'?m|i am) (a|an) (gtm|growth|revops|freelance|marketing|sales)\b|\b(i|we) help (companies|founders|teams|businesses|brands|startups)\b|\bour (services|agency|team)\b/i;
 /** the first LinkedIn message starts a conversation: no offer yet */

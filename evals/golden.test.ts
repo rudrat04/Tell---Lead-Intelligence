@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
+import { validateAnalysis, type AnalystInput } from "@tell/extract";
 import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic, buildEvidence, scoreAccount, type JobRow, type SignalRow } from "@tell/intel";
 
 const load = <T>(f: string): T[] =>
@@ -20,6 +21,18 @@ function report(name: string, results: { ok: boolean; label: string }[]) {
 }
 
 describe("golden sets", () => {
+  it("niche drafts: facts only, no overclaims, end on the offer question", () => {
+    const rows = load<{ note: string; expect: "pass" | "reject"; evidence: string[]; subject: string; body: string }>("niche-drafts.jsonl");
+    const failures = report("niche-drafts", rows.map((r) => {
+      const input: AnalystInput = { company: "Northwind", domain: "northwind.example", facts: "", contactRole: "Founder", plays: [{ title: "x", angle: "y" }],
+        evidence: r.evidence.map((q, i) => ({ type: "contract_won", ageDays: 1, current: false, quote: q, url: `https://ev.example/${i}` })) };
+      const raw = JSON.stringify({ hypothesis: "They have a timely opportunity in the record.", angle: "Lead with the record.", opener: "saw the record about you.", citations: [0], counter_evidence: null, confidence: 0.6, email_subject: r.subject, email_body: r.body, linkedin_message: null });
+      const a = validateAnalysis(raw, input, { maxWords: 90, noDurations: true });
+      const passed = !!a?.email;
+      return { ok: passed === (r.expect === "pass"), label: `${r.note}: ${passed ? "passed" : `rejected (${a?.emailProblems?.join("; ") ?? "invalid"})`}` };
+    }));
+    expect(failures).toEqual([]);
+  });
   it("ranking archetypes: who should come first (needs over volume, states over old news)", () => {
     type Ev = { job?: string; signal?: string; days: number; closed?: number; seen?: number };
     type Side = { size?: string; ev: Ev[] };
