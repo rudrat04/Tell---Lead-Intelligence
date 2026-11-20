@@ -51,6 +51,36 @@ export const BuyerSchema = z.object({
   decision_power: z.number().min(0).max(1).default(0.7),
 });
 
+/**
+ * One industry you sell into (industries.yaml), everything about it in one place. The loader expands it into the ICP
+ * fields scoring reads (segment_map, segment_descriptions, industries_any, segment_overrides, soft_fit.segment), and the
+ * play builder reads the rest (buyers, offer, what an opportunity looks like) for accounts in it.
+ */
+export const IndustrySchema = z.object({
+  /** the industry name as sources and the digest show it ("Pharma") */
+  label: z.string().min(1),
+  /** other source labels that mean the same industry (YC "Industrials") */
+  aliases: z.array(z.string()).default([]),
+  /** what a company in it does: Haiku classifies companies with no label by this */
+  description: z.string().min(10),
+  /** regions and team size for this industry (unset = the ICP defaults) */
+  regions: z.array(z.string()).optional(),
+  team_size: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }).optional(),
+  /** soft fit 0..1 (how readily this industry buys from you) */
+  fit: z.number().min(0).max(1).optional(),
+  /** buyers.yaml titles, most fitting first, for leads in this industry */
+  buyers: z.array(z.string()).default([]),
+  /** what you offer this industry: the play builder's offer for leads in it */
+  offer: z.string().optional(),
+  /** what an opportunity looks like here (helps the play builder judge evidence) */
+  opportunity: z.string().optional(),
+  /** the free list `pnpm list` builds for leads here: federal_buyers | anda_holders | hospitals | permits | recompetes |
+   *  gtm (no list: the GTM review) | manual (you put it together) */
+  list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes", "gtm", "manual"]).default("manual"),
+  /** described so companies can be classified into it, but never admitted (consumer brands) */
+  excluded: z.boolean().default(false),
+});
+
 export const IcpSchema = z.object({
   hard_filters: z.object({
     team_size: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }),
@@ -70,6 +100,8 @@ export const IcpSchema = z.object({
     })).default({}),
   }),
   size_bands: z.array(z.object({ band: z.string(), max: z.number().int() })).min(1),
+  /** industries.yaml, keyed by segment name (already expanded into the fields above by the loader) */
+  industries: z.record(z.string(), IndustrySchema).default({}),
   /** source industry label (e.g. YC "B2B", "Consumer") -> your segment name */
   segment_map: z.record(z.string(), z.string()).default({ B2B: "b2b" }),
   /** segment name -> what a company in it does. When set, a company whose segment no source gave is classified from
@@ -682,6 +714,9 @@ export const PackSchema = z.object({
       if (!play.requires.includes(t)) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "min_count"], message: `min_count "${t}" is not in requires` });
     }
   }
+  for (const [seg, ind] of Object.entries(p.icp.industries)) for (const t of ind.buyers) {
+    if (!personaTitles.has(t)) ctx.addIssue({ code: "custom", path: ["industries", seg, "buyers"], message: `unknown buyer "${t}"` });
+  }
   p.icp.personas.forEach((x, i) => x.size_bands.forEach((b) => {
     if (!bands.has(b)) ctx.addIssue({ code: "custom", path: ["icp", "personas", i, "size_bands"], message: `unknown size band "${b}"` });
   }));
@@ -759,4 +794,4 @@ export function leadCap(pack: Pick<Pack, "delivery">): number {
   if (g.length) return g.reduce((n, x) => n + x.max_leads, 0);
   return pack.delivery.digest.max_leads === 0 ? Infinity : pack.delivery.digest.max_leads;
 }
-export const PACK_FILES = ["pack", "icp", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;
+export const PACK_FILES = ["pack", "icp", "industries", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;

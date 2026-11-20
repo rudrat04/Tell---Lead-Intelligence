@@ -72,6 +72,13 @@ export function parsePack(files: Record<string, string>): Pack {
     raw.icp = { ...icp, personas: list };
     delete raw.buyers;
   }
+  // industries.yaml (`industries: { segment: {...} }`): one place per industry, expanded into the ICP fields
+  if (raw.industries != null) {
+    const list = (raw.industries as { industries?: unknown }).industries;
+    if (!list || typeof list !== "object" || Array.isArray(list)) throw new PackError("industries.yaml must hold an `industries:` map (segment name -> industry)");
+    raw.icp = expandIndustries((raw.icp ?? {}) as Record<string, any>, list as Record<string, any>);
+    delete raw.industries;
+  }
   const r = PackSchema.safeParse(raw);
   if (!r.success) {
     const issues = r.error.issues.map((i) => `  - ${i.path.join(".") || "(root)"}: ${i.message}`).join("\n");
@@ -92,4 +99,32 @@ export async function loadPack(src: PackSource = packSourceFromEnv()): Promise<P
 
 export async function loadPackFromDir(dir: string): Promise<Pack> {
   return loadPack({ kind: "dir", dir });
+}
+
+/**
+ * Expand industries.yaml into the ICP fields scoring reads. A segment defined in both files is an error (one place per
+ * industry), so nothing is silently merged. Exported for tests.
+ */
+export function expandIndustries(icp: Record<string, any>, industries: Record<string, any>): Record<string, any> {
+  const hf = { ...(icp.hard_filters ?? {}) };
+  const map: Record<string, string> = { ...(icp.segment_map ?? {}) };
+  const desc: Record<string, string> = { ...(icp.segment_descriptions ?? {}) };
+  const overrides: Record<string, unknown> = { ...(hf.segment_overrides ?? {}) };
+  const soft = { ...(icp.soft_fit ?? {}) };
+  const fitBy: Record<string, number> = { ...(soft.segment ?? {}) };
+  const any = new Set<string>(hf.industries_any ?? []);
+  for (const [seg, ind] of Object.entries(industries)) {
+    if (!ind || typeof ind !== "object") throw new PackError(`industries.yaml: "${seg}" must be a map`);
+    const clash = [desc[seg] != null && "segment_descriptions", overrides[seg] != null && "segment_overrides", fitBy[seg] != null && "soft_fit.segment",
+      Object.values(map).includes(seg) && "segment_map"].filter(Boolean);
+    if (clash.length) throw new PackError(`industry "${seg}" is defined in both industries.yaml and icp.yaml (${clash.join(", ")}): keep it in industries.yaml`);
+    if (ind.description) desc[seg] = ind.description;
+    if (!ind.excluded) {
+      for (const label of [ind.label, ...(ind.aliases ?? [])].filter(Boolean)) { map[label] = seg; any.add(label); }
+      if (ind.regions || ind.team_size) overrides[seg] = { ...(ind.team_size ? { team_size: ind.team_size } : {}), ...(ind.regions ? { regions_any: ind.regions } : {}) };
+      if (ind.fit != null) fitBy[seg] = ind.fit;
+    }
+  }
+  return { ...icp, industries, segment_map: map, segment_descriptions: desc, soft_fit: { ...soft, segment: fitBy },
+    hard_filters: { ...hf, industries_any: [...any], segment_overrides: overrides } };
 }
