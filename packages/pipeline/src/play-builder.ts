@@ -32,7 +32,9 @@ export async function buildMissingPlays(candidates: ScoreRunResult["playCandidat
       const ev: BuilderEvidence[] = drivers.map((e) => ({ type: e.type, quote: e.quote, ageDays: e.ageDays, current: e.current, strength: pack.signals.signals[e.type]?.strength ?? 3 }));
       const facts = [c.account.sizeBand && `${c.account.sizeBand} people`, c.account.segment, c.account.region].filter(Boolean).join(", ");
       let r;
-      try { r = await buildPlay(llm, pack, c.account.name ?? c.account.domain, facts, ev); } catch { res.failed++; continue; }
+      const ind = c.account.segment ? pack.icp.industries[c.account.segment] : undefined;
+      const industry = ind ? { label: ind.label, opportunity: ind.opportunity, offer: ind.offer, buyers: ind.buyers } : undefined;
+      try { r = await buildPlay(llm, pack, c.account.name ?? c.account.domain, facts, ev, industry); } catch { res.failed++; continue; }
       res.built++;
       const play: StoredPlay | null = r.qualifies
         ? { title: r.play.title, need: r.play.need, angle: r.play.angle, offer: r.play.offer, personas: r.play.personas, cited: r.play.citations.map((i) => ({ type: drivers[i]!.type, url: drivers[i]!.url })) }

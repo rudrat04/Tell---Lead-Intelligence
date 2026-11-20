@@ -245,6 +245,8 @@ export const PlaysSchema = z.object({
     /** what you offer a lead in this play, when it differs from pack.yaml `offer` (niche plays: a buyer list, a teaming
      *  map). Replaces the general offer in the draft brief for leads whose strongest play sets it. */
     offer: z.string().optional(),
+    /** the free list `pnpm list` builds for this play (unset = the industry's) */
+    list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes", "gtm", "manual"]).optional(),
   })),
 });
 

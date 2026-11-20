@@ -14,8 +14,9 @@ export const WRITER_USAGE = "sonnet";
 
 export interface LeadAnalysis extends Analysis { cachedFrom?: Date | null }
 
-function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefined, version: string): { input: AnalystInput; key: string; refs: { kind: string; id: string; url: string }[] } {
+function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefined, version: string, pack: Pack): { input: AnalystInput; key: string; refs: { kind: string; id: string; url: string }[] } {
   const a = l.account, s = l.score;
+  const industry = a.segment ? pack.icp.industries[a.segment] : undefined;
   const ev = s.drivers.slice(0, ANALYST_MAX_EVIDENCE);
   const refs = ev.map((e) => ({ kind: e.ref.kind, id: e.ref.id, url: e.url }));
   const key = createHash("sha256").update(JSON.stringify([version, refs.map((r) => `${r.kind}:${r.id}`), s.plays.map((p) => p.id)])).digest("hex").slice(0, 24);
@@ -25,7 +26,8 @@ function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefin
       company: a.name ?? a.domain, domain: a.domain,
       facts: [a.sizeBand && `${a.sizeBand} people`, a.segment?.toUpperCase(), a.region].filter(Boolean).join(", "),
       contactRole: contact?.person.role ?? contact?.persona ?? null,
-      plays: s.plays.map((p) => ({ id: p.id, title: p.title, angle: p.angle, ...(p.offer ? { offer: p.offer } : {}) })),
+      // a play without its own offer uses its industry's (industries.yaml), unless that industry gets the GTM review
+      plays: s.plays.map((p) => { const offer = p.offer ?? (industry && industry.list !== "gtm" ? industry.offer : undefined); return { id: p.id, title: p.title, angle: p.angle, ...(offer ? { offer } : {}) }; }),
       evidence: ev.map((e) => ({ type: e.type, ageDays: e.ageDays, current: e.current, quote: e.quote, url: e.url, openDays: e.openDays })),
     },
   };
@@ -47,7 +49,7 @@ export async function analyzeLeads(
   const db = getDb();
   // model + prompt in the key: a prompt change re-writes openers instead of serving stale cached ones
   const version = `${WRITER_MODEL}:${createHash("sha256").update(analystSystemPrompt(pack)).digest("hex").slice(0, 8)}`;
-  const prepared = leads.map((l) => ({ l, ...inputFor(l, contacts.get(l.account.id), version) }));
+  const prepared = leads.map((l) => ({ l, ...inputFor(l, contacts.get(l.account.id), version, pack) }));
 
   const prior = await db.select().from(analyses).where(and(
     inArray(analyses.accountId, prepared.map((p) => p.l.account.id)),
