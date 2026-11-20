@@ -215,3 +215,14 @@ describe("plays report verdicts", () => {
     expect(verdict({ delivered: 10, good: 1, bad: 1, replied: 1, meetings: 0 })).toBe("keep");
   });
 });
+
+import { listInputs, toCsv } from "./sample-list.js";
+describe("freelist inputs come from the lead's own quotes", () => {
+  it("drug, NAICS, city, state", () => {
+    expect(listInputs(["Zentrofil Sodium (injectable) is on the FDA drug shortage list (unavailable). Acmegen holds ANDA 200001 for it."]).drug).toBe("Zentrofil Sodium");
+    expect(listInputs(["Northwind's $3.2M contract ends June 2027 (2027-06-14; award W1, NAICS 541512)."]).naics).toBe("541512");
+    expect(listInputs(["Sampleville Hospice (Austin, TX) was certified by Medicare"])).toMatchObject({ city: "Austin", state: "TX" });
+    expect(listInputs(["Northwind Builders is the general contractor on a Chicago permit at 1 Main St"]).city).toBe("Chicago");
+    expect(toCsv([{ a: "x, y", b: 2 }])).toBe('a,b\n"x, y",2\n');
+  });
+});

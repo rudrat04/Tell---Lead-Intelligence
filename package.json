@@ -36,7 +36,8 @@
     "network": "tsx scripts/network.ts",
     "drafts:backfill": "tsx scripts/drafts.ts",
     "niche": "tsx scripts/niche.ts",
-    "plays:report": "tsx scripts/plays-report.ts"
+    "plays:report": "tsx scripts/plays-report.ts",
+    "freelist": "tsx scripts/freelist.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",

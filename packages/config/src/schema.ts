@@ -74,7 +74,7 @@ export const IndustrySchema = z.object({
   offer: z.string().optional(),
   /** what an opportunity looks like here (helps the play builder judge evidence) */
   opportunity: z.string().optional(),
-  /** the free list `pnpm list` builds for leads here: federal_buyers | anda_holders | hospitals | permits | recompetes |
+  /** the free list `pnpm freelist` builds for leads here: federal_buyers | anda_holders | hospitals | permits | recompetes |
    *  gtm (no list: the GTM review) | manual (you put it together) */
   list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes", "gtm", "manual"]).default("manual"),
   /** described so companies can be classified into it, but never admitted (consumer brands) */
@@ -245,7 +245,7 @@ export const PlaysSchema = z.object({
     /** what you offer a lead in this play, when it differs from pack.yaml `offer` (niche plays: a buyer list, a teaming
      *  map). Replaces the general offer in the draft brief for leads whose strongest play sets it. */
     offer: z.string().optional(),
-    /** the free list `pnpm list` builds for this play (unset = the industry's) */
+    /** the free list `pnpm freelist` builds for this play (unset = the industry's) */
     list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes", "gtm", "manual"]).optional(),
   })),
 });
