@@ -355,6 +355,8 @@ export const SourcesSchema = z.object({
   niche: z.object({
     /** company searches per source per run for new names (Exa, ~$0.007 each; usage_daily "exa_niche") */
     per_run: z.number().int().min(1).max(200).default(25),
+    /** per-source lookups per run, where a source resolves well (e.g. { socrata_nyc_permits: 30, anda_approvals: 30 }) */
+    per_run_by_source: z.record(z.string(), z.number().int().min(0).max(200)).default({}),
     /** Exa searches per IST day across every niche run (the tick drains the queue until this is spent) */
     daily_budget: z.number().int().min(1).max(5000).default(150),
     /** website lookup on Maps when the company index finds nothing: Google Places (GOOGLE_MAPS_API_KEY, 1,000 free a
@@ -507,7 +509,7 @@ export const SourcesSchema = z.object({
       region: z.string().default("United States of America"),
     })).default([]),
   }).default({
-    per_run: 25, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4,
+    per_run: 25, per_run_by_source: {}, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4,
     fda_shortage: { enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 },
     usaspending: { enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" },
     cms_new_providers: { enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" },

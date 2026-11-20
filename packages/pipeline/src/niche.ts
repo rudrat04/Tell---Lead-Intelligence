@@ -105,7 +105,8 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
   const homepage = deps.homepage ?? checkHomepage;
   // per-run cap, within the day's search budget across every niche run (usage_daily "exa_niche")
   const budget = pack.sources.niche.daily_budget;
-  const cap = Math.max(0, Math.min(pack.sources.niche.per_run, budget - (await usage.spentToday("exa_niche"))));
+  const perRun = pack.sources.niche.per_run_by_source[records[0]?.source ?? ""] ?? pack.sources.niche.per_run;
+  const cap = Math.max(0, Math.min(perRun, budget - (await usage.spentToday("exa_niche"))));
   const maps = await mapsClient(pack, usage, now);
   let searches = 0;
   res.records += records.length;

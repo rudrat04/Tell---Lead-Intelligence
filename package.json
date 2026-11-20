@@ -35,7 +35,8 @@
     "forget": "tsx scripts/forget.ts",
     "network": "tsx scripts/network.ts",
     "drafts:backfill": "tsx scripts/drafts.ts",
-    "niche": "tsx scripts/niche.ts"
+    "niche": "tsx scripts/niche.ts",
+    "plays:report": "tsx scripts/plays-report.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",

@@ -205,3 +205,13 @@ describe("NPPES, SAM, recalls, news, DMF (fictional)", () => {
     expect(readZipEntry(zip, (n) => n.startsWith("npidata"))?.toString()).toBe("hello,world\n");
   });
 });
+
+import { verdict } from "./niche-stats.js";
+describe("plays report verdicts", () => {
+  it("needs enough deliveries; meetings or replies double down; silence cuts", () => {
+    expect(verdict({ delivered: 5, good: 0, bad: 0, replied: 0, meetings: 0 })).toBe("too early");
+    expect(verdict({ delivered: 10, good: 2, bad: 0, replied: 2, meetings: 0 })).toBe("double down");
+    expect(verdict({ delivered: 16, good: 0, bad: 3, replied: 0, meetings: 0 })).toBe("cut?");
+    expect(verdict({ delivered: 10, good: 1, bad: 1, replied: 1, meetings: 0 })).toBe("keep");
+  });
+});

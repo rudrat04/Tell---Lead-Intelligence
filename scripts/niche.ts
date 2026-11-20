@@ -2,6 +2,7 @@
  * Niche public-record discovery (pack sources.niche): FDA shortages x ANDA holders, expiring federal contracts, new
  * Medicare-certified providers. Counts only (Actions logs are public).
  *   pnpm niche [fda|govcon|cms|510k|anda|awards|formd|nppes|sam|recalls|news|socrata]   (no argument = every enabled source)
+ *   pnpm niche stats                                  (resolve rate per source, queue, spend, contact coverage)
  *   pnpm niche drain                                  (every tick: look up queued companies within the daily budget)
  *   pnpm niche dmf <dmf-list.csv>                     (FDA's DMF list saved as CSV x the shortage list; local only)
  *   pnpm niche import <file.csv> [--region India] [--segment pharma]   (local only: your own exports, e.g. GeM / RERA / customs)
@@ -11,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { fetchShortages } from "@tell/watchers";
 import { loadPack } from "@tell/config";
 import { runFdaShortage, runUsaSpending, runCmsNewProviders, runFda510k, runAndaApprovals, runNewAwards, runFormD, runSocrata,
-  runNppes, runSamEntities, runRecalls, runNewsEvents, drainNicheQueue, dmfRecords, persistNicheRecords, parseCsv, importRecords, type NicheResult } from "@tell/pipeline";
+  runNppes, runSamEntities, runRecalls, runNewsEvents, drainNicheQueue, dmfRecords, nicheStats, persistNicheRecords, parseCsv, importRecords, type NicheResult } from "@tell/pipeline";
 
 const pack = await loadPack();
 const [cmd, file] = process.argv.slice(2);
@@ -19,6 +20,16 @@ const flag = (name: string, d: string) => { const i = process.argv.indexOf(`--${
 const line = (r: NicheResult) => r.skipped ? `${r.source}: skipped (${r.skipped})`
   : `${r.source}: records=${r.records} contacts=${r.contacts ?? 0} companies=${r.companies} looked_up=${r.looked} resolved=${r.resolved} accounts_new=${r.accountsNew} signals=${r.signals} no_match=${r.noMatch} not_region=${r.notRegion} filtered=${r.filtered} bad_site=${r.badSite} capped=${r.capped} errors=${r.errors}`;
 
+if (cmd === "stats") {
+  const st = await nicheStats();
+  console.log("names looked up per source (proven = became an account):");
+  for (const x of st.sources) console.log(`  ${x.source.padEnd(28)} ${String(x.lookedUp).padStart(5)} looked up  ${String(x.proven).padStart(4)} proven  ${(x.rate * 100).toFixed(0)}%`);
+  console.log(`queue: ${st.queued} names waiting (${st.queue.slice(0, 6).map((q) => `${q.source.replace(/^niche:/, "")} ${q.n}`).join(", ")})`);
+  console.log(`spend, last 7 days: ${Object.entries(st.spend7d).map(([k, v]) => `${k} ${v}`).join(", ") || "none"}`);
+  console.log(`named contacts on delivered leads (30 days): ${st.contacts.map((c) => `${c.segment} ${c.named}/${c.delivered}`).join(", ") || "no deliveries yet"}`);
+  console.log(`your last import (pnpm niche import): ${st.daysSinceImport == null ? "never" : `${st.daysSinceImport} days ago`}`);
+  process.exit(0);
+}
 if (cmd === "drain") {
   const r = await drainNicheQueue({ pack });
   console.log(`${line(r)} still_queued=${r.queued} dropped_old=${r.dropped}`);
