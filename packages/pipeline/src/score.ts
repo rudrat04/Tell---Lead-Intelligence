@@ -5,7 +5,9 @@ import {
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
 import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, builtPlays, eq, and, inArray, sql } from "@tell/db";
-import type { Evidence, PlayMatch } from "@tell/intel";
+import { applyExploration, type Evidence, type PlayMatch, type LearnedFit, type RankInput as RI } from "@tell/intel";
+import { regionGroupFor } from "@tell/config";
+import { judgeSystem, playBuilderSystem } from "@tell/extract";
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const DAY = 86_400_000;
@@ -38,6 +40,10 @@ export interface ScoreRunResult {
   gapCandidates: string[];
   /** pool accounts with no matching play whose play is still to be built from their evidence (plays.build) */
   playCandidates: { account: ScoredAccount; score: AccountScore; evidenceKey: string }[];
+  /** judged mode: gate-passing accounts with no judgement for their current evidence, freshest first (wider than the pool) */
+  judgeCandidates: { account: ScoredAccount; score: AccountScore; evidenceKey: string }[];
+  /** judged mode: learned fit inputs (labelled leads overall), for the health line */
+  learnedLabels?: number;
   /** account id -> critic checks it failed (eligible accounts only) */
   criticFailed?: Record<string, string[]>;
   /** every scored account (for tuning and evals; not rendered) */
@@ -113,19 +119,24 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   // plays built from evidence (plays.build), keyed by account + evidence: rebuilt only when the evidence changes
   const built = new Map<string, StoredPlay | null>();
   const evidenceKeys = new Map<string, string>();
-  if (pack.plays.build?.enabled) {
+  const judgedMode = pack.signals.score.mode === "judged";
+  const playVer = playVersion(pack);
+  if (pack.plays.build?.enabled || judgedMode) {
     for (const part of chunk([...accts.keys()], 500)) {
       for (const r of await db.select().from(builtPlays).where(inArray(builtPlays.accountId, part))) built.set(`${r.accountId}:${r.evidenceKey}`, (r.play as StoredPlay | null) ?? null);
     }
   }
+  const learned = judgedMode ? await loadLearned(pack) : null;
   const results: { account: ScoredAccount; score: AccountScore; incomplete: boolean; recentlyDelivered: boolean; newSinceDelivery: boolean; backReason?: string }[] = [];
   for (const [id, data] of byAccount) {
     const account = accts.get(id);
     if (!account) continue;
     const ev = buildEvidence(data.jobs, data.signals, pack, roles, now, data.people);
-    const key = evidenceKey(ev);
+    // the key carries the prompt / catalog / industries version: editing any of them re-judges (re-builds) the play
+    const key = `${evidenceKey(ev)}:${playVer}`;
     const b = built.get(`${id}:${key}`);
-    const score = scoreAccount(ev, account, pack, b === undefined ? undefined : b ? playFromStored(b, ev) : null);
+    const stored = b === undefined ? undefined : b && (!judgedMode || b.rubric) ? playFromStored(b, ev) : null;
+    const score = scoreAccount(ev, account, pack, stored, judgedMode && stored ? learnedFor(learned, account.segment, stored.id) : undefined);
     evidenceKeys.set(id, key);
     // when each piece of evidence first existed: a role posted before the delivery but found later isn't new
     const firstSeen = new Map<string, Date>([
@@ -195,9 +206,11 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
 
   const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days, segmentOf: (a: ScoredAccount) => a.segment };
   const groups = pack.delivery.digest.region_groups;
-  const ranking = groups.length
+  let ranking = groups.length
     ? rankByRegionGroups(passed, groups, (a) => a.region, opts.poolScale ?? 1, 5, rankOpts)
     : rankAccounts(passed, opts.maxLeads ?? leadCap(pack), 5, rankOpts);
+  // judged mode: exploration slots for industries with too few labelled leads (only once there's data to compare to)
+  if (judgedMode && learned) ranking = exploreFor(ranking, passed, pack, learned, opts.poolScale ?? 1);
 
   // Person leads: no account, ranked on the post alone (plan 8a): strength x timing
   const pl = await db.select({
@@ -236,12 +249,19 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
     ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore, factsCandidates, gapCandidates,
     playCandidates: [...ranking.leads, ...ranking.watchlist].filter((l) => l.score.needsPlay).map((l) => ({ account: l.account, score: l.score, evidenceKey: evidenceKeys.get(l.account.id)! })),
+    // wider than the pool: every gate-passing account not judged yet, freshest evidence first, so the old weights
+    // decide only the order of judging, not who gets a chance
+    judgeCandidates: criticPassed.filter((r) => r.score.needsJudge && !(r.recentlyDelivered && !r.newSinceDelivery))
+      .sort((a, b) => Math.min(...a.score.drivers.map((e) => e.ageDays), 999) - Math.min(...b.score.drivers.map((e) => e.ageDays), 999) || b.score.priority - a.score.priority)
+      .map((r) => ({ account: r.account, score: r.score, evidenceKey: evidenceKeys.get(r.account.id)! })),
+    ...(learned ? { learnedLabels: learned.total } : {}),
     criticFailed: Object.fromEntries([...verdicts].filter(([, v]) => !v.pass).map(([id, v]) => [id, v.failed.map((f) => f.check)])), all: results.map((r) => ({ account: r.account, score: r.score })),
   };
 }
 
 /** A built play as stored (built_plays.play): the evidence it cites by type + URL. */
-export interface StoredPlay { title: string; need: string; angle: string; offer: string; personas: string[]; cited: { type: string; url: string }[] }
+export interface StoredPlay { title: string; need: string; angle: string; offer: string; personas: string[]; cited: { type: string; url: string }[];
+  /** judged mode */ rubric?: { specific: number; urgent: number; prize: number; deliverable: number }; free?: string; paid?: string[] }
 
 /** The account's positive evidence, as a stable key: a built play is reused until this changes. */
 export function evidenceKey(ev: Evidence[]): string {
@@ -251,5 +271,62 @@ export function evidenceKey(ev: Evidence[]): string {
 
 export function playFromStored(p: StoredPlay, ev: Evidence[]): PlayMatch {
   const cited = ev.filter((e) => p.cited.some((c) => c.type === e.type && c.url === e.url));
-  return { id: `built:${p.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`, title: p.title, angle: `${p.need} ${p.angle}`, offer: p.offer, personas: p.personas, qualifies: true, evidence: cited.length ? cited : ev.slice(0, 1) };
+  const evidence = cited.length ? cited : ev.slice(0, 1);
+  // judged plays are bucketed by the signal they stand on (for learned fit and the plays report); built ones by title
+  const id = p.rubric ? `judged:${evidence[0]?.type ?? "x"}` : `built:${p.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`;
+  return { id, title: p.title, angle: `${p.need} ${p.angle}`, offer: p.offer, personas: p.personas, qualifies: true, evidence, ...(p.rubric ? { rubric: p.rubric, free: p.free } : {}) };
+}
+
+/** The judge / builder prompt version: a changed prompt, catalog or industry file means a new judgement. */
+export function playVersion(pack: Pack): string {
+  const src = pack.signals.score.mode === "judged" ? judgeSystem(pack) : playBuilderSystem(pack);
+  return createHash("sha256").update(src + JSON.stringify(pack.icp.industries)).digest("hex").slice(0, 8);
+}
+
+/** Labelled outcomes by industry and play bucket: positive = 👍 or replied / meeting / won; counted = any label or outcome. */
+export interface LearnedStats { total: number; positive: number; bySegment: Map<string, { pos: number; n: number }>; byPlay: Map<string, { pos: number; n: number }>; minBucket: number; shrink: number }
+
+export async function loadLearned(pack: Pack): Promise<LearnedStats> {
+  const rows = (await getDb().execute(sql`
+    select coalesce(a.segment, '?') as seg,
+      coalesce(case when pm.play_id like 'built:%' then 'built' else pm.play_id end, 'none') as play,
+      count(distinct d.id) filter (where l.label = 'good' or l.outcome in ('replied','meeting','won'))::int as pos,
+      count(distinct d.id) filter (where l.label is not null or l.outcome is not null)::int as n
+    from ${deliveries} d join ${accounts} a on a.id = d.account_id
+    left join ${labels} l on l.delivery_id = d.id
+    left join ${playsMatched} pm on pm.account_id = d.account_id and pm.matched_at <= d.delivered_at + interval '1 day'
+    group by 1, 2`)).rows as { seg: string; play: string; pos: number; n: number }[];
+  const add = (m: Map<string, { pos: number; n: number }>, k: string, r: { pos: number; n: number }) => { const c = m.get(k) ?? { pos: 0, n: 0 }; c.pos += r.pos; c.n += r.n; m.set(k, c); };
+  const bySegment = new Map<string, { pos: number; n: number }>(), byPlay = new Map<string, { pos: number; n: number }>();
+  for (const r of rows) { add(bySegment, r.seg, r); add(byPlay, r.play, r); }
+  const total = [...bySegment.values()].reduce((n, x) => n + x.n, 0), positive = [...bySegment.values()].reduce((n, x) => n + x.pos, 0);
+  const j = pack.signals.score.judge;
+  return { total, positive, bySegment, byPlay, minBucket: j.min_bucket, shrink: j.shrink };
+}
+
+/**
+ * Learned fit for a lead (pure; exported for tests): each bucket's positive rate, shrunk toward the overall rate and
+ * counted only with min_bucket labelled leads; level = 0.5 at the overall rate, 1 at twice it. Neutral without data.
+ */
+export function learnedFor(st: LearnedStats | null, segment: string | null, playId: string): LearnedFit {
+  if (!st || st.total < st.minBucket * 2 || st.positive === 0) return { level: 0.5, rate: null, n: 0 };
+  const p0 = st.positive / st.total;
+  const rate = (b?: { pos: number; n: number }) => (b && b.n >= st.minBucket ? (b.pos + st.shrink * p0) / (b.n + st.shrink) : null);
+  const seg = rate(st.bySegment.get(segment ?? "?")), play = rate(st.byPlay.get(playId));
+  const known = [seg, play].filter((x): x is number => x != null);
+  const n = (st.bySegment.get(segment ?? "?")?.n ?? 0) + (st.byPlay.get(playId)?.n ?? 0);
+  if (!known.length) return { level: 0.5, rate: null, n };
+  const p = known.reduce((a, b) => a + b, 0) / known.length;
+  return { level: Math.max(0, Math.min(1, 0.5 * (p / p0))), rate: p, n };
+}
+
+function exploreFor(ranking: Ranking<ScoredAccount>, candidates: RI<ScoredAccount>[], pack: Pack, st: LearnedStats, scale: number): Ranking<ScoredAccount> {
+  if (st.total < st.minBucket * 2) return ranking; // nothing to compare against yet: every industry is untested
+  const groups = pack.delivery.digest.region_groups;
+  return applyExploration(ranking, candidates, {
+    share: pack.signals.score.judge.explore_share,
+    underTested: (r) => !!r.score.judged && (st.bySegment.get(r.account.segment ?? "?")?.n ?? 0) < st.minBucket,
+    groupOf: (r) => regionGroupFor(pack, r.account.region, r.account.segment)?.name ?? "",
+    capOf: (g) => (groups.find((x) => x.name === g)?.max_leads ?? leadCap(pack)) * scale,
+  });
 }

@@ -61,7 +61,18 @@ export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string
   const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days, segmentOf: (a: ScoredAccount) => a.segment };
   const groups = pack.delivery.digest.region_groups;
   // with region groups, each group keeps its own top N after re-ranking (so one region never takes another's slots)
-  const ranking = groups.length ? rankByRegionGroups(rows, groups, (a) => a.region, 1, 5, rankOpts) : rankAccounts(rows, max, 5, rankOpts);
+  let ranking = groups.length ? rankByRegionGroups(rows, groups, (a) => a.region, 1, 5, rankOpts) : rankAccounts(rows, max, 5, rankOpts);
+  // exploration slots chosen at scoring keep their place through the re-rank (they'd lose it to well-known industries)
+  const explorers = rows.filter((r) => r.score.judged?.exploring && !ranking.leads.some((l) => l.account.id === r.account.id));
+  if (explorers.length) {
+    const leads = [...ranking.leads];
+    for (const e of explorers) {
+      const g = groups.length ? rankByRegionGroups([e], groups, (a) => a.region, 1, 0, rankOpts).leads[0]?.group : undefined;
+      const out = leads.filter((l) => l.group === g && !l.score.judged?.exploring).sort((a, b) => a.score.priority - b.score.priority)[0];
+      if (out) leads[leads.indexOf(out)] = { ...e, group: out.group };
+    }
+    ranking = { ...ranking, leads };
+  }
   const noContact = [...pool.leads, ...pool.watchlist].filter((r) => !contacts.get(r.account.id)).length;
   return { ranking: { ...ranking, held: pool.held }, factors, noContact, enterprise };
 }

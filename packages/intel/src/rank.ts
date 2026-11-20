@@ -194,7 +194,13 @@ export function softFit(a: AccountFacts, icp: Pack["icp"]): number {
   return Object.entries(f.weights).reduce((sum, [k, w]) => sum + w * (parts[k] ?? 0.5), 0);
 }
 
-export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[]; personas?: string[]; qualifies?: boolean; /** play-specific offer (plays.yaml `offer`) */ offer?: string }
+/** The opportunity judge's four 0-5 ratings (signals.score.mode: judged). */
+export interface Rubric { specific: number; urgent: number; prize: number; deliverable: number }
+/** Reply rate learned from your labels for this lead's industry and play (judged mode's fit). */
+export interface LearnedFit { level: number; rate: number | null; n: number }
+
+export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[]; personas?: string[]; qualifies?: boolean; /** play-specific offer (plays.yaml `offer`) */ offer?: string;
+  /** judged mode: the ratings behind this play */ rubric?: Rubric; /** judged mode: the free capability (its list) */ free?: string }
 
 /**
  * A play fires when every required signal type is present within its window (current evidence always is), at least
@@ -265,6 +271,10 @@ export interface AccountScore {
   eligible: boolean;
   /** no pack play matched and plays.build is on: a play is still to be built from the evidence */
   needsPlay?: boolean;
+  /** judged mode: the account passes the gates and has no judgement for its current evidence yet */
+  needsJudge?: boolean;
+  /** judged mode: what the score is made of (the ratings, the learned rate, whether it's an exploration slot) */
+  judged?: { rubric: Rubric; learnedRate: number | null; learnedN: number; exploring?: boolean };
   evidence: Evidence[];
   plays: PlayMatch[];
   /** evidence that counted, strongest first (for "why now" and citations) */
@@ -276,7 +286,7 @@ export interface AccountScore {
  * `built`: the play built from this account's evidence when no pack play matched (plays.build): undefined = not built
  * yet (stays eligible so it can be built), null = the builder found no need (not eligible).
  */
-export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, built?: PlayMatch | null): AccountScore {
+export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, built?: PlayMatch | null, learned?: LearnedFit): AccountScore {
   const specs = pack.signals.signals;
   const cap = pack.signals.max_events_per_type;
 
@@ -315,7 +325,8 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, bu
   const fit = softFit(facts, pack.icp);
 
   const fixed = matchPlays(counted, pack.plays.plays).sort((a, b) => playStrength(b) - playStrength(a));
-  const building = !fixed.length && !!pack.plays.build?.enabled;
+  const judgedMode = pack.signals.score.mode === "judged";
+  const building = !judgedMode && !fixed.length && !!pack.plays.build?.enabled;
   const plays = building && built ? [built] : fixed;
   function playStrength(p: PlayMatch) { return p.evidence.reduce((n, e) => n + Math.log(specs[e.type]?.lr ?? 1) * 0.5 ** (e.ageDays / (specs[e.type]?.half_life_days ?? 30)), 0); }
   // fast lane = one strong, fresh signal is enough to deliver (plan 8d-2); stale "strong" signals aren't urgent
@@ -339,10 +350,26 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, bu
   // perfect-fit company with one weak signal doesn't. Each signal already decays by its own half-life inside need;
   // timing adds a small bonus for the freshest one (a still-true state is fresh).
   const w = pack.signals.score;
+  // judged mode: the judge's ratings replace the per-signal weights and the guessed fit; a "no" drops the account; an
+  // account not judged yet keeps its legacy score (so an API outage or spent cap never empties the digest)
+  if (judgedMode && built?.rubric) {
+    const r = built.rubric;
+    const jparts = scoreParts({ need: (r.specific + r.prize + r.deliverable) / 15, fit: learned?.level ?? 0.5, timing: r.urgent / 5, buyer: UNKNOWN_BUYER }, w);
+    return {
+      intent, fit: learned?.level ?? 0.5, timing: r.urgent / 5, priority: partsTotal(jparts) / 100, parts: jparts, baseRate: pack.signals.base_rate,
+      lane: fast ? "fast" : "combined", eligible: true, evidence: ev, plays: [built], drivers,
+      judged: { rubric: r, learnedRate: learned?.rate ?? null, learnedN: learned?.n ?? 0 },
+    };
+  }
+  if (judgedMode && built === null) {
+    const p0 = scoreParts({ need: needLevel(intent, pack.signals.base_rate, w.full_need_lift), fit, timing, buyer: UNKNOWN_BUYER }, w);
+    return { intent, fit, timing, priority: partsTotal(p0) / 100, parts: p0, baseRate: pack.signals.base_rate, lane: fast ? "fast" : "combined", eligible: false, evidence: ev, plays: fixed, drivers };
+  }
   const parts = scoreParts({ need: needLevel(intent, pack.signals.base_rate, w.full_need_lift), fit, timing, buyer: UNKNOWN_BUYER }, w);
   return {
     intent, fit, timing, priority: partsTotal(parts) / 100, parts, baseRate: pack.signals.base_rate,
     lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers, ...(building && built === undefined ? { needsPlay: true } : {}),
+    ...(judgedMode && built === undefined && eligibleBySignals ? { needsJudge: true } : {}),
   };
 }
 

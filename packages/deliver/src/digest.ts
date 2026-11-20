@@ -1,6 +1,6 @@
 import { leadCap, type Pack } from "@tell/config";
 import {
-  runScoring, istDay, buildMissingPlays, nicheStats, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  runScoring, istDay, buildMissingPlays, judgeAccounts, nicheStats, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
@@ -98,7 +98,14 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   } catch { gapNote = "need check failed"; }
   // no pack play fits: build one from the evidence (plays.build); a qualifying play makes the lead, "no need" drops it
   let playNote = "";
-  if (pack.plays.build?.enabled) {
+  if (pack.signals.score.mode === "judged") {
+    // one path: the judge rates every gate-passing account and writes its play (the builder doesn't run)
+    try {
+      const j = await judgeAccounts(score.judgeCandidates, pack);
+      playNote = j.skipped ? `judged: ${j.skipped}` : `judged ${j.judged}: ${j.qualified} opportunities, ${j.rejected} no${j.failed ? `, ${j.failed} failed` : ""}${score.learnedLabels != null ? `; learned from ${score.learnedLabels} labelled leads` : ""}`;
+      if (j.judged) score = await scoreRun(false);
+    } catch { playNote = "judge failed (legacy scores used)"; }
+  } else if (pack.plays.build?.enabled) {
     try {
       const b = await buildMissingPlays(score.playCandidates, pack);
       playNote = b.skipped ? `plays built: ${b.skipped}` : `plays built ${b.built}: ${b.qualified} qualified, ${b.rejected} no need${b.failed ? `, ${b.failed} failed` : ""}`;
@@ -160,7 +167,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const counts = { enrich: enrich.join("; "), leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   const deliveryRows = (at: Date) => score.ranking.leads.map((l) => ({
-    id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: at, kind: l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
+    id: ids.get(l.account.id)!, accountId: l.account.id, deliveredAt: at, kind: l.score.judged?.exploring ? "exploration" : l.score.lane === "fast" ? "fast" : "normal", configVersion: score.configVersion,
     sheetRow: leadSheetRow(l, contacts.get(l.account.id), day, notes?.get(l.account.id), pack.delivery.email.signature, pack.copy, pack.icp.calendar, taps?.get(l.account.id)?.enrich),
   }));
   if (opts.sheetOnly) {

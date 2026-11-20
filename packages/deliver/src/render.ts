@@ -165,8 +165,16 @@ export function gapLine(s: Lead["score"]): { missing: string; has: string } | nu
 }
 
 /** "Score 68 = need 34 · fit 16 · timing 12 · buyer 6": what the number is made of. */
-export const scoreLine = (s: Lead["score"]) =>
-  `Score ${displayScore(s)} = need ${Math.round(s.parts.need)} · fit ${Math.round(s.parts.fit)} · timing ${Math.round(s.parts.timing)} · buyer ${Math.round(s.parts.buyer)}`;
+export const scoreLine = (s: Lead["score"]) => {
+  const j = s.judged;
+  if (j) {
+    // judged mode: the ratings behind the number, the reply rate learned from your labels, exploration
+    const r = j.rubric;
+    const learned = j.learnedRate == null ? "learned: not enough labels yet" : `learned reply rate ${Math.round(j.learnedRate * 100)}%`;
+    return `Score ${displayScore(s)} = opportunity ${Math.round(s.parts.need + s.parts.timing)} (specific ${r.specific} · urgent ${r.urgent} · prize ${r.prize} · deliverable ${r.deliverable}, of 5) · ${learned} (${Math.round(s.parts.fit)}) · reach ${Math.round(s.parts.buyer)}${j.exploring ? " · exploring a new industry" : ""}`;
+  }
+  return `Score ${displayScore(s)} = need ${Math.round(s.parts.need)} · fit ${Math.round(s.parts.fit)} · timing ${Math.round(s.parts.timing)} · buyer ${Math.round(s.parts.buyer)}`;
+};
 
 /** The buyer's department, from buyers.yaml, for the name line. */
 const buyerDept = (c: Contact | null | undefined, personas: Pack["icp"]["personas"]) => (c?.persona ? personas.find((p) => p.title === c.persona)?.department : undefined);

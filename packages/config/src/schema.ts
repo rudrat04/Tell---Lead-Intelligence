@@ -72,7 +72,9 @@ export const IndustrySchema = z.object({
   buyers: z.array(z.string()).default([]),
   /** what you offer this industry: the play builder's offer for leads in it */
   offer: z.string().optional(),
-  /** what an opportunity looks like here (helps the play builder judge evidence) */
+  /** what opportunities here often look like: context for the judge / builder, never a filter */
+  hint: z.string().optional(),
+  /** older name for `hint` */
   opportunity: z.string().optional(),
   /** the free list `pnpm freelist` builds for leads here: federal_buyers | anda_holders | hospitals | permits | recompetes |
    *  gtm (no list: the GTM review) | manual (you put it together) */
@@ -80,6 +82,22 @@ export const IndustrySchema = z.object({
   /** described so companies can be classified into it, but never admitted (consumer brands) */
   excluded: z.boolean().default(false),
 });
+
+/** One thing you can actually deliver (capabilities.yaml). The judge composes each lead's offer from these: a free
+ *  first step (often a list public data can build) and the paid work after it. */
+export const CapabilitySchema = z.object({
+  id: z.string().regex(/^[a-z0-9_]+$/),
+  name: z.string(),
+  /** what the person receives, in plain words */
+  deliver: z.string().min(10),
+  /** given away as the first step */
+  free: z.boolean().default(false),
+  /** the pnpm freelist generator that builds it, when it's a list */
+  list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes"]).optional(),
+  /** when it fits (a hint for the judge) */
+  good_for: z.string().default(""),
+});
+export const CapabilitiesSchema = z.object({ capabilities: z.array(CapabilitySchema).default([]) });
 
 export const IcpSchema = z.object({
   hard_filters: z.object({
@@ -170,12 +188,25 @@ export const SignalsSchema = z.object({
    *           contacts are looked up
    */
   score: z.object({
+    /** legacy: need from per-signal likelihood ratios, fit from icp.soft_fit. judged: an opportunity judgement per lead
+     *  (specific + prize + deliverable -> need, urgent -> timing), fit = reply rate learned from your labels; accounts
+     *  not judged yet keep their legacy score */
+    mode: z.enum(["legacy", "judged"]).default("legacy"),
     need: z.number().min(0).default(50),
     fit: z.number().min(0).default(20),
     timing: z.number().min(0).default(15),
     buyer: z.number().min(0).default(15),
     full_need_lift: z.number().gt(1).default(25),
-  }).default({ need: 50, fit: 20, timing: 15, buyer: 15, full_need_lift: 25 }),
+    /** judged mode: accounts judged per digest (Haiku, cached per evidence + prompt version), the share of each list kept
+     *  for under-tested industries / plays (exploration), the labelled leads a bucket needs before its rate counts, and
+     *  how hard rates shrink toward the average (pseudo-count) */
+    judge: z.object({
+      per_run: z.number().int().min(1).max(300).default(60),
+      explore_share: z.number().min(0).max(0.5).default(0.2),
+      min_bucket: z.number().int().min(1).default(5),
+      shrink: z.number().min(0).default(10),
+    }).default({ per_run: 60, explore_share: 0.2, min_bucket: 5, shrink: 10 }),
+  }).default({ mode: "legacy", need: 50, fit: 20, timing: 15, buyer: 15, full_need_lift: 25, judge: { per_run: 60, explore_share: 0.2, min_bucket: 5, shrink: 10 } }),
   signals: z.record(z.string(), z.object({
     class: z.enum(["explicit", "implicit", "trigger", "pain", "negative"]),
     lr: z.number().gt(0),
@@ -699,7 +730,11 @@ export const PackSchema = z.object({
   copy: CopySchema.default(COPY_DEFAULT),
   critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60, enterprise: { url_patterns: [], title_patterns: [] } }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
+  capabilities: CapabilitiesSchema.default({ capabilities: [] }),
 }).superRefine((p, ctx) => {
+  const capIds = p.capabilities.capabilities.map((c) => c.id);
+  if (new Set(capIds).size !== capIds.length) ctx.addIssue({ code: "custom", path: ["capabilities"], message: "capability ids must be unique" });
+  if (p.signals.score.mode === "judged" && !p.capabilities.capabilities.some((c) => c.free)) ctx.addIssue({ code: "custom", path: ["capabilities"], message: "judged scoring needs capabilities.yaml with at least one free capability (the first step an offer gives)" });
   for (const t of CODE_SIGNAL_TYPES) {
     if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["signals", "signals", t], message: `signal type "${t}" is emitted by the code and must be defined` });
   }
@@ -808,4 +843,4 @@ export function leadCap(pack: Pick<Pack, "delivery">): number {
   if (g.length) return g.reduce((n, x) => n + x.max_leads, 0);
   return pack.delivery.digest.max_leads === 0 ? Infinity : pack.delivery.digest.max_leads;
 }
-export const PACK_FILES = ["pack", "icp", "industries", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;
+export const PACK_FILES = ["pack", "icp", "industries", "capabilities", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;
