@@ -24,8 +24,8 @@ const GENERIC = new Set(["india", "indian", "the", "this", "startup", "exclusive
  * ("Child-care startup Nestly raises..." -> "Nestly"; "From rafting to trekking: Trailkit raises..." -> "Trailkit").
  * Null when no plausible name is found.
  */
-export function companyFromHeadline(title: string): string | null {
-  const m = title.match(new RegExp(`^(.*?)${VERBS.source}`, "i"));
+export function companyFromHeadline(title: string, verbs: RegExp = VERBS): string | null {
+  const m = title.match(new RegExp(`^(.*?)${verbs.source}`, "i"));
   if (!m) return null;
   // anything before a colon is a lead-in ("Exclusive:", "From X to Y:")
   const before = m[1]!.split(/:\s+/).pop()!.replace(/^\[[^\]]*\]\s*/, "").trim();

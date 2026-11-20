@@ -22,8 +22,8 @@ export interface AnalystInput {
 }
 
 const Raw = z.object({
-  hypothesis: z.string().min(10).max(400),
-  angle: z.string().min(5).max(300),
+  hypothesis: z.string().min(10).max(600),
+  angle: z.string().min(5).max(600),
   opener: z.string().min(10).max(300),
   citations: z.array(z.number().int()).min(1).max(6),
   counter_evidence: z.string().max(300).nullable().optional(),
@@ -154,31 +154,37 @@ export function copiedRun(email: string, brief: string[]): string | null {
 }
 const DURATION = /\b\d+\+?\s*(?:days?|weeks?|months?|years?)\b|\b(?:for|over)\s+(?:weeks|months|years|a while|a long time|so long)\b|\b(?:a|one|two|three|several|many|few)\s+(?:weeks|months)\s+(?:now|ago)\b/i;
 
+/** why the last validateAnalysis() call returned null: fed back to the model so a rewrite can fix it */
+export let lastRejectReason = "";
+const reject = (why: string) => { lastRejectReason = why; return null; };
+
 export function validateAnalysis(raw: string, input: AnalystInput, opts: { allowedText?: string; maxWords?: number } & CopyChecks = {}): Analysis | null {
+  lastRejectReason = "";
   let json: unknown;
-  try { json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)); } catch { return null; }
+  try { json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)); } catch { return reject("the reply was not valid JSON"); }
   const p = Raw.safeParse(json);
-  if (!p.success) return null;
+  if (!p.success) return reject(`the JSON doesn't match the keys and limits (${p.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")})`);
   const r = p.data;
   const cites = [...new Set(r.citations)];
-  if (cites.some((c) => c < 0 || c >= input.evidence.length)) return null;
+  if (cites.some((c) => c < 0 || c >= input.evidence.length)) return reject(`citations must be evidence indexes 0 to ${input.evidence.length - 1}`);
   // every quoted phrase must appear verbatim in an evidence quote
   const all = input.evidence.map((e) => norm(e.quote));
   for (const text of [r.hypothesis, r.opener, r.angle]) {
     for (const m of text.matchAll(/["“]([^"”]{3,})["”]/g)) {
       const q = norm(m[1]!);
-      if (!all.some((c) => c.includes(q))) return null;
+      if (!all.some((c) => c.includes(q))) return reject(`the hypothesis, opener or angle puts "${m[1]}" in quotation marks but those exact words are not in the evidence (quote exactly, or drop the quotation marks)`);
     }
   }
   // unquoted numbers and funding rounds must also come from the input (no invented "$4M Series A")
   const source = norm(`${analystUserPrompt(input)}\n${opts.allowedText ?? ""}`);
   const numbersOk = (text: string) => [...norm(text).matchAll(/\d+(?:[.,]\d+)*|\bseries [a-f]\b/g)]
-    .every((m) => new RegExp(`(^|[^0-9a-z])${m[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^0-9a-z])`).test(source));
+    .every((m) => new RegExp(`(^|[^0-9a-z])${m[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:k|m|b|bn|mn|cr|l)?($|[^0-9a-z])`).test(source));
   const quotesOk = (text: string) => [...text.matchAll(/["“]([^"”]{3,})["”]/g)].every((m) => all.some((c) => c.includes(norm(m[1]!))));
-  if (![r.hypothesis, r.opener, r.angle].every(numbersOk)) return null;
+  const badNum = [r.hypothesis, r.opener, r.angle].find((t) => !numbersOk(t));
+  if (badNum) return reject(`the hypothesis, opener or angle uses a number that is not in the evidence ("${badNum.slice(0, 120)}"): use only numbers written in the evidence, exactly as written`);
   // the code writes the greeting
   const opener = r.opener.replace(/^(hi|hey|hello|dear)\b[^,]{0,40},\s*/i, "").trim();
-  if (opener.length < 10) return null;
+  if (opener.length < 10) return reject("the opener is too short");
   // the email and the LinkedIn message are checked the same way; if one fails, the analysis stands without it
   const lower = (t: string) => t.toLowerCase();
   // only tools this lead's evidence names: "Drift", "Qualified", "Segment" are ordinary words everywhere else
@@ -274,7 +280,7 @@ export const MAX_REWRITES = 2;
  * One lead: the model thinks first (writing is the hard part), then code checks the result. When the email fails a
  * check, it is rewritten with the reasons, up to MAX_REWRITES times; whatever still fails is dropped (never a generic template).
  */
-export async function analyzeLead(llm: LlmClient, pack: Pack, input: AnalystInput): Promise<Analysis | null> {
+export async function analyzeLead(llm: LlmClient, pack: Pack, input: AnalystInput, onReject?: (reasons: string) => void): Promise<Analysis | null> {
   if (!input.evidence.length) return null;
   const system = analystSystemPrompt(pack);
   const c = pack.copy;
@@ -307,7 +313,8 @@ export async function analyzeLead(llm: LlmClient, pack: Pack, input: AnalystInpu
     if (best?.email && best.linkedin) return { ...best, emailProblems: undefined, linkedinProblems: undefined };
     rejected.push(a
       ? [a.email ? "" : `the email ${(a.emailProblems ?? []).join("; ")}`, a.linkedin ? "" : `the LinkedIn message ${(a.linkedinProblems ?? []).join("; ")}`].filter(Boolean).join(" | ")
-      : "the reply must be the JSON object, cite only listed evidence, and quote only exact words from it");
+      : lastRejectReason || "the reply must be the JSON object, cite only listed evidence, and quote only exact words from it");
+    onReject?.(rejected.at(-1)!);
   }
   return best;
 }

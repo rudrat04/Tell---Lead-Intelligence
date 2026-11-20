@@ -45,6 +45,16 @@ jobs:
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
           TICK_MAX_PER_SOURCE: ${{ inputs.max_per_source }}
+      # niche records over the per-run lookup cap wait in niche_queue; each tick looks up the most valuable few,
+      # until the day's search budget (sources.niche.daily_budget) is spent. Counts only.
+      - name: Niche lookup queue
+        continue-on-error: true
+        run: pnpm niche drain
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
 
       # Optional dead-man's switch for the 30-minute tick (add the secret once the external scheduler is live)
       - name: Dead-man's switch ping

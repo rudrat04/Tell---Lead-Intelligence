@@ -81,7 +81,9 @@ export async function analyzeLeads(
   try {
     for (const p of todo) {
       let a: Analysis | null = null;
-      try { a = await analyzeLead(llm, pack, p.input); } catch { /* cap reached or API down: code opener stands */ }
+      // TELL_DEBUG_DRAFTS=1 (local only: it prints lead details) shows why drafts were rejected
+      const debug = process.env.TELL_DEBUG_DRAFTS && !process.env.CI ? (r: string) => console.error(`[draft rejected] ${p.input.company}: ${r}`) : undefined;
+      try { a = await analyzeLead(llm, pack, p.input, debug); } catch (e) { debug?.(`error: ${(e as Error).message}`); }
       if (!a) { res.failed++; continue; }
       out.set(p.l.account.id, a);
       res.fresh++;

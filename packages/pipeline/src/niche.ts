@@ -3,10 +3,12 @@ import {
   fetchShortages, fetchAndaHolders, holderCounts, fetchExpiringAwards, fetchNewProviders, exaCompanySearch, companyKey, isSourceEnabled,
   fetchClearances, fetchAndaApprovals, fetchNewAwards, socrataRows, fillTemplate, fetchFormDFilings, fetchFormDDetail,
   type Shortage, type AndaHolder, type ExpiringAward, type NewProvider, type CompanyHit, type DeviceClearance, type AndaApproval, type NewAward, type FormDDetail, type FormDFiling,
+  googlePlaces, serperPlaces, fetchNppesWeekly, requestSamExtract, downloadSamExtract, fetchRecalls, serperNews, companyFromHeadline,
+  type PlaceHit, type NewNpi, type SamEntity, type Recall, type NewsItem,
 } from "@tell/watchers";
 import { passesHardFilters, regionInScope } from "@tell/intel";
 import { registrableDomain, nameMatchesDomain, checkHomepage, domainLists, type DomainLists } from "@tell/people";
-import { getDb, accounts, signals, companySeeds, and, eq, sql } from "@tell/db";
+import { getDb, accounts, signals, companySeeds, people, nicheQueue, usageDaily, and, eq, sql, desc } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
 import { neonUsage, type UsageStore } from "./usage.js";
 import { bandForHeadcount } from "./company-facts.js";
@@ -35,9 +37,19 @@ export interface NicheRecord {
   /** the company description must mention this (keeps a same-name company in another industry out) */
   mustMention?: RegExp;
   signal: { type: string; quote: string; url: string; observedAt: Date };
+  /** the record's own website for the company (SAM registrations): checked like any other candidate */
+  website?: string | null;
+  /** where the record itself says the company is (NPPES, SAM, FMCSA): used when the company index has no HQ */
+  knownRegion?: string;
+  /** a Maps search for the website when the company index finds nothing ("Acme Trucking Fresno CA") */
+  mapsQuery?: string;
+  /** small local businesses (new clinics, agencies, carriers) are rarely in the company index: try Maps first */
+  mapsFirst?: boolean;
+  /** named people the record lists (authorized official, registrant contact, Form D executive): saved as people */
+  contacts?: { name: string; role: string }[];
 }
 
-export interface NicheResult { source: string; records: number; companies: number; looked: number; resolved: number; accountsNew: number; signals: number; noMatch: number; notRegion: number; filtered: number; badSite: number; capped: number; errors: number; skipped?: string }
+export interface NicheResult { contacts?: number; source: string; records: number; companies: number; looked: number; resolved: number; accountsNew: number; signals: number; noMatch: number; notRegion: number; filtered: number; badSite: number; capped: number; errors: number; skipped?: string }
 
 const empty = (source: string): NicheResult => ({ source, records: 0, companies: 0, looked: 0, resolved: 0, accountsNew: 0, signals: 0, noMatch: 0, notRegion: 0, filtered: 0, badSite: 0, capped: 0, errors: 0 });
 
@@ -89,9 +101,12 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
   const now = deps.now ?? new Date();
   const usage = deps.usage ?? neonUsage();
   const lists = domainLists(pack.domains);
-  const search = deps.companies ?? ((q: string) => exaCompanySearch(q));
+  const exa = deps.companies ?? ((q: string) => exaCompanySearch(q));
   const homepage = deps.homepage ?? checkHomepage;
-  const cap = pack.sources.niche.per_run;
+  // per-run cap, within the day's search budget across every niche run (usage_daily "exa_niche")
+  const budget = pack.sources.niche.daily_budget;
+  const cap = Math.max(0, Math.min(pack.sources.niche.per_run, budget - (await usage.spentToday("exa_niche"))));
+  const maps = await mapsClient(pack, usage, now);
   let searches = 0;
   res.records += records.length;
 
@@ -111,10 +126,9 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
     }
     if (!accountId) {
       if (seed && !seed.fitPass && seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < RETRY_DAYS * DAY) continue;
-      if (searches >= cap) { res.capped++; continue; }
+      if (searches >= cap) { res.capped++; await enqueue(seedSource, k, recs); continue; }
       searches++;
       res.looked++;
-      await usage.addSpend("exa_niche", 1, cap * 3);
       const v = await resolve(r0).catch(() => ({ reason: "error" } as Verdict));
       if (v.reason === "no-match") res.noMatch++;
       else if (v.reason === "error") res.errors++;
@@ -125,7 +139,15 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
       await db.insert(companySeeds).values({ source: seedSource, sourceId: k, domain: v.domain ?? null, fitPass: !!accountId, reason: v.reason, siteCheckedAt: now, updatedAt: now })
         .onConflictDoUpdate({ target: [companySeeds.source, companySeeds.sourceId], set: { domain: v.domain ?? null, fitPass: !!accountId, reason: v.reason, siteCheckedAt: now, updatedAt: now } });
     }
+    await db.delete(nicheQueue).where(and(eq(nicheQueue.source, seedSource), eq(nicheQueue.key, k)));
     if (!accountId) continue;
+    // people the records name (authorized officials, registrant contacts, Form D executives): a contact to reach
+    const named = new Map(recs.flatMap((r) => r.contacts ?? []).filter((c) => c.name.trim().split(/\s+/).length >= 2).map((c) => [c.name.toLowerCase(), c]));
+    if (named.size) {
+      await db.insert(people).values([...named.values()].map((c) => ({ accountId: accountId!, fullName: c.name, role: c.role || null, source: "public_record", confidence: 0.8, sourceUrl: r0.signal.url, fetchedAt: now })))
+        .onConflictDoUpdate({ target: [people.accountId, people.fullName, people.source], set: { role: sql`excluded.role`, fetchedAt: sql`excluded.fetched_at` } });
+      res.contacts = (res.contacts ?? 0) + named.size;
+    }
     for (const r of recs) {
       const spec = pack.signals.signals[r.signal.type];
       if (!spec) continue; // the pack doesn't use this signal type
@@ -142,9 +164,23 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
   type Verdict = { reason: string; domain?: string; isNew?: boolean; accountId?: string };
 
   async function resolve(r: NicheRecord): Promise<Verdict> {
-    const m = matchCompany(r.name, await search(r.query), lists, r.mustMention);
+    // 1. the record's own website; 2. the company index; 3. Maps (website only)
+    let m: { hit: CompanyHit; domain: string } | null = null;
+    const own = r.website ? registrableDomain(/^https?:/i.test(r.website) ? r.website : `https://${r.website}`) : null;
+    if (own && !lists.neverCompany.has(own) && !lists.freeMail.has(own) && nameMatchesDomain(r.name, own)) {
+      m = { hit: { name: r.name, url: `https://${own}`, employees: null, description: "", country: r.knownRegion ?? null }, domain: own };
+    }
+    const viaMaps = async () => {
+      if (!maps || !r.mapsQuery) return null;
+      const hit = await maps.lookup(r.mapsQuery, r.knownRegion ?? r.regions[0] ?? "");
+      return hit ? matchCompany(r.name, [{ name: hit.name, url: hit.website!, employees: null, description: hit.name, country: r.knownRegion ?? null }], lists) : null;
+    };
+    if (!m && r.mapsFirst) m = await viaMaps();
+    // the company index costs a search (usage_daily "exa_niche", within the daily budget)
+    if (!m) { await usage.addSpend("exa_niche", 1, budget); m = matchCompany(r.name, await exa(r.query), lists, r.mustMention); }
+    if (!m && !r.mapsFirst) m = await viaMaps();
     if (!m) return { reason: "no-match" };
-    const region = regionName(m.hit.country);
+    const region = regionName(m.hit.country) ?? r.knownRegion ?? null;
     if (!region || !r.regions.includes(region) || !regionInScope(region, pack.icp, r.segment)) return { reason: "not-region", domain: m.domain };
     const home = await homepage(m.domain);
     if (!home.ok) return { reason: "bad-site", domain: m.domain };
@@ -343,6 +379,8 @@ export function clearanceRecords(cs: DeviceClearance[], cfg: NonNullable<Niche["
     const name = titleName(c.applicant);
     return {
       source: "fda_510k", name, query: `${name} medical device company`, segment: cfg.segment, regions: cfg.regions, mustMention: MEDTECH,
+      knownRegion: c.country === "IN" ? "India" : c.country === "US" ? "United States of America" : undefined, mapsQuery: `${name} ${c.city}`,
+      ...(c.contact ? { contacts: [{ name: c.contact, role: "Regulatory contact (FDA 510(k))" }] } : {}),
       signal: { type: "device_cleared", quote: `${name} received FDA 510(k) clearance ${c.kNumber} for ${c.device.toLowerCase()}${c.panel ? ` (${c.panel.toLowerCase()})` : ""} on ${monthYear(c.decidedAt)} (${isoDay(c.decidedAt)}).`, url: c.url, observedAt: c.decidedAt },
     };
   }).sort((a, b) => Number(likelyForeign(a.name)) - Number(likelyForeign(b.name)));
@@ -386,7 +424,8 @@ export function formDRecords(ds: FormDDetail[], cfg: NonNullable<Niche["form_d"]
     const name = titleName(d.entity);
     const raised = d.sold != null && d.sold > 0 ? `${fmtUsd(d.sold)} sold${d.offering ? ` of a ${fmtUsd(d.offering)} offering` : ""}` : d.offering ? `a ${fmtUsd(d.offering)} offering` : "an offering of undisclosed size";
     return [{
-      source: "form_d", name, query: `${name} ${d.city} company`, segment, regions: [region],
+      source: "form_d", name, query: `${name} ${d.city} company`, segment, regions: [region], knownRegion: region, mapsQuery: `${name} ${d.city} ${d.state}`,
+      contacts: (d.executives ?? []).map((e) => ({ name: e.name, role: "Executive Officer (SEC Form D)" })),
       signal: { type: "form_d_raise", quote: `${name} (${d.city}${d.state.length === 2 ? `, ${d.state}` : ""}) filed a Form D with the SEC on ${isoDay(d.filedAt)}: ${raised} (industry: ${d.industry.toLowerCase()}).`, url: d.url, observedAt: d.filedAt },
     }];
   });
@@ -412,8 +451,13 @@ export function socrataRecord(row: Record<string, unknown>, cfg: SocrataCfg, now
   const key = String(row[cfg.key_field] ?? "").trim();
   if (!key) return null;
   const url = cfg.url ? fillTemplate(cfg.url, fields) : `https://${cfg.domain}/resource/${cfg.dataset}.json?${encodeURIComponent(cfg.key_field)}=${encodeURIComponent(key)}`;
+  const site = cfg.website ? fillTemplate(cfg.website, fields) : "";
+  const contactName = cfg.contact ? fillTemplate(cfg.contact.name, fields) : "";
   return {
-    source: `socrata_${cfg.id}`, name, query: fillTemplate(cfg.query, fields), segment: cfg.segment, regions: [cfg.region],
+    source: `socrata_${cfg.id}`, name, query: fillTemplate(cfg.query, fields), segment: cfg.segment, regions: [cfg.region], knownRegion: cfg.region,
+    mapsQuery: fillTemplate(cfg.maps_query ?? cfg.query, fields), ...(cfg.maps_first ? { mapsFirst: true } : {}),
+    ...(site ? { website: site.includes("@") ? site.split("@")[1]!.trim() : site } : {}),
+    ...(contactName ? { contacts: [{ name: contactName, role: cfg.contact!.role }] } : {}),
     ...(cfg.must_mention ? { mustMention: new RegExp(cfg.must_mention, "i") } : {}),
     signal: { type: cfg.signal_type, quote: fillTemplate(cfg.quote, fields), url, observedAt: at },
   };
@@ -489,4 +533,231 @@ export async function runSocrata(deps: Deps & { rows?: (cfg: SocrataCfg, where: 
     } catch { res.errors++; out.push(res); }
   }
   return out;
+}
+
+// ------------------------------------------------------------------------------------------------ queue + Maps
+
+/** Strength first, then the largest amount in the quote ("$4.2M"): the most valuable records are looked up first. */
+export function queuePriority(recs: NicheRecord[], pack: Pack): number {
+  const strength = Math.max(...recs.map((r) => pack.signals.signals[r.signal.type]?.strength ?? 0));
+  const amount = Math.max(0, ...recs.map((r) => { const m = r.signal.quote.match(/\$([\d.]+)([MBK])/); return m ? Number(m[1]) * (m[2] === "B" ? 1000 : m[2] === "K" ? 0.001 : 1) : 0; }));
+  return strength * 1000 + Math.min(999, amount);
+}
+
+const toJson = (recs: NicheRecord[]) => recs.map((r) => ({ ...r, mustMention: r.mustMention?.source, signal: { ...r.signal, observedAt: r.signal.observedAt.toISOString() } }));
+const fromJson = (rows: unknown): NicheRecord[] => (rows as (Omit<NicheRecord, "mustMention" | "signal"> & { mustMention?: string; signal: { type: string; quote: string; url: string; observedAt: string } })[])
+  .map((r) => ({ ...r, mustMention: r.mustMention ? new RegExp(r.mustMention, "i") : undefined, signal: { ...r.signal, observedAt: new Date(r.signal.observedAt) } }));
+
+let queuePack: Pack | null = null;
+async function enqueue(source: string, key: string, recs: NicheRecord[]) {
+  const priority = queuePack ? queuePriority(recs, queuePack) : 0;
+  await getDb().insert(nicheQueue).values({ source, key, records: toJson(recs), priority })
+    .onConflictDoUpdate({ target: [nicheQueue.source, nicheQueue.key], set: { records: toJson(recs), priority } });
+}
+
+/**
+ * Every tick: look up the most valuable queued companies, within the per-run cap and the day's search budget
+ * (sources.niche.daily_budget). Records a lookup can't reach today stay queued; a record older than 60 days is dropped.
+ */
+export async function drainNicheQueue(deps: Deps & { limit?: number }): Promise<NicheResult & { queued: number; dropped: number }> {
+  const db = getDb();
+  const now = deps.now ?? new Date();
+  queuePack = deps.pack;
+  const old = await db.delete(nicheQueue).where(sql`${nicheQueue.queuedAt} < ${new Date(now.getTime() - 60 * DAY)}`).returning({ k: nicheQueue.key });
+  const rows = await db.select().from(nicheQueue).orderBy(desc(nicheQueue.priority), nicheQueue.queuedAt).limit(deps.limit ?? deps.pack.sources.niche.per_run);
+  const res = { ...empty("queue"), queued: 0, dropped: old.length };
+  for (const row of rows) await persistNicheRecords(fromJson(row.records), deps, res);
+  res.queued = Number((await db.execute(sql`select count(*)::int as n from ${nicheQueue}`)).rows[0]?.n ?? 0);
+  return res;
+}
+
+/** Google Places (GOOGLE_MAPS_API_KEY, monthly cap) or Serper places (SERPER_API_KEY, daily cap): a website for a name. */
+async function mapsClient(pack: Pack, usage: UsageStore, now: Date) {
+  queuePack = pack;
+  const cfg = pack.sources.niche.maps;
+  if (!cfg.enabled) return null;
+  const google = process.env.GOOGLE_MAPS_API_KEY, serper = process.env.SERPER_API_KEY;
+  if (!google && !serper) return null;
+  const month = now.toISOString().slice(0, 7);
+  const monthUsed = async () => Number((await getDb().select({ n: sql<number>`coalesce(sum(${usageDaily.used}), 0)` }).from(usageDaily)
+    .where(and(eq(usageDaily.service, "google_places"), sql`${usageDaily.day}::text like ${`${month}%`}`)))[0]?.n ?? 0);
+  return {
+    async lookup(query: string, region: string): Promise<PlaceHit | null> {
+      const code = region === "India" ? "IN" : "US";
+      let hits: PlaceHit[] = [];
+      try {
+        if (google && (await monthUsed()) < cfg.google_per_month) { await usage.addSpend("google_places", 1, cfg.google_per_month); hits = await googlePlaces(google, query, code); }
+        else if (serper && (await usage.spentToday("serper_places")) < cfg.serper_per_day) { await usage.addSpend("serper_places", 1, cfg.serper_per_day); hits = await serperPlaces(serper, query, code.toLowerCase()); }
+      } catch { return null; }
+      return hits.find((h) => h.website) ?? null;
+    },
+  };
+}
+
+// ------------------------------------------------------------------------------------------------ NPPES, SAM, recalls, news, DMF
+
+const HEALTH = /health|care|clinic|medical|hospice|home|nursing|therapy|dental|lab|pharmacy|hospital|physician|rehab|senior|living|supply|equipment|transport/i;
+
+export function nppesRecords(ns: NewNpi[], cfg: NonNullable<Niche["nppes"]>): NicheRecord[] {
+  return ns.flatMap((n) => {
+    const t = cfg.taxonomies[n.taxonomy];
+    if (!t) return [];
+    return [{
+      source: "nppes", mapsFirst: true, name: n.name, query: `${n.name} ${t.label} ${n.city} ${n.state}`, segment: t.segment, regions: ["United States of America"], knownRegion: "United States of America",
+      mapsQuery: `${n.name} ${n.city} ${n.state}`, mustMention: HEALTH,
+      contacts: n.official ? [{ name: n.official.name, role: n.official.title || "Authorized Official" }] : [],
+      signal: { type: "new_provider_npi", quote: `${n.name} (${n.city}, ${n.state}) registered a new NPI as a ${t.label.toLowerCase()} on ${monthYear(n.enumeratedAt)} (${isoDay(n.enumeratedAt)}; NPI ${n.npi}).`, url: n.url, observedAt: n.enumeratedAt },
+    }];
+  });
+}
+
+export function samRecords(es: SamEntity[], cfg: NonNullable<Niche["sam_entities"]>): NicheRecord[] {
+  const prefixes = Object.keys(cfg.naics_prefixes).sort((a, b) => b.length - a.length);
+  return es.flatMap((e) => {
+    const p = prefixes.find((x) => e.naics.startsWith(x));
+    const region = cfg.countries[e.country];
+    if (!p || !region) return [];
+    const since = e.startedAt ? `; in business since ${e.startedAt.getUTCFullYear()}` : "";
+    const where = [e.city, e.state].filter(Boolean).join(", ");
+    return [{
+      source: "sam_entities", name: e.name, query: `${e.name} ${e.city} company`, segment: cfg.naics_prefixes[p]!, regions: [region], knownRegion: region,
+      website: e.website, mapsQuery: `${e.name} ${where}`,
+      contacts: e.contact ? [{ name: e.contact.name, role: e.contact.title || "Business contact (SAM.gov)" }] : [],
+      signal: { type: "new_federal_registrant", quote: `${e.name}${where ? ` (${where})` : ""} registered with SAM.gov to bid on US federal contracts on ${isoDay(e.registeredAt)} (primary NAICS ${e.naics}${since}).`,
+        url: `https://sam.gov/entity/${e.uei}`, observedAt: e.registeredAt },
+    }];
+  });
+}
+
+/** The molecule a recall is about: openFDA's substance, else the leading words of the product description. */
+export function recallSubstance(r: Recall): string | null {
+  if (r.substances[0]) return r.substances[0];
+  const m = r.product.toUpperCase().match(/^([A-Z][A-Z -]{3,40}?)(?=\s+(?:\d|USP|INJECTION|TABLETS?|CAPSULES?|ORAL|SOLUTION|FOR\b|EXTENDED|DELAYED|HCL|HYDROCHLORIDE|SODIUM|,|\())/);
+  return m ? m[1]!.trim() : null;
+}
+
+export function recallRecords(r: Recall, holders: AndaHolder[], cfg: NonNullable<Niche["recalls"]>): NicheRecord[] {
+  const firm = companyKey(r.firm).slice(0, 6);
+  const substance = recallSubstance(r);
+  if (!substance) return [];
+  return holders.filter((h) => !companyKey(h.sponsor).startsWith(firm) && !h.labelers.some((l) => companyKey(l).startsWith(firm))).map((h) => {
+    const name = fullName(h.labelers, titleName(h.sponsor));
+    return {
+      source: "fda_recalls", name, query: `${name} pharmaceutical company`, segment: cfg.segment, regions: cfg.regions, mustMention: PHARMA,
+      signal: { type: "competitor_recall", quote: `${titleName(r.firm)} recalled ${shortDesc(r.product)} (FDA ${r.classification}: ${shortDesc(r.reason)}) on ${isoDay(r.reportedAt)} (recall ${r.recallNumber}). ${name} holds ANDA ${h.appNo} for ${title2(substance)}${h.marketed ? " and markets it" : ""}.`,
+        url: `${h.url}#recall-${r.recallNumber}`, observedAt: r.reportedAt },
+    };
+  });
+}
+const title2 = (s: string) => s.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+type NewsCfg = Niche["news_events"][number];
+export function newsRecords(items: NewsItem[], cfg: NewsCfg, now: Date): NicheRecord[] {
+  const verbs = new RegExp(`\\s+(?:${cfg.verbs})\\b`, "i"), must = cfg.must ? new RegExp(cfg.must, "i") : null;
+  const seen = new Set<string>();
+  return items.flatMap((i) => {
+    if (must && !must.test(i.title)) return [];
+    const name = companyFromHeadline(i.title, verbs);
+    if (!name || seen.has(companyKey(name))) return [];
+    seen.add(companyKey(name));
+    return [{
+      source: `news_${cfg.id}`, name, query: `${name} ${cfg.segment.replace(/_/g, " ")} company ${cfg.region}`, segment: cfg.segment, regions: [cfg.region], knownRegion: cfg.region,
+      ...(cfg.must_mention ? { mustMention: new RegExp(cfg.must_mention, "i") } : {}),
+      signal: { type: cfg.signal_type, quote: `${i.title}${i.outlet ? ` (${i.outlet})` : ""}`, url: i.url, observedAt: i.postedAt && i.postedAt <= now ? i.postedAt : now },
+    }];
+  });
+}
+
+/** FDA's DMF list saved as CSV (DMF#, STATUS, TYPE, SUBMIT DATE, HOLDER, SUBJECT) x the shortage list (pure). */
+export function dmfRecords(rows: Record<string, string>[], shortages: Shortage[], now: Date): NicheRecord[] {
+  const col = (r: Record<string, string>, ...names: string[]) => { for (const n of names) for (const [k, v] of Object.entries(r)) if (k.toLowerCase().replace(/[^a-z]/g, "") === n) return v; return ""; };
+  // the molecule's name, not its salt ("SODIUM BICARBONATE" needs both words; "LIDOCAINE HYDROCHLORIDE" just the first)
+  const SALT = /^(SODIUM|POTASSIUM|CALCIUM|MAGNESIUM|ZINC|FERRIC|FERROUS|AMMONIUM|DEXTROSE|STERILE)$/;
+  const subs = shortages.map((s) => { const w = s.substance.split(/\s+/).map((x) => x.replace(/[^A-Z0-9-]/g, "")); const core = SALT.test(w[0]!) ? w.slice(0, 2).join("\\s+") : w[0]!; return { s, rx: new RegExp(`\\b${core}\\b`, "i") }; });
+  return rows.flatMap((r) => {
+    if (!/^a/i.test(col(r, "status")) || !/^ii$/i.test(col(r, "type").trim())) return [];
+    const subject = col(r, "subject"), holder = col(r, "holder").trim(), no = col(r, "dmf");
+    const hit = subs.find((x) => x.rx.test(subject));
+    if (!hit || !holder || !no) return [];
+    const name = titleName(holder);
+    return [{
+      source: "fda_dmf", name, query: `${name} active pharmaceutical ingredient manufacturer`, segment: "pharma", regions: ["India", "United States of America"], mustMention: PHARMA,
+      signal: { type: "shortage_dmf_holder", quote: `${hit.s.name} is on the FDA drug shortage list (${hit.s.availability.toLowerCase()}). ${name} holds active Type II DMF ${no} for ${subject.toLowerCase().slice(0, 120)}${col(r, "submitdate") ? ` (submitted ${col(r, "submitdate")})` : ""}.`,
+        url: `https://www.fda.gov/drugs/drug-master-files-dmfs/list-drug-master-files-dmfs#dmf-${no}`, observedAt: now },
+    }];
+  });
+}
+
+export async function runNppes(deps: Deps & { fetch?: (tax: Set<string>, since: Date) => Promise<NewNpi[]> }): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.nppes;
+  const g = guard("nppes", "nppes", cfg?.enabled && Object.keys(cfg.taxonomies).length > 0, deps); if (g) return g;
+  const now = deps.now ?? new Date(), res = empty("nppes");
+  try {
+    const ns = await (deps.fetch ?? fetchNppesWeekly)(new Set(Object.keys(cfg!.taxonomies)), new Date(now.getTime() - cfg!.max_age_days * DAY));
+    return await persistNicheRecords(nppesRecords(ns, cfg!), deps, res);
+  } catch { res.errors++; return res; }
+}
+
+/** Two requests a day at most (personal SAM keys get 10): download yesterday's extract, request the next one. */
+export async function runSamEntities(deps: Deps): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.sam_entities;
+  const g = guard("sam_entities", "sam", cfg?.enabled && Object.keys(cfg.naics_prefixes).length > 0, deps); if (g) return g;
+  const key = process.env.SAM_API_KEY;
+  if (!key) return { ...empty("sam_entities"), skipped: "SAM_API_KEY not set" };
+  const db = getDb(), now = deps.now ?? new Date(), res = empty("sam_entities");
+  const state = { source: "sam_extract", sourceId: "pending" };
+  const [pending] = await db.select().from(companySeeds).where(and(eq(companySeeds.source, state.source), eq(companySeeds.sourceId, state.sourceId))).limit(1);
+  try {
+    if (pending?.reason) {
+      const es = await downloadSamExtract(key, pending.reason);
+      if (!es) {
+        if (pending.siteCheckedAt && now.getTime() - pending.siteCheckedAt.getTime() < 3 * DAY) return { ...res, skipped: "extract not ready yet" };
+      } else await persistNicheRecords(samRecords(es, cfg!), deps, res);
+    }
+    const token = await requestSamExtract(key, new Date(now.getTime() - cfg!.days * DAY), new Date(now.getTime() - DAY));
+    await db.insert(companySeeds).values({ ...state, fitPass: true, reason: token, siteCheckedAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: [companySeeds.source, companySeeds.sourceId], set: { reason: token, siteCheckedAt: now, updatedAt: now } });
+  } catch { res.errors++; }
+  return res;
+}
+
+export async function runRecalls(deps: Deps & { recalls?: (since: Date) => Promise<Recall[]>; holders?: (s: string) => Promise<AndaHolder[]> }): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.recalls;
+  const g = guard("fda_recalls", "openfda", cfg?.enabled, deps); if (g) return g;
+  const now = deps.now ?? new Date(), res = empty("fda_recalls");
+  const records: NicheRecord[] = [];
+  try {
+    const rs = await (deps.recalls ?? ((s) => fetchRecalls("drug", s, now)))(new Date(now.getTime() - cfg!.max_age_days * DAY));
+    const bySub = new Map<string, Recall>();
+    for (const r of rs) { const s = recallSubstance(r); if (s && !bySub.has(s)) bySub.set(s, r); }
+    for (const [s, r] of [...bySub].slice(0, 30)) {
+      try { records.push(...recallRecords(r, await (deps.holders ?? ((x) => fetchAndaHolders(x, [])))(s), cfg!)); } catch { res.errors++; }
+    }
+  } catch { res.errors++; }
+  return persistNicheRecords(records, deps, res);
+}
+
+export async function runNewsEvents(deps: Deps & { news?: (q: string, country: string) => Promise<NewsItem[]> }): Promise<NicheResult> {
+  const n = deps.pack.sources.niche;
+  const res = empty("news_events");
+  if (!n.news_events.length || !n.news_per_day) return { ...res, skipped: "no news_events in the pack" };
+  const key = process.env.SERPER_API_KEY;
+  if (!deps.news && !key) return { ...res, skipped: "SERPER_API_KEY not set" };
+  if (!deps.companies && !process.env.EXA_API_KEY) return { ...res, skipped: "EXA_API_KEY not set" };
+  applyPackIdentity(deps.pack);
+  const usage = deps.usage ?? neonUsage(), now = deps.now ?? new Date();
+  const all = n.news_events.flatMap((e) => e.queries.map((q) => ({ e, q })));
+  const used = await usage.spentToday("serper_news_events");
+  // rotate through every event x query across days
+  const day = Math.floor(now.getTime() / DAY);
+  const picks = Array.from({ length: Math.max(0, Math.min(all.length, n.news_per_day - used)) }, (_, i) => all[(day * n.news_per_day + used + i) % all.length]!);
+  const records: NicheRecord[] = [];
+  for (const { e, q } of picks) {
+    await usage.addSpend("serper_news_events", 1, n.news_per_day);
+    try {
+      const items = await (deps.news ?? ((qq, c) => serperNews({ apiKey: key!, country: c, timeRange: "w" })(qq)))(q, e.country);
+      records.push(...newsRecords(items, e, now));
+    } catch { res.errors++; }
+  }
+  return persistNicheRecords(records, deps, res);
 }

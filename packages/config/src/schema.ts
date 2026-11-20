@@ -314,6 +314,51 @@ export const SourcesSchema = z.object({
   niche: z.object({
     /** company searches per source per run for new names (Exa, ~$0.007 each; usage_daily "exa_niche") */
     per_run: z.number().int().min(1).max(200).default(25),
+    /** Exa searches per IST day across every niche run (the tick drains the queue until this is spent) */
+    daily_budget: z.number().int().min(1).max(5000).default(150),
+    /** website lookup on Maps when the company index finds nothing: Google Places (GOOGLE_MAPS_API_KEY, 1,000 free a
+     *  month for the website field) first, else Serper places (SERPER_API_KEY) */
+    maps: z.object({
+      enabled: z.boolean().default(true),
+      google_per_month: z.number().int().min(0).max(10_000).default(600),
+      serper_per_day: z.number().int().min(0).max(100).default(5),
+    }).default({ enabled: true, google_per_month: 600, serper_per_day: 5 }),
+    /** NPPES weekly file: organisations with a new NPI in these taxonomies (code -> segment) */
+    nppes: z.object({
+      enabled: z.boolean().default(false),
+      taxonomies: z.record(z.string().regex(/^[0-9A-Z]{10}$/), z.object({ segment: z.string(), label: z.string() })).default({}),
+      max_age_days: z.number().int().min(3).max(60).default(14),
+    }).optional(),
+    /** SAM.gov new entity registrations (SAM_API_KEY): primary NAICS prefix -> segment; India + US registrants */
+    sam_entities: z.object({
+      enabled: z.boolean().default(false),
+      naics_prefixes: z.record(z.string().regex(/^\d{2,6}$/), z.string()).default({}),
+      days: z.number().int().min(1).max(14).default(3),
+      countries: z.record(z.string(), z.string()).default({ USA: "United States of America", IND: "India" }),
+    }).optional(),
+    /** openFDA recalls (Class I/II): other holders of the recalled molecule get competitor_recall */
+    recalls: z.object({
+      enabled: z.boolean().default(false),
+      max_age_days: z.number().int().min(7).max(120).default(30),
+      regions: z.array(z.string()).default(["India", "United States of America"]),
+      segment: z.string().default("pharma"),
+    }).optional(),
+    /** India business-event headlines (Serper news): "X bags order", "X receives environmental clearance"... */
+    news_events: z.array(z.object({
+      id: z.string().regex(/^[a-z0-9_]+$/),
+      queries: z.array(z.string()).min(1),
+      /** the verb phrase after the company name, as a regex ("bags|wins|secures") */
+      verbs: z.string(),
+      /** the headline must also match this (e.g. "order|contract") */
+      must: z.string().default(""),
+      signal_type: z.string(),
+      segment: z.string(),
+      region: z.string().default("India"),
+      country: z.string().default("in"),
+      must_mention: z.string().optional(),
+    })).default([]),
+    /** Serper news searches per day for news_events (usage_daily "serper_news_events"; queries rotate) */
+    news_per_day: z.number().int().min(0).max(50).default(4),
     /** openFDA (no key needed; OPENFDA_API_KEY raises the daily limit): drugs on the FDA shortage list x the companies
      *  holding approved ANDAs for them. Holders HQ'd in `regions` become accounts (segment `segment`). */
     fda_shortage: z.object({
@@ -407,13 +452,21 @@ export const SourcesSchema = z.object({
       /** evidence URL template; default = the row's own API URL */
       url: z.string().optional(),
       query: z.string().default("{company}"),
+      /** Maps search when the company index finds nothing (default: query) */
+      maps_query: z.string().optional(),
+      /** small local businesses (new trucking companies): Maps before the company index */
+      maps_first: z.boolean().default(false),
+      /** the company's website or email from the row ("{email_address}": its domain, unless free mail) */
+      website: z.string().optional(),
+      /** a named person in the row ({name: "{company_officer_1|title}", role: "Company officer"}) */
+      contact: z.object({ name: z.string(), role: z.string() }).optional(),
       must_mention: z.string().optional(),
       signal_type: z.string(),
       segment: z.string(),
       region: z.string().default("United States of America"),
     })).default([]),
   }).default({
-    per_run: 25,
+    per_run: 25, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4,
     fda_shortage: { enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 },
     usaspending: { enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" },
     cms_new_providers: { enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" },

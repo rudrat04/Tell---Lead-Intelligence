@@ -50,6 +50,12 @@ describe("analyst: invented numbers", () => {
     expect(validateAnalysis(JSON.stringify({ ...good, opener: "saw the AE role at an 11-50 person team." }), input)).not.toBeNull();
     expect(validateAnalysis(JSON.stringify({ ...good, opener: "your AE role has been open 52 days." }), input)).not.toBeNull();
   });
+  it("money with a unit suffix ($3.2M, ₹40Cr) matches the same figure in the evidence; a different figure doesn't", () => {
+    const money = { ...input, evidence: [{ type: "contract_expiring", ageDays: 0, current: true, quote: "Northwind's $3.2M contract ends June 2027.", url: "https://example.invalid/3" }] };
+    const ok = { ...good, citations: [0], opener: "noticed your $3.2M contract wraps up in June 2027." };
+    expect(validateAnalysis(JSON.stringify({ ...ok, hypothesis: "Their $3.2M contract ends June 2027, so teaming starts now." }), money)).not.toBeNull();
+    expect(validateAnalysis(JSON.stringify({ ...ok, hypothesis: "Their $4.5M contract ends June 2027, so teaming starts now." }), money)).toBeNull();
+  });
 });
 
 describe("analyst: opening email", () => {

@@ -249,7 +249,7 @@ export const anyDate = (s?: string | null): Date | null => {
   return m ? new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`) : null;
 };
 
-export interface DeviceClearance { applicant: string; kNumber: string; device: string; panel: string; country: string; city: string; decidedAt: Date; url: string }
+export interface DeviceClearance { contact?: string; applicant: string; kNumber: string; device: string; panel: string; country: string; city: string; decidedAt: Date; url: string }
 
 /** 510(k) clearances (substantially equivalent only) in the listed countries (pure; exported for tests). */
 export function parseClearances(results: unknown[], countries: string[]): DeviceClearance[] {
@@ -258,7 +258,7 @@ export function parseClearances(results: unknown[], countries: string[]): Device
     const at = anyDate(r.decision_date);
     if (!r.applicant || !r.k_number || !at || !/^substantially equivalent/i.test((r.decision_description ?? "").trim())) return [];
     if (countries.length && !countries.includes(r.country_code ?? "")) return [];
-    return [{ applicant: r.applicant.trim(), kNumber: r.k_number, device: (r.device_name ?? "").trim(), panel: (r.advisory_committee_description ?? "").trim(), country: r.country_code ?? "", city: title(r.city ?? ""), decidedAt: at,
+    return [{ ...(r.contact && /^[A-Za-z.'-]+( [A-Za-z.'-]+){1,3}$/.test(r.contact.trim()) ? { contact: title(r.contact.trim().replace(/^(mr|mrs|ms|dr)\.?\s+/i, "")) } : {}), applicant: r.applicant.trim(), kNumber: r.k_number, device: (r.device_name ?? "").trim(), panel: (r.advisory_committee_description ?? "").trim(), country: r.country_code ?? "", city: title(r.city ?? ""), decidedAt: at,
       url: `https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfpmn/pmn.cfm?ID=${r.k_number}` }];
   });
 }
@@ -344,8 +344,15 @@ export async function fetchNewAwards(opts: { naics: string; setAsides: string[];
  *  SOCRATA_APP_TOKEN (free) raises the throttle. */
 export async function socrataRows(domain: string, dataset: string, where: string, order: string | undefined, limit: number): Promise<Record<string, unknown>[]> {
   const q = new URLSearchParams({ $where: where, $limit: String(limit), ...(order ? { $order: order } : {}) });
-  const token = process.env.SOCRATA_APP_TOKEN;
-  const j = await json(`https://${domain}/resource/${dataset}.json?${q}`, token ? { headers: { "X-App-Token": token } } : {});
+  // SOCRATA_APP_TOKEN alone = an app token (X-App-Token); with SOCRATA_APP_SECRET it's an API key id + secret (basic
+  // auth). Credentials the portal rejects fall back to anonymous access (lower throttle, same data).
+  const token = process.env.SOCRATA_APP_TOKEN, secret = process.env.SOCRATA_APP_SECRET;
+  const auth: Record<string, string> = token && secret ? { authorization: `Basic ${Buffer.from(`${token}:${secret}`).toString("base64")}` } : token ? { "X-App-Token": token } : {};
+  const url = `https://${domain}/resource/${dataset}.json?${q}`;
+  let res = await fetch(url, { headers: { "user-agent": userAgent(), accept: "application/json", ...auth }, signal: AbortSignal.timeout(60_000) });
+  if ((res.status === 401 || res.status === 403) && Object.keys(auth).length) res = await fetch(url, { headers: { "user-agent": userAgent(), accept: "application/json" }, signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw new Error(`${domain} ${res.status}`);
+  const j = await res.json();
   return Array.isArray(j) ? (j as Record<string, unknown>[]) : [];
 }
 
@@ -365,7 +372,7 @@ export function fillTemplate(t: string, row: Record<string, unknown>): string {
 
 // ------------------------------------------------------------------------------------------------ SEC Form D (details)
 
-export interface FormDDetail { entity: string; city: string; state: string; industry: string; offering: number | null; sold: number | null; filedAt: Date; url: string; amendment: boolean }
+export interface FormDDetail { executives?: { name: string; role: string }[]; entity: string; city: string; state: string; industry: string; offering: number | null; sold: number | null; filedAt: Date; url: string; amendment: boolean }
 
 const tag = (xml: string, t: string) => xml.match(new RegExp(`<${t}>([^<]*)</${t}>`))?.[1]?.trim() ?? "";
 
@@ -375,7 +382,13 @@ export function parseFormDXml(xml: string, filedAt: Date, url: string): FormDDet
   if (!entity) return null;
   const num = (s: string) => (/^\d+(\.\d+)?$/.test(s) ? Number(s) : null);
   const issuer = xml.match(/<primaryIssuer>[\s\S]*?<\/primaryIssuer>/)?.[0] ?? xml;
+  const executives = [...xml.matchAll(/<relatedPersonInfo>([\s\S]*?)<\/relatedPersonInfo>/g)].flatMap((m) => {
+    const name = [tag(m[1]!, "firstName"), tag(m[1]!, "lastName")].filter(Boolean).map(title).join(" ");
+    const role = [...m[1]!.matchAll(/<relationship>([^<]+)<\/relationship>/g)].map((x) => x[1]!.trim()).join(", ");
+    return name.includes(" ") && /executive officer/i.test(role) ? [{ name, role }] : [];
+  }).slice(0, 3);
   return {
+    executives,
     entity: entity.replace(/\s+/g, " "), city: title(tag(issuer, "city")), state: tag(issuer, "stateOrCountry"), industry: tag(xml, "industryGroupType"),
     offering: num(tag(xml, "totalOfferingAmount")), sold: num(tag(xml, "totalAmountSold")), filedAt, url, amendment: tag(xml, "isAmendment") === "true",
   };

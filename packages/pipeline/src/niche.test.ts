@@ -131,11 +131,77 @@ describe("more public records (fictional companies)", () => {
     expect(fillTemplate("{a|title} ({b|money}, {c|date}){missing}", { a: "NORTHWIND BUILDERS LLC", b: "2500000", c: "20261101" })).toBe("Northwind Builders LLC ($2.5M, 2026-11-01)");
     const cfg = { id: "chi", enabled: true, domain: "data.example.gov", dataset: "abcd-1234", where: "", limit: 10, max_age_days: 21,
       company_pairs: { name: "contact_{i}_name", type: "contact_{i}_type", match: "GENERAL CONTRACTOR", max: 5 }, skip_company: "^(owner|self)$", key_field: "id", date_field: "issue_date",
-      quote: "{company} is the GC at {addr} ({cost|money})", query: "{company} construction", signal_type: "building_permit", segment: "construction", region: "United States of America" };
+      quote: "{company} is the GC at {addr} ({cost|money})", query: "{company} construction", signal_type: "building_permit", segment: "construction", region: "United States of America", maps_first: false };
     const now = new Date("2026-11-20T00:00:00Z");
     const r = socrataRecord({ id: "7", issue_date: "2026-11-19T00:00:00.000", addr: "1 Main St", cost: "4000000", contact_1_type: "ARCHITECT", contact_1_name: "SAMPLE, RIYA", contact_2_type: "CONTRACTOR-GENERAL CONTRACTOR", contact_2_name: "NORTHWIND BUILDERS , INC." }, cfg, now);
     expect(r?.name).toBe("Northwind Builders, Inc.");
     expect(r?.signal).toMatchObject({ quote: "Northwind Builders, Inc. is the GC at 1 Main St ($4.0M)", url: "https://data.example.gov/resource/abcd-1234.json?id=7" });
     expect(socrataRecord({ id: "8", contact_1_type: "CONTRACTOR-GENERAL CONTRACTOR", contact_1_name: "SAMPLE, RIYA" }, cfg, now)).toBeNull(); // a person
+  });
+});
+
+import { nppesRecords, samRecords, recallRecords, recallSubstance, newsRecords, dmfRecords, queuePriority } from "./niche.js";
+import { parseNppes, parseSamEntities, csvLine, readZipEntry } from "@tell/watchers";
+import { deflateRawSync } from "node:zlib";
+
+describe("NPPES, SAM, recalls, news, DMF (fictional)", () => {
+  it("NPPES: new organisation NPIs in the listed taxonomies, with the authorized official", () => {
+    const head = ['"NPI"', '"Entity Type Code"', '"Provider Organization Name (Legal Business Name)"', '"Provider Other Organization Name"', '"Provider Business Practice Location Address City Name"', '"Provider Business Practice Location Address State Name"',
+      '"Provider Enumeration Date"', '"Healthcare Provider Taxonomy Code_1"', '"Authorized Official Last Name"', '"Authorized Official First Name"', '"Authorized Official Title or Position"'].join(",");
+    const row = (npi: string, type: string, name: string, date: string, tax: string) => [npi, type, name, "", "AUSTIN", "TX", date, tax, "SAMPLE", "RIYA", "ADMINISTRATOR"].map((x) => `"${x}"`).join(",");
+    const csv = [head, row("1999999991", "2", "SAMPLEVILLE HOME HEALTH LLC", "11/12/2026", "251E00000X"), row("1999999992", "1", "PERSON", "11/12/2026", "251E00000X"), row("1999999993", "2", "OLD CO", "01/01/2020", "251E00000X")].join("\n");
+    const ns = parseNppes(csv, new Set(["251E00000X"]), new Date("2026-11-01T00:00:00Z"));
+    expect(ns).toHaveLength(1);
+    const r = nppesRecords(ns, { enabled: true, max_age_days: 14, taxonomies: { "251E00000X": { segment: "home_health", label: "Home health agency" } } });
+    expect(r[0]!.contacts).toEqual([{ name: "Riya Sample", role: "Administrator" }]);
+    expect(r[0]!.signal.quote).toBe("Sampleville Home Health LLC (Austin, TX) registered a new NPI as a home health agency on November 2026 (2026-11-12; NPI 1999999991).");
+    expect(csvLine('"a","b ""c""",d')).toEqual(["a", 'b "c"', "d"]);
+  });
+  it("SAM: registrants by NAICS prefix, US and India, own website and contact", () => {
+    const e = (name: string, naics: string, country: string, url: string | null) => ({ entityRegistration: { legalBusinessName: name, ueiSAM: `U${name.length}`, registrationDate: "2026-11-15", registrationStatus: "Active" },
+      coreData: { entityInformation: { entityURL: url, entityStartDate: "2019-04-01" }, physicalAddress: { city: "PUNE", stateOrProvinceCode: "", countryCode: country } },
+      assertions: { goodsAndServices: { primaryNaics: naics } }, pointsOfContact: { governmentBusinessPOC: { firstName: "RIYA", lastName: "SAMPLE", title: "CEO" } } });
+    const es = parseSamEntities({ entityData: [e("ACME CASTINGS PVT LTD", "331511", "IND", "acmecastings.in"), e("NOT LISTED CO", "999999", "USA", null)] });
+    const r = samRecords(es, { enabled: true, days: 3, naics_prefixes: { "33": "manufacturing" }, countries: { USA: "United States of America", IND: "India" } });
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ segment: "manufacturing", knownRegion: "India", website: "acmecastings.in", contacts: [{ name: "Riya Sample", role: "Ceo" }] });
+    expect(r[0]!.signal.quote).toBe("Acme Castings Pvt Ltd (Pune) registered with SAM.gov to bid on US federal contracts on 2026-11-15 (primary NAICS 331511; in business since 2019).");
+  });
+  it("recalls: other ANDA holders of the molecule, never the recalling firm", () => {
+    const rc = { kind: "drug" as const, firm: "Northwind Pharma LLC", product: "ZENTROFIL SODIUM INJECTION, 10 mg/mL", reason: "Particulate matter", classification: "Class II", reportedAt: new Date("2026-11-10T00:00:00Z"), recallNumber: "D-0001-2027", substances: [], productCodes: [], url: "https://example.org/r" };
+    expect(recallSubstance(rc)).toBe("ZENTROFIL");
+    const h = (sponsor: string, labelers: string[]) => ({ appNo: "200001", sponsor, labelers, marketed: true, url: `https://example.org/${sponsor}` });
+    const r = recallRecords(rc, [h("NORTHWIND", ["Northwind Pharma LLC"]), h("ACMEGEN", ["Acmegen Pharma Limited"])], { enabled: true, max_age_days: 30, regions: ["India"], segment: "pharma" });
+    expect(r.map((x) => x.name)).toEqual(["Acmegen Pharma Limited"]);
+    expect(r[0]!.signal.quote).toContain("Northwind Pharma LLC recalled zentrofil sodium injection");
+  });
+  it("news events: the company before the verb, headline as the quote", () => {
+    const cfg = { id: "orders", queries: ["x"], verbs: "bags|wins", must: "order", signal_type: "order_won", segment: "manufacturing", region: "India", country: "in" };
+    const r = newsRecords([{ title: "Acme Castings bags Rs 120 crore order from railways", url: "https://example.org/n1", postedAt: new Date("2026-11-18T00:00:00Z"), outlet: "Example Times" },
+      { title: "Markets rally as Sensex gains", url: "https://example.org/n2", postedAt: null }], cfg, new Date("2026-11-20T00:00:00Z"));
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ name: "Acme Castings", signal: { type: "order_won", quote: "Acme Castings bags Rs 120 crore order from railways (Example Times)" } });
+  });
+  it("DMF: active Type II holders for a shortage molecule; salts need both words", () => {
+    const sh = [{ substance: "ZENTROFIL HYDROCHLORIDE", name: "Zentrofil Hydrochloride", forms: ["injectable"], availability: "Unavailable", allSame: true, reason: null, updatedAt: null },
+      { substance: "SODIUM BICARBONATE", name: "Sodium Bicarbonate", forms: ["injectable"], availability: "Unavailable", allSame: true, reason: null, updatedAt: null }];
+    const rows = [{ "DMF#": "40001", STATUS: "A", TYPE: "II", "SUBMIT DATE": "2019-01-01", HOLDER: "ACMEGEN LIFESCIENCES LTD", SUBJECT: "ZENTROFIL HYDROCHLORIDE USP" },
+      { "DMF#": "40002", STATUS: "I", TYPE: "II", HOLDER: "X", SUBJECT: "ZENTROFIL" }, { "DMF#": "40003", STATUS: "A", TYPE: "II", HOLDER: "Y CO", SUBJECT: "SODIUM CHLORIDE" }] as Record<string, string>[];
+    const r = dmfRecords(rows, sh, new Date("2026-11-20T00:00:00Z"));
+    expect(r.map((x) => x.name)).toEqual(["Acmegen Lifesciences Ltd"]);
+  });
+  it("queue priority: strength first, then amount", async () => {
+    const pack = await loadFixturePack();
+    const rec = (type: string, quote: string) => ({ source: "x", name: "n", query: "q", segment: "b2b", regions: [], signal: { type, quote, url: "u", observedAt: new Date() } });
+    expect(queuePriority([rec("funding_raise", "$5.0M")], pack)).toBeGreaterThan(queuePriority([rec("funding_raise", "$1.0M")], pack));
+  });
+  it("zip: reads a deflated entry", () => {
+    const data = Buffer.from("hello,world\n"), comp = deflateRawSync(data), name = Buffer.from("npidata_pfile_x.csv");
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(8, 8); local.writeUInt32LE(comp.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46); central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(8, 10); central.writeUInt32LE(comp.length, 20); central.writeUInt32LE(data.length, 24); central.writeUInt16LE(name.length, 28); central.writeUInt32LE(0, 42);
+    const cdOff = 30 + name.length + comp.length;
+    const eocd = Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(1, 8); eocd.writeUInt16LE(1, 10); eocd.writeUInt32LE(46 + name.length, 12); eocd.writeUInt32LE(cdOff, 16);
+    const zip = Buffer.concat([local, name, comp, central, name, eocd]);
+    expect(readZipEntry(zip, (n) => n.startsWith("npidata"))?.toString()).toBe("hello,world\n");
   });
 });

@@ -73,6 +73,13 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   // Socrata open-data portals (city building permits, data.transportation.gov FMCSA census): public SODA API, no key
   // needed (SOCRATA_APP_TOKEN, free, raises the throttle); datasets are published for reuse.
   socrata: { enabled: true, allowedMappings: ["explicit"], note: "SODA API /resource endpoints only" },
+  // NPPES weekly incremental file (download.cms.gov): public CMS data dissemination file, no key.
+  nppes: { enabled: true, allowedMappings: ["explicit"], note: "weekly NPI file; organisations only" },
+  // SAM.gov entity API (SAM_API_KEY, public data only; personal keys: 10 requests a day, two used per run).
+  sam: { enabled: true, allowedMappings: ["explicit"], note: "public entity data via extract; 2 requests a day" },
+  // Google Places / Serper places: only the website is read, and only to find the company's own domain (then checked
+  // on its own homepage); no other Places content is stored.
+  maps: { enabled: true, allowedMappings: ["explicit"], note: "website field only, verified on the company's own site" },
   // Operator-supplied exports (pnpm niche import <csv>): rows the operator downloaded under their own access (GeM, CPPP,
   // RERA, PARIVESH, customs data from a paid provider). Local only: the file never enters the repo or CI.
   niche_import: { enabled: true, allowedMappings: ["explicit"], note: "operator's own exports, local only" },

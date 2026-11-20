@@ -409,3 +409,16 @@ export const peopleSearches = pgTable("people_searches", {
   found: integer("found").notNull().default(0),
   searchedAt: ts("searched_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.accountId, t.persona, t.provider] })]);
+
+/** Niche public records waiting for a company lookup (over the per-run search cap): drained a few at a time by
+ *  `pnpm niche drain` in every tick, within the daily search budget. Records are public facts (quote + URL). */
+export const nicheQueue = pgTable("niche_queue", {
+  source: text("source").notNull(),
+  /** company key (one lookup per name per source) */
+  key: text("key").notNull(),
+  /** NicheRecord[] for that company, JSON (dates as ISO strings, mustMention as a regex source) */
+  records: jsonb("records").notNull(),
+  /** higher first (a strength-5 signal before a strength-3 one, then the largest amounts) */
+  priority: real("priority").notNull().default(0),
+  queuedAt: ts("queued_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.source, t.key] }), index("niche_queue_priority_idx").on(t.priority, t.queuedAt)]);
