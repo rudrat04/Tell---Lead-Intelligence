@@ -55,6 +55,15 @@ jobs:
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+      # same-day alert for the strongest fresh signals with a named contact (pack delivery.alerts); counts only
+      - name: Lead alerts
+        continue-on-error: true
+        run: pnpm alerts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
 
       # Optional dead-man's switch for the 30-minute tick (add the secret once the external scheduler is live)
       - name: Dead-man's switch ping

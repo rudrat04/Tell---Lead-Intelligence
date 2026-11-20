@@ -196,3 +196,12 @@ describe("Signals column", () => {
     expect(signalSummary([e("funding_raise"), e("adjacent_role_open"), e("adjacent_role_open"), e("core_role_open_45d")])).toBe("Core role open 45+ days, Sales/marketing hiring ×2, Recently raised");
   });
 });
+
+import { quoteDollars } from "./alerts.js";
+describe("alerts: contract size from the quote", () => {
+  it("reads $K / $M / $B", () => {
+    expect(quoteDollars("Northwind's $5.2M contract ends")).toBe(5_200_000);
+    expect(quoteDollars("a $1.1B award")).toBe(1_100_000_000);
+    expect(quoteDollars("no money here")).toBe(0);
+  });
+});

@@ -608,6 +608,16 @@ export const DeliverySchema = z.object({
     min_score: z.number().int().min(0).max(100).default(0),
     send_hour_local: z.number().int().min(0).max(23).default(9),
   }).default({ from_name: "Lead digest", max_leads: 10, region_groups: [], send_hour_local: 9, reserved_non_hiring: 0, pool_multiplier: 3, min_score: 0 }),
+  /** same-day alert email (every tick) for the strongest fresh signals at accounts with a named contact; the lead
+   *  still arrives complete (draft, Sheet row) in the next digest */
+  alerts: z.object({
+    enabled: z.boolean().default(false),
+    /** signal types that alert (strength 5 / fast lane are the usual picks) */
+    types: z.array(z.string()).default([]),
+    /** contract signals alert only at or above this value (the "$X.YM" in the quote) */
+    min_contract_usd: z.number().min(0).default(5_000_000),
+    max_per_day: z.number().int().min(1).max(20).default(3),
+  }).optional(),
   redeliver_after_days: z.number().int().min(1).default(90),
   /** Google Sheet for leads + your labels (created by `pnpm sheet:setup`; private: it holds lead names) */
   sheet: z.object({ spreadsheet_id: z.string().min(10).optional() }).default({}),

@@ -1,6 +1,6 @@
 import { leadCap, type Pack } from "@tell/config";
 import {
-  runScoring, istDay, buildMissingPlays, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  runScoring, istDay, buildMissingPlays, nicheStats, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
@@ -134,6 +134,12 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const r = rerankByReach(score.ranking, contacts, pack, max);
   score.ranking = r.ranking;
   const avg = r.factors.size ? [...r.factors.values()].reduce((a, b) => a + b, 0) / r.factors.size : 0;
+  // weekly India import (GeM / RERA / customs exports via pnpm niche import): a nudge when it's been over a week
+  try {
+    const st = await nicheStats();
+    if (st.daysSinceImport == null || st.daysSinceImport > 7) enrich.push(`India import: ${st.daysSinceImport == null ? "never run" : `last ${st.daysSinceImport} days ago`} (export GeM / RERA rows, then pnpm niche import file.csv)`);
+    if (st.queued) enrich.push(`niche queue ${st.queued}`);
+  } catch { /* stats are a nudge, never a failure */ }
   enrich.push(`buyer: average ${(avg * 100).toFixed(0)}% over ${r.factors.size} pool leads; ${r.noContact} dropped for no contact; ${r.enterprise} dropped as enterprise (contact title)`);
   // analyst only for today's leads; cached by evidence, so test sends and re-runs don't pay again
   let notes: Awaited<ReturnType<typeof analyzeLeads>>["analyses"] | undefined;
