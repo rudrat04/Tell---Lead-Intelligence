@@ -62,6 +62,12 @@ export const IcpSchema = z.object({
     regions_any: z.array(z.string()).default([]),
     /** sources other than YC rarely give team size / industry / status: "pass" admits them with a neutral fit score */
     unknown_facts: z.enum(["pass", "fail"]).default("fail"),
+    /** per-segment exceptions to team_size and regions_any (niche segments: e.g. pharma up to 2,000 people, govcon in the
+     *  US). An account whose segment is listed is checked against these instead; unlisted keys fall back to the defaults. */
+    segment_overrides: z.record(z.string(), z.object({
+      team_size: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }).optional(),
+      regions_any: z.array(z.string()).optional(),
+    })).default({}),
   }),
   size_bands: z.array(z.object({ band: z.string(), max: z.number().int() })).min(1),
   /** source industry label (e.g. YC "B2B", "Consumer") -> your segment name */
@@ -146,6 +152,9 @@ export const SignalsSchema = z.object({
     fast_lane: z.boolean().default(false),
     /** overrides max_events_per_type for this signal (e.g. 1: three founding roles are one "building GTM from zero" story) */
     max_events: z.number().int().min(1).optional(),
+    /** a state that stays true while a source keeps seeing it (signals.last_seen_at), like the watch states: current while
+     *  seen in the last 15 days (e.g. a drug still on the FDA shortage list) */
+    state: z.boolean().optional(),
   })),
   gate1: z.object({
     required_any: z.array(pattern).default([]),
@@ -194,6 +203,9 @@ export const PlaysSchema = z.object({
     qualifies: z.boolean().default(false),
     /** persona titles (icp.personas) who own this problem, most fitting first; they're contacted before the default order */
     personas: z.array(z.string()).default([]),
+    /** what you offer a lead in this play, when it differs from pack.yaml `offer` (niche plays: a buyer list, a teaming
+     *  map). Replaces the general offer in the draft brief for leads whose strongest play sets it. */
+    offer: z.string().optional(),
   })),
 });
 
@@ -297,6 +309,53 @@ export const SourcesSchema = z.object({
     /** roles found only through JSearch close when no search has seen them for this long */
     close_after_days: z.number().int().min(7).default(21),
   }).default({ enabled: false, queries: [], location: "India", country: "in", locations: [], date_posted: "week", per_run: 6, per_month: 180, close_after_days: 21 }),
+  /** Public-record sources for niche industries (pnpm niche). Each record names a company; the company becomes an
+   *  account only when a company search proves its website (as funding news), and the signal quotes the record. */
+  niche: z.object({
+    /** company searches per source per run for new names (Exa, ~$0.007 each; usage_daily "exa_niche") */
+    per_run: z.number().int().min(1).max(200).default(25),
+    /** openFDA (no key needed; OPENFDA_API_KEY raises the daily limit): drugs on the FDA shortage list x the companies
+     *  holding approved ANDAs for them. Holders HQ'd in `regions` become accounts (segment `segment`). */
+    fda_shortage: z.object({
+      enabled: z.boolean().default(false),
+      regions: z.array(z.string()).default(["India"]),
+      segment: z.string().default("pharma"),
+      /** shortage records with this availability are not a shortage (FDA keeps resolved packages listed) */
+      skip_availability: z.array(z.string()).default(["Available"]),
+      max_substances: z.number().int().min(1).max(500).default(150),
+    }).default({ enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 }),
+    /** USASpending (no key): federal contracts in these NAICS codes and set-asides ending `min_days`-`max_days` from now.
+     *  The incumbent becomes an account (segment `segment`) with a contract_expiring signal. */
+    usaspending: z.object({
+      enabled: z.boolean().default(false),
+      naics: z.array(z.string().regex(/^\d{2,6}$/)).default([]),
+      /** USASpending set-aside codes, e.g. 8A, 8AN, SDVOSBC, SDVOSBS, WOSB, EDWOSB, HZC, SBA; empty = any */
+      set_asides: z.array(z.string()).default([]),
+      min_days: z.number().int().min(0).default(60),
+      max_days: z.number().int().min(30).default(365),
+      min_amount: z.number().min(0).default(500_000),
+      /** result pages (100 awards each) per NAICS code per run */
+      max_pages: z.number().int().min(1).max(50).default(10),
+      segment: z.string().default("govcon"),
+      region: z.string().default("United States of America"),
+    }).default({ enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" }),
+    /** CMS Provider Data (no key): home health agencies and hospices Medicare-certified in the last `max_age_days`. Care
+     *  Compare lists new providers about 8 months late, so a window under ~240 days finds nothing. */
+    cms_new_providers: z.object({
+      enabled: z.boolean().default(false),
+      kinds: z.array(z.enum(["home_health", "hospice"])).default(["home_health", "hospice"]),
+      /** two-letter state codes; empty = every state */
+      states: z.array(z.string().length(2)).default([]),
+      max_age_days: z.number().int().min(7).max(730).default(365),
+      segment: z.string().default("home_health"),
+      region: z.string().default("United States of America"),
+    }).default({ enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" }),
+  }).default({
+    per_run: 25,
+    fda_shortage: { enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 },
+    usaspending: { enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" },
+    cms_new_providers: { enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" },
+  }),
   /** VC / accelerator portfolio pages (weekly): each company page's "Website" link becomes an account; job boards
    *  are found on that site. Region comes from job locations, never from the investor. */
   portfolios: z.array(z.object({
@@ -379,6 +438,9 @@ export const DeliverySchema = z.object({
       max_leads: z.number().int().min(1).max(25),
       /** this list's score floor (0-100); unset = delivery.digest.min_score */
       min_score: z.number().int().min(0).max(100).optional(),
+      /** accounts in these segments (icp segment names) go to this list whatever their region; a group with segments is
+       *  filled first, so its accounts never appear in a region list too. Empty = region only. */
+      segments: z.array(z.string()).optional(),
     })).default([]),
     /** slots kept for companies that qualify through non-hiring signals (funding, launches, tools, site changes, posts) */
     reserved_non_hiring: z.number().int().min(0).default(0),
@@ -517,26 +579,45 @@ export const PackSchema = z.object({
   const w = Object.values(p.icp.soft_fit.weights).reduce((a, b) => a + b, 0);
   if (Math.abs(w - 1) > 0.01) ctx.addIssue({ code: "custom", path: ["icp", "soft_fit", "weights"], message: `weights must sum to 1 (got ${w.toFixed(2)})` });
   const groups = p.delivery.digest.region_groups;
-  if (groups.filter((g) => !g.regions.length).length > 1) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: "only one group can be the catch-all (regions: [])" });
+  if (groups.filter(isCatchAll).length > 1) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: "only one group can be the catch-all (regions: [], no segments)" });
   const named = groups.flatMap((g) => g.regions);
   if (new Set(named).size !== named.length) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: "a region is in two groups" });
-  const anyRegions = p.icp.hard_filters.regions_any;
-  for (const r of named) if (anyRegions.length && !anyRegions.includes(r)) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: `region "${r}" is not in icp.hard_filters.regions_any (it would never have leads)` });
+  const anyRegions = [...p.icp.hard_filters.regions_any, ...Object.values(p.icp.hard_filters.segment_overrides).flatMap((o) => o.regions_any ?? [])];
+  for (const r of named) if (p.icp.hard_filters.regions_any.length && !anyRegions.includes(r)) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "region_groups"], message: `region "${r}" is not in icp.hard_filters.regions_any (it would never have leads)` });
   if (p.delivery.digest.max_leads === 0 && !groups.length && p.delivery.digest.min_score < 1) ctx.addIssue({ code: "custom", path: ["delivery", "digest", "min_score"], message: "max_leads 0 (no cap) needs a min_score, or every eligible account becomes a lead" });
   if (p.icp.hard_filters.team_size.min > p.icp.hard_filters.team_size.max) ctx.addIssue({ code: "custom", path: ["icp", "hard_filters", "team_size"], message: "min > max" });
+  // niche segments: every override, digest group segment and niche source segment must be a segment the ICP admits
+  const admitted = new Set(p.icp.hard_filters.industries_any.map((x) => p.icp.segment_map[x]).filter(Boolean));
+  const checkSeg = (sname: string, path: (string | number)[]) => {
+    if (!admitted.has(sname)) ctx.addIssue({ code: "custom", path, message: `segment "${sname}" is not admitted by the ICP (map an industries_any label to it in segment_map)` });
+  };
+  for (const [sname, o] of Object.entries(p.icp.hard_filters.segment_overrides)) {
+    checkSeg(sname, ["icp", "hard_filters", "segment_overrides", sname]);
+    if (o.team_size && o.team_size.min > o.team_size.max) ctx.addIssue({ code: "custom", path: ["icp", "hard_filters", "segment_overrides", sname, "team_size"], message: "min > max" });
+  }
+  groups.forEach((g, i) => (g.segments ?? []).forEach((sname) => checkSeg(sname, ["delivery", "digest", "region_groups", i, "segments"])));
+  const n = p.sources.niche;
+  if (n.fda_shortage.enabled) checkSeg(n.fda_shortage.segment, ["sources", "niche", "fda_shortage", "segment"]);
+  if (n.usaspending.enabled) checkSeg(n.usaspending.segment, ["sources", "niche", "usaspending", "segment"]);
+  if (n.cms_new_providers.enabled) checkSeg(n.cms_new_providers.segment, ["sources", "niche", "cms_new_providers", "segment"]);
 });
+
+/** The catch-all digest list: no regions and no segments. */
+const isCatchAll = (g: { regions: string[]; segments?: string[] }) => !g.regions.length && !(g.segments?.length);
 
 export type Pack = z.infer<typeof PackSchema>;
 
-/** The region group an account falls in: the one naming its region, else the catch-all (regions: []); null = none. */
-export function regionGroupFor(pack: Pick<Pack, "delivery">, region: string | null | undefined) {
+/** The digest group an account falls in: a group naming its segment first, then the one naming its region, else the
+ *  catch-all (regions: [], no segments); null = none. */
+export function regionGroupFor(pack: Pick<Pack, "delivery">, region: string | null | undefined, segment?: string | null) {
   const g = pack.delivery.digest.region_groups;
-  return g.find((x) => region != null && x.regions.includes(region)) ?? g.find((x) => !x.regions.length) ?? null;
+  return (segment ? g.find((x) => x.segments?.includes(segment)) : undefined)
+    ?? g.find((x) => region != null && !x.segments?.length && x.regions.includes(region)) ?? g.find(isCatchAll) ?? null;
 }
 
-/** The score floor for an account in this region: its region group's min_score, else delivery.digest.min_score. */
-export function minScoreFor(pack: Pick<Pack, "delivery">, region: string | null | undefined): number {
-  return regionGroupFor(pack, region)?.min_score ?? pack.delivery.digest.min_score;
+/** The score floor for an account: its digest group's min_score, else delivery.digest.min_score. */
+export function minScoreFor(pack: Pick<Pack, "delivery">, region: string | null | undefined, segment?: string | null): number {
+  return regionGroupFor(pack, region, segment)?.min_score ?? pack.delivery.digest.min_score;
 }
 
 /** Leads per digest: the sum of region_groups when set, else `delivery.digest.max_leads` (0 = no cap). */

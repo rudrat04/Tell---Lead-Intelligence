@@ -57,8 +57,8 @@ export function rerankByReach(pool: Ranking<ScoredAccount>, contacts: Map<string
     const f = buyerLevel(contacts.get(r.account.id), owners.get(r.account.id) ?? [], pack);
     factors.set(r.account.id, f);
     return { ...r, score: withBuyer(r.score, f, pack.signals.score) };
-  }).filter((r) => displayScore(r.score) >= minScoreFor(pack, r.account.region)); // a hard-to-reach lead can fall under the threshold
-  const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days };
+  }).filter((r) => displayScore(r.score) >= minScoreFor(pack, r.account.region, r.account.segment)); // a hard-to-reach lead can fall under the threshold
+  const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days, segmentOf: (a: ScoredAccount) => a.segment };
   const groups = pack.delivery.digest.region_groups;
   // with region groups, each group keeps its own top N after re-ranking (so one region never takes another's slots)
   const ranking = groups.length ? rankByRegionGroups(rows, groups, (a) => a.region, 1, 5, rankOpts) : rankAccounts(rows, max, 5, rankOpts);

@@ -1,5 +1,6 @@
 import { toRegex, type Pack } from "@tell/config";
 import type { Evidence } from "./rank.js";
+import { filtersFor } from "./icp.js";
 
 /**
  * Code critic (plan 8f): checks that drop a lead before ranking, so the next account takes its slot.
@@ -65,7 +66,10 @@ export function critic(i: CriticInput, pack: Pack): CriticVerdict {
 export function icpRecheck(i: Pick<CriticInput, "domain" | "sizeBand" | "segment" | "ycFitFailed">, pack: Pack): string | null {
   const icp = pack.icp;
   if (icp.hard_filters.exclude_domains.includes(i.domain)) return "excluded domain";
-  if (i.sizeBand && !icp.size_bands.some((b) => b.band === i.sizeBand)) return `size ${i.sizeBand} is outside the ICP`;
+  const bandAt = icp.size_bands.findIndex((b) => b.band === i.sizeBand);
+  if (i.sizeBand && bandAt < 0) return `size ${i.sizeBand} is outside the ICP`;
+  // a band whose smallest size is over this segment's cap (bands above 200 exist for niche segments only)
+  if (i.sizeBand && bandAt > 0 && icp.size_bands[bandAt - 1]!.max + 1 > filtersFor(icp, i.segment).team_size.max) return `size ${i.sizeBand} is outside the ICP`;
   if (i.segment) {
     const allowed = new Set(icp.hard_filters.industries_any.map((x) => icp.segment_map[x]).filter(Boolean));
     if (allowed.size && !allowed.has(i.segment)) return `segment ${i.segment} is outside the ICP`;

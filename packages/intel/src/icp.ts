@@ -11,9 +11,17 @@ export interface CompanyFacts {
   status: string | null;
 }
 
-/** Hard ICP filters (plan 8d: fit = hard filters first). Unknown team size fails: nothing is assumed. */
-export function passesHardFilters(c: CompanyFacts, icp: IcpConfig): { pass: boolean; reason: string } {
+/** team size and regions for an account in this segment: the segment's override, else the defaults */
+export function filtersFor(icp: IcpConfig, segment?: string | null): { team_size: { min: number; max: number }; regions_any: string[] } {
   const f = icp.hard_filters;
+  const o = segment ? f.segment_overrides?.[segment] : undefined;
+  return { team_size: o?.team_size ?? f.team_size, regions_any: o?.regions_any ?? f.regions_any };
+}
+
+/** Hard ICP filters (plan 8d: fit = hard filters first). Unknown team size fails: nothing is assumed. `segment` picks
+ *  the segment's size override (niche sources know the segment). */
+export function passesHardFilters(c: CompanyFacts, icp: IcpConfig, segment?: string | null): { pass: boolean; reason: string } {
+  const f = { ...icp.hard_filters, ...filtersFor(icp, segment) };
   if (!c.domain) return { pass: false, reason: "no domain" };
   if (f.exclude_domains.includes(c.domain)) return { pass: false, reason: "excluded domain" };
   const unknownOk = f.unknown_facts === "pass";
@@ -43,7 +51,7 @@ export function segmentFor(industries: string[], icp: IcpConfig): string | null 
  * rule); empty = every region. Boards and the account watch skip the rest: fetching pages for accounts that can never
  * become leads only gets the crawler throttled (YC began refusing ~270 pages into a 1,060-page run).
  */
-export function regionInScope(region: string | null | undefined, icp: IcpConfig): boolean {
-  const any = icp.hard_filters.regions_any;
+export function regionInScope(region: string | null | undefined, icp: IcpConfig, segment?: string | null): boolean {
+  const any = filtersFor(icp, segment).regions_any;
   return any.length === 0 || (region != null && any.includes(region));
 }

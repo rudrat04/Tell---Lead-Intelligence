@@ -23,3 +23,4 @@ export * from "./waterfall.js";
 export * from "./company-facts.js";
 export * from "./role-gap.js";
 export * from "./discover-funding.js";
+export * from "./niche.js";

@@ -62,6 +62,25 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   // and topic pages, and names AI crawlers (ClaudeBot, GPTBot) with Disallow: /.
   funding_news: { enabled: true, allowedMappings: ["explicit"], note: "news search API: headline + link only; domain proven by company search" },
   google_news_rss: { enabled: false, allowedMappings: [], note: "robots.txt disallows /rss and blocks AI crawlers" },
+  // Niche public records (Nov 2026, pnpm niche). Official APIs meant for programmatic use; records name companies, and a
+  // company becomes an account only when a company search proves its website (never a name guess).
+  // openFDA: CC0 data, terms (open.fda.gov/terms) allow automated use within rate limits (1,000/day without a key).
+  openfda: { enabled: true, allowedMappings: ["explicit"], note: "api.fda.gov only; fda.gov pages (DMF list) refuse bots and are not fetched" },
+  // USASpending: public API, no key, no automated-access ban.
+  usaspending: { enabled: true, allowedMappings: ["explicit"], note: "api.usaspending.gov public API" },
+  // CMS Provider Data Catalog: public datastore API (data.cms.gov/provider-data/api), no key.
+  cms_provider_data: { enabled: true, allowedMappings: ["explicit"], note: "provider-data datastore API" },
+  // Operator-supplied exports (pnpm niche import <csv>): rows the operator downloaded under their own access (GeM, CPPP,
+  // RERA, PARIVESH, customs data from a paid provider). Local only: the file never enters the repo or CI.
+  niche_import: { enabled: true, allowedMappings: ["explicit"], note: "operator's own exports, local only" },
+  // India tender / project portals checked Nov 2026 and NOT fetched: GeM (bidplus) needs a CSRF token per session;
+  // CPPP search sits behind a captcha; PARIVESH and state RERA portals are JS apps with captchas; NSE blocks clients
+  // without a browser session. Paid aggregators (Tender247, TenderTiger, BidAssist) or manual exports via niche import.
+  gem: { enabled: false, allowedMappings: [], note: "CSRF-protected API: not bypassed" },
+  cppp: { enabled: false, allowedMappings: [], note: "captcha on search" },
+  parivesh: { enabled: false, allowedMappings: [], note: "JS app + captcha" },
+  rera: { enabled: false, allowedMappings: [], note: "state portals use captchas" },
+  fda_web: { enabled: false, allowedMappings: [], note: "fda.gov refuses automated requests (Akamai)" },
   hubspot_community: { enabled: false, allowedMappings: [], note: "terms page needs JS; HubSpot site terms bar robots" },
 };
 

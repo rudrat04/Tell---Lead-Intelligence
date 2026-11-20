@@ -56,6 +56,15 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+      # niche public records (pack sources.niche): FDA shortages x ANDA holders, expiring federal contracts, new
+      # Medicare-certified providers. No keys needed; OPENFDA_API_KEY only raises openFDA's daily limit.
+      - name: Niche public records
+        continue-on-error: true
+        run: pnpm niche
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          OPENFDA_API_KEY: ${{ secrets.OPENFDA_API_KEY }}
       # JSearch (Google for Jobs: LinkedIn/Naukri/Indeed listings) before the diff, so boards it finds get today's baseline
       - name: JSearch roles
         continue-on-error: true

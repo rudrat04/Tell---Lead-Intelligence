@@ -85,7 +85,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   for (const part of chunk(ids, 500)) {
     const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, sizeBand: accounts.sizeBand, region: accounts.region, segment: accounts.segment, status: accounts.status })
       .from(accounts).where(inArray(accounts.id, part));
-    for (const r of rows) if (r.status === "active" && regionInScope(r.region, pack.icp)) accts.set(r.id, r);
+    for (const r of rows) if (r.status === "active" && regionInScope(r.region, pack.icp, r.segment)) accts.set(r.id, r);
   }
 
   // Evidence is incomplete when a board covering the account failed on its last check (plan 8d-2: outages are not evidence)
@@ -154,7 +154,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     if (!v.pass) for (const f of v.failed) criticDropped[f.check] = (criticDropped[f.check] ?? 0) + 1;
   }
   // the floor can differ per region group (delivery.digest.region_groups[].min_score); opts.minScore overrides all
-  const floorOf = (r: { account: ScoredAccount }) => opts.minScore ?? minScoreFor(pack, r.account.region);
+  const floorOf = (r: { account: ScoredAccount }) => opts.minScore ?? minScoreFor(pack, r.account.region, r.account.segment);
   const criticPassed = results.filter((r) => verdicts.get(r.account.id)?.pass !== false);
   // score threshold: below it never reaches the email or Sheet (the next lead above it takes the slot)
   const passed = criticPassed.filter((r) => !r.score.eligible || displayScore(r.score) >= floorOf(r));
@@ -178,7 +178,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
     .sort((a, b) => b.score.intent - a.score.intent)
     .map((r) => r.account.id) : [];
 
-  const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days };
+  const rankOpts = { reserveNonHiring: pack.delivery.digest.reserved_non_hiring, freshDays: pack.signals.eligibility.fresh_days, segmentOf: (a: ScoredAccount) => a.segment };
   const groups = pack.delivery.digest.region_groups;
   const ranking = groups.length
     ? rankByRegionGroups(passed, groups, (a) => a.region, opts.poolScale ?? 1, 5, rankOpts)

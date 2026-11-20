@@ -71,7 +71,7 @@ export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; no
     let drop: keyof SheetRebuildResult["removed"] | null = null;
     if (!x) drop = "outOfScope";
     else if ((failed[x.account.id] ?? []).some((c) => c === "icp" || c === "enterprise" || c === "vendor") || icpRecheck(x.account, pack)) drop = "notIcp";
-    else if (displayScore(x.score) < minScoreFor(pack, x.account.region)) drop = "belowScore";
+    else if (displayScore(x.score) < minScoreFor(pack, x.account.region, x.account.segment)) drop = "belowScore";
     if (drop && !hasOutcome) { res.removed[drop]++; continue; }
     if (drop) res.keptForOutcome++;
     if (x) {

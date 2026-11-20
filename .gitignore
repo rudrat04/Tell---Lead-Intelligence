@@ -15,3 +15,6 @@ packs/*
 
 # local digest previews contain lead details
 digest-preview.html
+
+# niche strategy notes (private)
+NICHE-SIGNALS.md

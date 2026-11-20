@@ -15,7 +15,7 @@ export interface AnalystInput {
   domain: string;
   facts: string;
   contactRole: string | null;
-  plays: { id?: string; title: string; angle: string }[];
+  plays: { id?: string; title: string; angle: string; /** what you offer in this play, instead of the general offer */ offer?: string }[];
   evidence: AnalystEvidence[];
   /** set by analyzeLead from the pack's copy.yaml: the offer framings that fit this lead, and this email's closing style */
   brief?: { offers: string[]; cta?: string };
@@ -124,7 +124,10 @@ export function analystUserPrompt(i: AnalystInput): string {
   const ev = i.evidence.map((e, n) => `[${n}] ${e.type.replace(/_\d+d$/, "_long").replace(/_/g, " ")}, ${e.current ? (e.openDays != null ? `still open, posted ${e.openDays} days ago` : "still open/current") : `${e.ageDays} days ago`}: "${e.quote.replaceAll("</data>", "").slice(0, 400)}"`).join("\n");
   const plays = i.plays.map((p) => `- ${p.title}: ${p.angle}`).join("\n") || "- none";
   const brief = i.brief ? `\nFor this email: ${i.brief.offers.length ? `the offer ideas that fit best (put the idea in your own words, don't reuse the phrasing): ${i.brief.offers.map((o) => `"${o}"`).join(" / ")}. ` : ""}${i.brief.cta ? `Close in this style: ${i.brief.cta}` : ""}`.trimEnd() : "";
-  return `${brief ? `${brief.trim()}\n` : ""}<data>
+  // niche plays carry their own offer (a buyer list, a teaming map): the strongest play's offer replaces the general one
+  const offer = i.plays.find((p) => p.offer)?.offer;
+  const own = offer ? `What you offer THIS lead (use this, not the general offer; never promise more than it says): ${offer}\n` : "";
+  return `${own}${brief ? `${brief.trim()}\n` : ""}<data>
 Company: ${i.company} (${i.domain})${i.facts ? `, ${i.facts}` : ""}
 Contact: ${i.contactRole ?? "unknown role"}
 Matched plays:
@@ -276,11 +279,11 @@ export async function analyzeLead(llm: LlmClient, pack: Pack, input: AnalystInpu
   const system = analystSystemPrompt(pack);
   const c = pack.copy;
   const opts = {
-    allowedText: [pack.meta.offer, pack.delivery.email.next_step, ...c.offers.map((o) => o.idea), ...c.ctas].join("\n"),
+    allowedText: [pack.meta.offer, pack.delivery.email.next_step, ...c.offers.map((o) => o.idea), ...c.ctas, ...input.plays.flatMap((p) => p.offer ?? [])].join("\n"),
     maxWords: pack.delivery.email.max_words, linkedinMaxWords: c.linkedin.max_words, neverSay: c.never_say, noDurations: !c.allow_durations,
     openings: (c.opening_patterns ?? []).map(toRegex),
     toolNames: Object.values(pack.tools.tools).map((t) => t.label),
-    briefText: [...c.offers.map((o) => o.idea), ...c.ctas, ...c.examples.map((e) => e.body), ...c.linkedin.examples.map((e) => e.body)],
+    briefText: [...c.offers.map((o) => o.idea), ...input.plays.flatMap((p) => p.offer ?? []), ...c.ctas, ...c.examples.map((e) => e.body), ...c.linkedin.examples.map((e) => e.body)],
   };
   // each lead gets the offers its plays fit (general ones when none do) and a closing style picked by its domain,
   // so a day's drafts don't all end on the same question
@@ -288,7 +291,10 @@ export async function analyzeLead(llm: LlmClient, pack: Pack, input: AnalystInpu
   const fitting = c.offers.filter((o) => o.plays.some((id) => ids.has(id)));
   const offers = (fitting.length ? fitting : c.offers.filter((o) => !o.plays.length)).map((o) => o.idea).slice(0, 3);
   const h = [...input.domain].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
-  const cta = c.ctas.length ? c.ctas[h % c.ctas.length] : undefined;
+  // a niche play's offer is something you give first (a buyer list, a watchlist): close by asking if they want it
+  const cta = input.plays.some((p) => p.offer)
+    ? "Ask in a few plain words whether they'd want what the offer gives them (e.g. 'want the names?', 'worth a look?'). No meeting ask."
+    : c.ctas.length ? c.ctas[h % c.ctas.length] : undefined;
   const user = analystUserPrompt(c.offers.length || cta ? { ...input, brief: { offers, cta } } : input);
   let best: Analysis | null = null;
   const rejected: string[] = [];

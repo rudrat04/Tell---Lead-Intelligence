@@ -140,7 +140,7 @@ export function buildEvidence(jobs: JobRow[], signals: SignalRow[], pack: Pack, 
     const since = (d: Date) => Math.max(0, (now.getTime() - d.getTime()) / DAY);
     let ageDays = since(s.observedAt);
     let current = false;
-    if (STATE_SIGNAL_TYPES.has(s.type)) {
+    if (STATE_SIGNAL_TYPES.has(s.type) || specs[s.type]!.state) {
       const seen = since(s.lastSeenAt ?? s.observedAt);
       if (seen <= STATE_SEEN_DAYS) { current = true; ageDays = Math.min(ageDays, STATE_MAX_AGE_DAYS); }
       else ageDays = seen; // no longer seen: it was last true then
@@ -194,7 +194,7 @@ export function softFit(a: AccountFacts, icp: Pack["icp"]): number {
   return Object.entries(f.weights).reduce((sum, [k, w]) => sum + w * (parts[k] ?? 0.5), 0);
 }
 
-export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[]; personas?: string[]; qualifies?: boolean }
+export interface PlayMatch { id: string; title: string; angle: string; evidence: Evidence[]; personas?: string[]; qualifies?: boolean; /** play-specific offer (plays.yaml `offer`) */ offer?: string }
 
 /**
  * A play fires when every required signal type is present within its window (current evidence always is), at least
@@ -219,7 +219,7 @@ export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayM
       if (!any) continue;
       used.push(any);
     }
-    out.push({ id, title: p.title, angle: p.angle, evidence: used, personas: p.personas ?? [], qualifies: p.qualifies ?? false });
+    out.push({ id, title: p.title, angle: p.angle, evidence: used, personas: p.personas ?? [], qualifies: p.qualifies ?? false, ...(p.offer ? { offer: p.offer } : {}) });
   }
   return out;
 }
@@ -303,7 +303,7 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const positives = counted.filter((e) => e.class !== "negative");
   // timing = how fresh the newest *event* is: a state that is still true (two CRMs, an empty seat) is not news, so it
   // only sets timing when there is nothing else (otherwise every account with a state looked brand new)
-  const events = positives.filter((e) => !STATE_SIGNAL_TYPES.has(e.type));
+  const events = positives.filter((e) => !STATE_SIGNAL_TYPES.has(e.type) && !pack.signals.signals[e.type]?.state);
   const newestAge = (events.length ? events : positives).length ? Math.min(...(events.length ? events : positives).map((e) => e.ageDays)) : Infinity;
   const timing = Number.isFinite(newestAge) ? timingScore(newestAge) : 0;
   const fit = softFit(facts, pack.icp);
@@ -433,7 +433,7 @@ export function rankAccounts<A>(rows: RankInput<A>[], max: number, watchlistSize
   return { leads, watchlist, held };
 }
 
-export interface RegionGroup { name: string; regions: string[]; max_leads: number }
+export interface RegionGroup { name: string; regions: string[]; max_leads: number; /** accounts in these segments land here first */ segments?: string[] }
 
 /**
  * One ranking per region group, each the usual top-N by score (fast lane kept), concatenated in group order and tagged
@@ -442,13 +442,19 @@ export interface RegionGroup { name: string; regions: string[]; max_leads: numbe
  * not-chosen accounts across all groups.
  */
 export function rankByRegionGroups<A>(rows: RankInput<A>[], groups: RegionGroup[], regionOf: (a: A) => string | null, scale = 1, watchlistSize = 5,
-  opts: { reserveNonHiring?: number; freshDays?: number } = {}): Ranking<A> {
-  const named = new Set(groups.flatMap((g) => g.regions));
+  opts: { reserveNonHiring?: number; freshDays?: number; segmentOf?: (a: A) => string | null } = {}): Ranking<A> {
   const held = { incomplete: 0, recentlyDelivered: 0 };
   const leads: RankInput<A>[] = [];
   const rest: RankInput<A>[] = [];
+  // each account belongs to one group: one naming its segment first, then one naming its region, else the catch-all
+  const groupOf = (a: A): RegionGroup | undefined => {
+    const seg = opts.segmentOf?.(a) ?? null, reg = regionOf(a);
+    return (seg ? groups.find((g) => g.segments?.includes(seg)) : undefined)
+      ?? groups.find((g) => !g.segments?.length && reg != null && g.regions.includes(reg))
+      ?? groups.find((g) => !g.segments?.length && !g.regions.length);
+  };
   for (const g of groups) {
-    const inGroup = rows.filter((r) => { const reg = regionOf(r.account); return g.regions.length ? reg != null && g.regions.includes(reg) : reg == null || !named.has(reg); });
+    const inGroup = rows.filter((r) => groupOf(r.account) === g);
     const r = rankAccounts(inGroup, g.max_leads * scale, inGroup.length, opts);
     held.incomplete += r.held.incomplete;
     held.recentlyDelivered += r.held.recentlyDelivered;

@@ -34,7 +34,8 @@
     "tune": "tsx scripts/tune.ts",
     "forget": "tsx scripts/forget.ts",
     "network": "tsx scripts/network.ts",
-    "drafts:backfill": "tsx scripts/drafts.ts"
+    "drafts:backfill": "tsx scripts/drafts.ts",
+    "niche": "tsx scripts/niche.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",
