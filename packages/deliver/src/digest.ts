@@ -1,6 +1,6 @@
 import { leadCap, type Pack } from "@tell/config";
 import {
-  runScoring, istDay, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  runScoring, istDay, buildMissingPlays, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
@@ -96,13 +96,22 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     gapNote = g.skipped ? `need check: ${g.skipped}` : `need check: ${g.checked} checked, ${g.gaps} with empty seats`;
     if (g.changed.length) score = await scoreRun(false);
   } catch { gapNote = "need check failed"; }
+  // no pack play fits: build one from the evidence (plays.build); a qualifying play makes the lead, "no need" drops it
+  let playNote = "";
+  if (pack.plays.build?.enabled) {
+    try {
+      const b = await buildMissingPlays(score.playCandidates, pack);
+      playNote = b.skipped ? `plays built: ${b.skipped}` : `plays built ${b.built}: ${b.qualified} qualified, ${b.rejected} no need${b.failed ? `, ${b.failed} failed` : ""}`;
+      if (b.built) score = await scoreRun(false);
+    } catch { playNote = "play builder failed"; }
+  }
   if (!opts.dryRun && !opts.test) score = await scoreRun(true);
   const preferred = preferredPersonas([...score.ranking.leads, ...score.ranking.watchlist]);
   // people search only for the leads (not the watchlist) to stay inside the search API's free tier
   const contacts = await contactsFor([...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), pack, {
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id), preferred,
   });
-  const enrich: string[] = [factsNote, gapNote];
+  const enrich: string[] = [factsNote, gapNote, ...(playNote ? [playNote] : [])];
   // Air Waterfall lookup: a lead nobody is known for gets one people search there (it would be dropped otherwise)
   try {
     const w = await waterfallContacts(contacts, score.ranking.leads.map((l) => l.account.id), pack, { write: !opts.dryRun, preferred });

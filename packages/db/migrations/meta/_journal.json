@@ -127,6 +127,13 @@
       "when": 1795195084562,
       "tag": "0017_sturdy_celestials",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1795197398073,
+      "tag": "0018_bitter_titanium_man",
+      "breakpoints": true
     }
   ]
 }

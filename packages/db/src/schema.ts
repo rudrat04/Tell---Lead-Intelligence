@@ -422,3 +422,13 @@ export const nicheQueue = pgTable("niche_queue", {
   priority: real("priority").notNull().default(0),
   queuedAt: ts("queued_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.source, t.key] }), index("niche_queue_priority_idx").on(t.priority, t.queuedAt)]);
+
+/** Plays built from an account's own evidence when no pack play matched (plays.build). Keyed by the evidence, so a
+ *  play is rebuilt only when the evidence changes. `play` is null when the builder found no need (no lead). */
+export const builtPlays = pgTable("built_plays", {
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  evidenceKey: text("evidence_key").notNull(),
+  play: jsonb("play"),
+  reason: text("reason"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.accountId, t.evidenceKey] })]);

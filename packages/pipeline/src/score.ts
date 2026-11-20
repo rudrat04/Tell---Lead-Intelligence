@@ -4,7 +4,8 @@ import {
   buildEvidence, scoreAccount, rankAccounts, rankByRegionGroups, compileRoles, critic, redelivery, regionInScope, type CriticVerdict, displayScore, bestCaseDisplayScore, type DeliveryHistory, timing as timingScore, matchPlays, icpRecheck,
   type JobRow, type SignalRow, type PersonRow, type AccountScore, type Ranking,
 } from "@tell/intel";
-import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, eq, and, inArray, sql } from "@tell/db";
+import { getDb, accounts, jobBoards, jobs, signals, snapshots, people as peopleTable, scores, playsMatched, deliveries, labels, personLeads, companySeeds, builtPlays, eq, and, inArray, sql } from "@tell/db";
+import type { Evidence, PlayMatch } from "@tell/intel";
 
 const chunk = <T>(xs: T[], n: number) => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 const DAY = 86_400_000;
@@ -35,6 +36,8 @@ export interface ScoreRunResult {
   factsCandidates: string[];
   /** accounts where an empty GTM / Founder's Office / Product Marketing seat would complete a play: worth a need check */
   gapCandidates: string[];
+  /** pool accounts with no matching play whose play is still to be built from their evidence (plays.build) */
+  playCandidates: { account: ScoredAccount; score: AccountScore; evidenceKey: string }[];
   /** account id -> critic checks it failed (eligible accounts only) */
   criticFailed?: Record<string, string[]>;
   /** every scored account (for tuning and evals; not rendered) */
@@ -107,11 +110,23 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   const firstMatched = new Map((await db.select({ a: playsMatched.accountId, p: playsMatched.playId, at: playsMatched.matchedAt }).from(playsMatched))
     .map((r) => [`${r.a}:${r.p}`, r.at]));
 
+  // plays built from evidence (plays.build), keyed by account + evidence: rebuilt only when the evidence changes
+  const built = new Map<string, StoredPlay | null>();
+  const evidenceKeys = new Map<string, string>();
+  if (pack.plays.build?.enabled) {
+    for (const part of chunk([...accts.keys()], 500)) {
+      for (const r of await db.select().from(builtPlays).where(inArray(builtPlays.accountId, part))) built.set(`${r.accountId}:${r.evidenceKey}`, (r.play as StoredPlay | null) ?? null);
+    }
+  }
   const results: { account: ScoredAccount; score: AccountScore; incomplete: boolean; recentlyDelivered: boolean; newSinceDelivery: boolean; backReason?: string }[] = [];
   for (const [id, data] of byAccount) {
     const account = accts.get(id);
     if (!account) continue;
-    const score = scoreAccount(buildEvidence(data.jobs, data.signals, pack, roles, now, data.people), account, pack);
+    const ev = buildEvidence(data.jobs, data.signals, pack, roles, now, data.people);
+    const key = evidenceKey(ev);
+    const b = built.get(`${id}:${key}`);
+    const score = scoreAccount(ev, account, pack, b === undefined ? undefined : b ? playFromStored(b, ev) : null);
+    evidenceKeys.set(id, key);
     // when each piece of evidence first existed: a role posted before the delivery but found later isn't new
     const firstSeen = new Map<string, Date>([
       ...data.jobs.map((j) => [j.id, j.postedAt && j.postedAt < j.firstSeenAt ? j.postedAt : j.firstSeenAt] as const),
@@ -220,6 +235,21 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   return {
     configVersion: version, scored: results.length, eligible: results.filter((r) => r.score.eligible).length,
     ranking, personLeads: personRanked, playsMatched: playsCount, criticDropped, belowMinScore, factsCandidates, gapCandidates,
+    playCandidates: [...ranking.leads, ...ranking.watchlist].filter((l) => l.score.needsPlay).map((l) => ({ account: l.account, score: l.score, evidenceKey: evidenceKeys.get(l.account.id)! })),
     criticFailed: Object.fromEntries([...verdicts].filter(([, v]) => !v.pass).map(([id, v]) => [id, v.failed.map((f) => f.check)])), all: results.map((r) => ({ account: r.account, score: r.score })),
   };
+}
+
+/** A built play as stored (built_plays.play): the evidence it cites by type + URL. */
+export interface StoredPlay { title: string; need: string; angle: string; offer: string; personas: string[]; cited: { type: string; url: string }[] }
+
+/** The account's positive evidence, as a stable key: a built play is reused until this changes. */
+export function evidenceKey(ev: Evidence[]): string {
+  const items = ev.filter((e) => e.class !== "negative").map((e) => `${e.type}|${e.url}`).sort();
+  return createHash("sha256").update(items.join("\n")).digest("hex").slice(0, 24);
+}
+
+export function playFromStored(p: StoredPlay, ev: Evidence[]): PlayMatch {
+  const cited = ev.filter((e) => p.cited.some((c) => c.type === e.type && c.url === e.url));
+  return { id: `built:${p.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`, title: p.title, angle: `${p.need} ${p.angle}`, offer: p.offer, personas: p.personas, qualifies: true, evidence: cited.length ? cited : ev.slice(0, 1) };
 }

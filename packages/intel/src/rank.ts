@@ -263,6 +263,8 @@ export interface AccountScore {
   lane: "fast" | "combined";
   /** has at least one current (or recent) explicit/implicit signal: required to be delivered in month one */
   eligible: boolean;
+  /** no pack play matched and plays.build is on: a play is still to be built from the evidence */
+  needsPlay?: boolean;
   evidence: Evidence[];
   plays: PlayMatch[];
   /** evidence that counted, strongest first (for "why now" and citations) */
@@ -270,7 +272,11 @@ export interface AccountScore {
 }
 
 /** Score one account. Pure: same inputs, same output. */
-export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): AccountScore {
+/**
+ * `built`: the play built from this account's evidence when no pack play matched (plays.build): undefined = not built
+ * yet (stays eligible so it can be built), null = the builder found no need (not eligible).
+ */
+export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, built?: PlayMatch | null): AccountScore {
   const specs = pack.signals.signals;
   const cap = pack.signals.max_events_per_type;
 
@@ -308,7 +314,9 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const timing = Number.isFinite(newestAge) ? timingScore(newestAge) : 0;
   const fit = softFit(facts, pack.icp);
 
-  const plays = matchPlays(counted, pack.plays.plays).sort((a, b) => playStrength(b) - playStrength(a));
+  const fixed = matchPlays(counted, pack.plays.plays).sort((a, b) => playStrength(b) - playStrength(a));
+  const building = !fixed.length && !!pack.plays.build?.enabled;
+  const plays = building && built ? [built] : fixed;
   function playStrength(p: PlayMatch) { return p.evidence.reduce((n, e) => n + Math.log(specs[e.type]?.lr ?? 1) * 0.5 ** (e.ageDays / (specs[e.type]?.half_life_days ?? 30)), 0); }
   // fast lane = one strong, fresh signal is enough to deliver (plan 8d-2); stale "strong" signals aren't urgent
   const fast = counted.some((e) => (specs[e.type]?.fast_lane || specs[e.type]?.strength === 5) && e.ageDays <= FAST_LANE_MAX_AGE_DAYS);
@@ -320,7 +328,11 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   // a play marked `qualifies` is a need on its own (e.g. 3+ sales roles open and no ops role or owner)
   const eligibleBySignals = fresh.some(strong) || weakTypes.size >= elig.triggers_needed || plays.some((p) => p.qualifies && p.evidence.some((e) => e.current || e.ageDays <= elig.fresh_days));
   // no play = no angle: with plays.require_play, signals alone never make a lead
-  const eligible = eligibleBySignals && (!pack.plays.require_play || plays.length > 0);
+  // with plays.build, an account with no fixed play stays in until its play is built; a built play that qualifies is
+  // the need on its own; "no need" from the builder drops it
+  const eligible = building
+    ? (built === undefined ? eligibleBySignals : built !== null)
+    : eligibleBySignals && (!pack.plays.require_play || plays.length > 0);
   const drivers = [...positives].sort((a, b) => Math.log(specs[b.type]!.lr) * 0.5 ** (b.ageDays / specs[b.type]!.half_life_days) - Math.log(specs[a.type]!.lr) * 0.5 ** (a.ageDays / specs[a.type]!.half_life_days));
 
   // The score is a sum of readable parts, not a product: a strong need at an unknown-size company still ranks, and a
@@ -330,7 +342,7 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack): A
   const parts = scoreParts({ need: needLevel(intent, pack.signals.base_rate, w.full_need_lift), fit, timing, buyer: UNKNOWN_BUYER }, w);
   return {
     intent, fit, timing, priority: partsTotal(parts) / 100, parts, baseRate: pack.signals.base_rate,
-    lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers,
+    lane: fast ? "fast" : "combined", eligible, evidence: ev, plays, drivers, ...(building && built === undefined ? { needsPlay: true } : {}),
   };
 }
 

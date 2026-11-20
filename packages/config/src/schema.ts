@@ -187,6 +187,13 @@ export const SignalsSchema = z.object({
 export const PlaysSchema = z.object({
   /** true: an account with no matching play is never a lead (no play = no angle = nothing to say) */
   require_play: z.boolean().default(false),
+  /** when no play matches: build one from the account's own evidence (Haiku, checked in code; cached per evidence).
+   *  A built play that qualifies makes the lead; one that doesn't drops it. Fixed plays always win when they match. */
+  build: z.object({
+    enabled: z.boolean().default(false),
+    /** plays built per digest (Haiku, ~$0.002 each, shares the Haiku daily cap) */
+    per_run: z.number().int().min(1).max(100).default(25),
+  }).optional(),
   plays: z.record(z.string(), z.object({
     title: z.string(),
     /** all of these signal types within window_days */

@@ -373,3 +373,23 @@ describe("region groups", () => {
     expect(r.leads.map((l) => l.account.id)).toEqual(["us1", "us2"]);
   });
 });
+
+import { scoreAccount as scoreForBuild, type PlayMatch as BuiltMatch } from "./rank.js";
+import { loadFixturePack as loadPackForBuild } from "@tell/config";
+
+describe("plays.build: a play built from the evidence when no pack play fits", () => {
+  it("stays eligible until built; a built play qualifies it; 'no need' drops it; fixed plays win", async () => {
+    const base = await loadPackForBuild();
+    const pack = { ...base, plays: { ...base.plays, require_play: true, build: { enabled: true, per_run: 5 }, plays: {} } };
+    const ev = [{ type: Object.keys(base.signals.signals).find((t) => base.signals.signals[t]!.class === "explicit")!, class: "explicit", ageDays: 1, current: false, quote: "q", url: "https://example.org/1", ref: { kind: "signal" as const, id: "1" } }];
+    const facts = { sizeBand: null, region: null, segment: null };
+    const pending = scoreForBuild(ev, facts, pack);
+    expect(pending.needsPlay).toBe(true);
+    const built: BuiltMatch = { id: "built:x", title: "Built", angle: "a", offer: "o", personas: [], qualifies: true, evidence: ev };
+    const yes = scoreForBuild(ev, facts, pack, built);
+    expect([yes.eligible, yes.plays[0]?.id, yes.needsPlay]).toEqual([true, "built:x", undefined]);
+    expect(scoreForBuild(ev, facts, pack, null).eligible).toBe(false);
+    const off = { ...pack, plays: { ...pack.plays, build: { enabled: false, per_run: 5 } } };
+    expect(scoreForBuild(ev, facts, off).eligible).toBe(false); // require_play, no play, no builder
+  });
+});
