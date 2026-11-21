@@ -32,16 +32,28 @@ export interface OppDraft { subject: string; body: string }
  * question on every email. Each ends on a question and asks for no time.
  */
 export const CLOSES = [
-  { id: "pursue", how: "ask whether this specific piece of work is one they would go after, naming the kind of work and the place (e.g. \"Is a 300-bed fit-out in Pune the kind of job you chase?\")" },
-  { id: "brief", how: "offer the short brief on it (who it is, the timing, who to reach) and ask if they'd like it (e.g. \"Should I send you the one-pager on it?\")" },
-  { id: "today", how: "ask how they find out about work like this today (e.g. \"How do you usually hear about plants like this before they buy?\")" },
-  { id: "feed", how: "ask whether a steady feed of these for their market would help their team (e.g. \"Would a weekly list of these in your region be useful?\")" },
-  { id: "timing", how: "ask whether they are taking on this kind of work in the coming months (e.g. \"Are you taking on new OSD lines next year?\")" },
+  { id: "worth", how: "ask whether a system like that, built for their market, is worth exploring (e.g. \"Would something like that be worth exploring for your team?\")" },
+  { id: "sample", how: "offer to send this one plus a few more like it as a sample of what their system would catch, and ask if they want it (e.g. \"Want me to send this one and a few others as a sample of what it would catch?\")" },
+  { id: "first", how: "ask whether hearing about these before competitors do would change how they sell (e.g. \"Would seeing these before your competitors do change things for you?\")" },
+  { id: "today", how: "ask whether anything flags these for them today, set against what their system would do (e.g. \"Is anything flagging these for you today, or is it mostly word of mouth?\")" },
+  { id: "build", how: "ask whether they'd want one set up for their own region or product line, naming it (e.g. \"Should we build one for your Ohio and Indiana territory?\")" },
 ] as const;
 export const CONTRACT_CLOSES = [
-  { id: "tracking", how: "ask whether this recompete is already on their capture list (e.g. \"Is this one on your pipeline yet?\")" },
-  CLOSES[0], CLOSES[1], CLOSES[3],
+  { id: "pipeline", how: "ask whether a system that puts every recompete like this on their capture pipeline months early would help (e.g. \"Would that help your capture pipeline?\")" },
+  CLOSES[0], CLOSES[1], CLOSES[4],
 ] as const;
+/** How the pitch line is shaped, rotated by lead on its own (so it doesn't move with the close): the content is the
+ *  same (we build systems like this; what theirs would catch), the wording never a template. */
+export const PITCH_SHAPES = [
+  "lead with what we do, then what theirs would catch (\"We build systems that ... ; yours would ...\")",
+  "say this lead came from the kind of system we build, then what one built for them would watch (\"This came from a system we build for ...; one for you would ...\")",
+  "say finding these early is what we build systems for, then name what theirs would cover (\"Finding these early is what we build systems for. For you that would mean ...\")",
+  "describe their future week with the system in it, then say we build it (\"Picture a list every Monday of ... in your region. We build systems that do exactly that ...\")",
+] as const;
+export function pitchFor(i: Pick<OppDraftInput, "company" | "events">): string {
+  return PITCH_SHAPES[hashOf(`pitch|${i.events[0]?.quote ?? ""}|${i.company}`) % PITCH_SHAPES.length]!;
+}
+
 const hashOf = (s: string) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
 /** The close for this lead (pure; exported for tests). */
 export function closeFor(i: Pick<OppDraftInput, "company" | "events" | "contract">): { id: string; how: string } {
@@ -58,7 +70,7 @@ Write four short parts, one or two sentences each, plain words, in this order:
 1. The signal, unnamed. One specific fact from the facts (what, how much, where, roughly when), with the company behind it described only by its kind ("a generic drug maker", "a VA contractor", "a hospital group"). Never name that company or give anything that finds it in one search (the news outlet, a street address, a permit, award or ANDA number): who it is, is what they reply to find out. Open straight on the fact, never with "we noticed" or "hope you're well".
 2. Why it matters to them. Tie it to ${contract ? "their own record (contracts they won, agencies they work with, set-asides they qualify for)" : "what they actually make or do; when the facts include a line from their own site, use it to show you know their product (in your words, briefly)"}. Use "could": never claim it will become business for them.
 3. The play. The one move it opens right now (${contract ? "capture starts before the RFP: shaping requirements, lining up teaming partners" : "reaching the company in the news before its suppliers are chosen"}), said your own way, from the angle given.
-4. What we do, then the close. One line that we found this and others like it and build systems that catch them for clients: say what such a system would watch in THEIR market (e.g. "a system that flags every new hospital project in western India for your sales team"); the word "system" must be in it. Then close the way the facts say ("How to close"), as a question. Never ask for a call, a meeting or time.
+4. What we do, then the close: this is the reason we write, so never skip or bury it. Say plainly that we build systems like this for companies like theirs, and what THEIR system would catch (their region, product, buyers), shaped the way the facts say ("How to say what we do"), in fresh words, never the example's; it must contain "we build" and "system". Then close with one question about that system, the way the facts say ("How to close"), in its own last paragraph. Never ask for a call, a meeting or time.
 
 Every email must read as written for this reader: vary sentence shapes and openings, and never use stock lines ("the move is", "a team like yours", "as they appear", "want to see what we found").
 Rules: aim for about ${targetWords(pack)} words in the body and never more than ${maxWords(pack)}: one or two short sentences per part, no part longer than the signal. No greeting and no signature (code adds them). Never introduce yourself or say "I help companies".
@@ -76,6 +88,7 @@ Events:
 ${i.events.map((e, n) => `${n + 1}. ${e.quote}${e.about ? `\n   About (never name them in the email): ${e.about}` : ""}\n   Why it fits ${i.company} (these describe ${i.company}, not the company in the event): ${e.reasons.join("; ")}`).join("\n")}
 ${i.contract === false ? "What they do / their own site" : "Their record"}:
 ${i.record.map((r) => `- ${r}`).join("\n")}
+How to say what we do: ${pitchFor(i)}
 How to close: ${closeFor(i).how}
 </data>`;
 }
@@ -128,7 +141,10 @@ export function draftProblems(d: OppDraft, i: OppDraftInput, pack: Pick<Pack, "c
   for (const n of i.events.flatMap((e) => (e.about ? entityNames(e.about) : []))) {
     if (new RegExp(`(^|[^\\p{L}\\p{N}])${n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}\\p{N}])`, "u").test(text)) { p.push(`names "${n}", the company behind the signal: describe it by its kind instead`); break; }
   }
-  if (!/\bsystems?\b/i.test(body)) p.push(`doesn't say we build systems that surface opportunities like this`);
+  // the pitch is the point of the email: "we build ... system" in so many words, and the closing paragraph is about it
+  if (!/\b(we|i)\s+(build|set up|make|create)\b[^.?!]{0,120}\bsystems?\b|\bsystems?\b[^.?!]{0,40}\b(we|i)\s+(build|set up|make|create)\b/i.test(body)) p.push(`doesn't say "we build" a system like this for them`);
+  const closing = body.split(/\n\s*\n/).slice(-2).join(" ");
+  if (!/\b(system|one|it|that|something like (that|this))\b/i.test(closing.split(/(?<=[.!])\s+/).pop() ?? "") || !/\bsystems?\b|\bbuild\b/i.test(closing)) p.push("the close isn't about the system we'd build for them");
   for (const o of i.events.map((e) => outletOf(e.quote)).filter((x): x is string => !!x && x.length >= 4)) if (text.includes(o.toLowerCase())) { p.push(`names the outlet "${o}" (one search finds the company)`); break; }
   if (IDENTIFIER.test(`${d.subject} ${body}`)) p.push(`gives "${`${d.subject} ${body}`.match(IDENTIFIER)![0]}", which finds the company in one search: keep the place general`);
   if (STOCK.test(body)) p.push(`uses the stock phrase "${body.match(STOCK)![0]}": say it your own way`);

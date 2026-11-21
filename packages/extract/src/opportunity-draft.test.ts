@@ -7,7 +7,7 @@ const input: OppDraftInput = {
   events: [{ quote: `Contoso Federal LLC's $8.0M Department of Veterans Affairs contract for "it modernization support" (NAICS 541512) ends 2027-06-30`, url: "https://x.test", reasons: ["won 3 contracts in NAICS 541512"], about: "Contoso Federal LLC" }],
   record: ["Won $4.0M from Department of Veterans Affairs in 2025"],
 };
-const good = { subject: "a va it contract is ending", body: "A VA contractor's $8.0M IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it; we build a system that flags VA recompetes like this for your capture team. Is this one on your capture list yet?" };
+const good = { subject: "a va it contract is ending", body: "A VA contractor's $8.0M IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it; we build systems that flag VA recompetes like this for capture teams.\n\nWould one for your pipeline help?" };
 
 describe("opportunity draft checks", () => {
   it("a short, factual draft that ends on a question passes", async () => {
@@ -31,16 +31,20 @@ describe("opportunity draft checks", () => {
     const pack = await loadFixturePack();
     expect(draftProblems({ ...good, body: good.body.replace("A VA contractor's", "Contoso Federal's") }, input, pack)).toMatch(/names "Contoso Federal", the company behind the signal/);
     expect(draftProblems({ ...good, subject: "contoso's va contract" }, input, pack)).toMatch(/names "Contoso"/);
-    expect(draftProblems({ ...good, body: good.body.replace("; we build a system that flags VA recompetes like this for your capture team", "") }, input, pack)).toMatch(/doesn't say we build systems/);
+    expect(draftProblems({ ...good, body: good.body.replace("; we build systems that flag VA recompetes like this for capture teams.", ".") }, input, pack)).toMatch(/doesn't say "we build"/);
     expect(entityNames("Contoso Pharma Ltd.")).toEqual(["Contoso Pharma", "Contoso"]);
     // nothing that finds the company in one search, and no stock lines
     const news = { ...input, events: [{ quote: "Contoso Pharma to set up plant in Gujarat (Daily Business)", url: "u", reasons: ["offers granulation"], about: "Contoso Pharma" }] };
-    const ok = { subject: "a new plant in gujarat", body: "A drug maker is setting up a plant in Gujarat. That could mean granulators. We built a system that flags plants like this for your sales team. Is Gujarat on your list?" };
+    const ok = { subject: "a new plant in gujarat", body: "A drug maker is setting up a plant in Gujarat. That could mean granulators. We build systems that flag plants like this for machine makers.\n\nWould one for Gujarat be worth exploring?" };
     expect(draftProblems(ok, news, pack)).toBe("");
     expect(draftProblems({ ...ok, body: ok.body.replace("Gujarat.", "Gujarat, per Daily Business.") }, news, pack)).toMatch(/names the outlet "Daily Business"/);
     expect(draftProblems({ ...ok, body: ok.body.replace("in Gujarat", "at 1200 W Fulton St") }, news, pack)).toMatch(/1200 W Fulton St/);
     expect(draftProblems({ ...ok, body: ok.body.replace("That could mean", "The move is") }, news, pack)).toMatch(/stock phrase "The move is"/);
-    expect(draftProblems({ ...ok, body: ok.body.replace("Is Gujarat on your list?", "Want to see what we found?") }, news, pack)).toMatch(/stock phrase/);
+    expect(draftProblems({ ...ok, body: ok.body.replace("Would one for Gujarat be worth exploring?", "Want to see what we found?") }, news, pack)).toMatch(/stock phrase/);
+    // "a system we build" counts as much as "we build a system"
+    expect(draftProblems({ ...ok, body: ok.body.replace("We build systems that flag plants like this for machine makers.", "This came from a system we build for machine makers.") }, news, pack)).toBe("");
+    // a close about the lead, not the system we'd build, is rewritten
+    expect(draftProblems({ ...ok, body: ok.body.replace("Would one for Gujarat be worth exploring?", "Is Gujarat on your list?") }, news, pack)).toMatch(/close isn't about the system/);
     expect(entityNames("Global Health Services LLC")).toEqual(["Global Health Services"]);
   });
   it("the close rotates by lead (same lead, same close), with contract closes for recompetes", () => {
