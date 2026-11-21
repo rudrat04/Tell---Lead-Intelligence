@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
-import { draftProblems, writeOpportunityDraft, entityNames, type OppDraftInput } from "./opportunity-draft.js";
+import { draftProblems, writeOpportunityDraft, entityNames, closeFor, CONTRACT_CLOSES, type OppDraftInput } from "./opportunity-draft.js";
 
 const input: OppDraftInput = {
   company: "Northwind Systems", opportunity: "Federal recompete", angle: "",
   events: [{ quote: `Contoso Federal LLC's $8.0M Department of Veterans Affairs contract for "it modernization support" (NAICS 541512) ends 2027-06-30`, url: "https://x.test", reasons: ["won 3 contracts in NAICS 541512"], about: "Contoso Federal LLC" }],
   record: ["Won $4.0M from Department of Veterans Affairs in 2025"],
 };
-const good = { subject: "a va it contract is ending", body: "A VA contractor's $8.0M IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it; we build a system that flags VA recompetes like this for your capture team. Want to see what we found?" };
+const good = { subject: "a va it contract is ending", body: "A VA contractor's $8.0M IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it; we build a system that flags VA recompetes like this for your capture team. Is this one on your capture list yet?" };
 
 describe("opportunity draft checks", () => {
   it("a short, factual draft that ends on a question passes", async () => {
@@ -21,6 +21,12 @@ describe("opportunity draft checks", () => {
     expect(draftProblems({ ...good, body: `The recompete is confirmed. ${good.body}` }, input, pack)).toMatch(/recompete as fact/);
     expect(draftProblems({ ...good, body: good.body.replace(/\?$/, ".") }, input, pack)).toMatch(/end on a question/);
   });
+  it("banned words match whole words only (\"fr\" never matches inside \"from\")", async () => {
+    const pack = { ...(await loadFixturePack()) };
+    pack.copy = { ...pack.copy, never_say: ["fr"] };
+    expect(draftProblems(good, input, pack)).not.toMatch(/says "fr"/);
+    expect(draftProblems({ ...good, body: good.body.replace("could suit you", "could suit you fr") }, input, pack)).toMatch(/says "fr"/);
+  });
   it("never names the company behind the signal, and always pitches the system", async () => {
     const pack = await loadFixturePack();
     expect(draftProblems({ ...good, body: good.body.replace("A VA contractor's", "Contoso Federal's") }, input, pack)).toMatch(/names "Contoso Federal", the company behind the signal/);
@@ -29,12 +35,19 @@ describe("opportunity draft checks", () => {
     expect(entityNames("Contoso Pharma Ltd.")).toEqual(["Contoso Pharma", "Contoso"]);
     // nothing that finds the company in one search, and no stock lines
     const news = { ...input, events: [{ quote: "Contoso Pharma to set up plant in Gujarat (Daily Business)", url: "u", reasons: ["offers granulation"], about: "Contoso Pharma" }] };
-    const ok = { subject: "a new plant in gujarat", body: "A drug maker is setting up a plant in Gujarat. That could mean granulators. We built a system that flags plants like this for your sales team. Want to see what we found?" };
+    const ok = { subject: "a new plant in gujarat", body: "A drug maker is setting up a plant in Gujarat. That could mean granulators. We built a system that flags plants like this for your sales team. Is Gujarat on your list?" };
     expect(draftProblems(ok, news, pack)).toBe("");
     expect(draftProblems({ ...ok, body: ok.body.replace("Gujarat.", "Gujarat, per Daily Business.") }, news, pack)).toMatch(/names the outlet "Daily Business"/);
     expect(draftProblems({ ...ok, body: ok.body.replace("in Gujarat", "at 1200 W Fulton St") }, news, pack)).toMatch(/1200 W Fulton St/);
     expect(draftProblems({ ...ok, body: ok.body.replace("That could mean", "The move is") }, news, pack)).toMatch(/stock phrase "The move is"/);
+    expect(draftProblems({ ...ok, body: ok.body.replace("Is Gujarat on your list?", "Want to see what we found?") }, news, pack)).toMatch(/stock phrase/);
     expect(entityNames("Global Health Services LLC")).toEqual(["Global Health Services"]);
+  });
+  it("the close rotates by lead (same lead, same close), with contract closes for recompetes", () => {
+    const ids = new Set(["Acme", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta"].map((c) => closeFor({ company: c, events: input.events, contract: false }).id));
+    expect(ids.size).toBeGreaterThan(2);
+    expect(closeFor({ company: "Acme", events: input.events, contract: false })).toEqual(closeFor({ company: "Acme", events: input.events, contract: false }));
+    expect(CONTRACT_CLOSES.map((c) => c.id)).toContain(closeFor({ company: "Acme", events: input.events }).id);
   });
   it("rewrites with the reasons, then gives up (no template)", async () => {
     const pack = await loadFixturePack();

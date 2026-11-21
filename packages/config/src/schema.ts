@@ -880,6 +880,9 @@ const GeneralOpp = {
   keywords: z.array(z.string().min(2)).default([]),
   /** events to reuse from another opportunity (same news, another roster: no second search) */
   events_from: z.string().optional(),
+  /** prove the fit before a lead goes out: the company's own website must show it offers what the event needs (the
+   *  molecule, the destination, the equipment), quoted word for word; unproven = not a lead */
+  verify: z.boolean().default(true),
 };
 
 const NewsOppSchema = z.object({

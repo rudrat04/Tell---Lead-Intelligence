@@ -16,6 +16,9 @@ import { contactsFor } from "./contacts.js";
 import { attachEmails } from "./emails.js";
 import { decisionPower } from "./reach.js";
 import { waterfallContacts } from "./waterfall.js";
+import { readSite, type SitePage } from "@tell/watchers";
+import { HaikuClient, checkFit, type FitVerdict, type LlmClient } from "@tell/extract";
+import { fitChecks } from "@tell/db";
 
 /**
  * Opportunity-led leads (pack opportunities.yaml, `pnpm opps`): find the event first, then the companies that can
@@ -68,6 +71,7 @@ export interface OppRunStats {
   rosters: Record<string, { refreshed: boolean; awards: number; members: number; looked: number; resolved: number; pending: number; sam?: { requests: number; checked: number; withSite: number } }>;
   events: Record<string, { fetched: number; stored: number; errors: number; skipped?: boolean }>;
   matches: number; beneficiaries: number; held: number; pool: number; noContact: number; leads: number;
+  proven?: number; unproven?: number; fitChecks?: number;
 }
 
 export interface OppLead {
@@ -79,6 +83,8 @@ export interface OppLead {
   evidence: MemberFacts["evidence"];
   facts: MemberFacts;
   contact: Contact | null;
+  /** the fit proven from their own site (news / signal leads): what the event needs, and the sentence that shows they offer it */
+  proof?: { need: string; quote: string; url: string } | null;
 }
 
 type Fetch = typeof searchFedAwards;
@@ -289,7 +295,7 @@ export async function collectEvents(id: string, op: OpportunityDef, r: Roster, o
 }
 
 /** Headlines -> events (pure; exported for tests): the headline must match `must` and not `exclude`; the company before
- *  the verb is who it is about (kept by name only); a headline naming no company is still an event (no one to exclude). */
+ *  the verb is who it is about (kept by name only); a headline naming no company is not an event. */
 export function newsEvents(items: NewsItem[], op: Extract<OpportunityDef, { kind: "news" }>, now: Date): { key: string; entityName: string; quote: string; url: string; at: Date }[] {
   const verbs = new RegExp(`\\s+(?:${op.verbs})\\b`, "i"), must = op.must ? toRegex(op.must) : null, exclude = op.exclude ? toRegex(op.exclude) : null;
   const seen = new Set<string>();
@@ -298,7 +304,10 @@ export function newsEvents(items: NewsItem[], op: Extract<OpportunityDef, { kind
     seen.add(i.url);
     const at = i.postedAt && i.postedAt <= now ? i.postedAt : now;
     if (now.getTime() - at.getTime() > op.max_age_days * DAY) return [];
-    return [{ key: i.url, entityName: companyFromHeadline(i.title, verbs) ?? "", quote: `${i.title}${i.outlet ? ` (${i.outlet})` : ""}`, url: i.url, at }];
+    // a headline that names no company before the verb is a roundup or a press note ("Manufacturing Momentum: ..."), not an event
+    const entityName = companyFromHeadline(i.title, verbs);
+    if (!entityName) return [];
+    return [{ key: i.url, entityName, quote: `${i.title}${i.outlet ? ` (${i.outlet})` : ""}`, url: i.url, at }];
   });
 }
 
@@ -412,6 +421,7 @@ export async function matchOpportunity(id: string, op: OpportunityDef, pack: Pac
   for (const row of evs) {
     const fed = op.kind === "usaspending_expiring" ? storedEvent(row) : null, gen = op.kind !== "usaspending_expiring" ? storedGeneral(row) : null;
     if (!fed && !gen) continue;
+    if (gen && !gen.entityName) continue; // (news stored before headlines had to name a company)
     for (const { m, domain } of members) {
       if (!m.accountId || isJointVenture(m.name)) continue; // (members stored before JVs were left off rosters)
       const facts = m.facts as MemberFacts;
@@ -444,7 +454,7 @@ export async function matchOpportunity(id: string, op: OpportunityDef, pack: Pac
  * The day's opportunity leads: every beneficiary with live matched events, scored, held back when delivered recently
  * with nothing new, the pool searched for the opportunity's buyers, re-scored with the contact, cut at max_leads.
  */
-export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; waterfall?: typeof waterfallContacts } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads"> }> {
+export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; waterfall?: typeof waterfallContacts; fit?: FitDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks"> }> {
   const db = getDb(), now = opts.now ?? new Date(), cfg = pack.opportunities;
   const since = new Date(now.getTime() - cfg.window_days * DAY);
   // a match belongs to the opportunity that reads its event's opportunity with its roster (events_from shares events)
@@ -506,7 +516,10 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   }
   scored.sort((a, b) => b.score.score - a.score.score);
   const max = cfg.max_leads || scored.length;
-  const pool = roundRobin(scored, max * cfg.pool_multiplier, cfg.max_per_opportunity * cfg.pool_multiplier);
+  // news / signal leads must prove the fit from the company's own site before they take a slot (federal leads carry
+  // their proof: the contracts they won)
+  const proven = await proveFits(scored, pack, { now, write: opts.write !== false, want: max * cfg.pool_multiplier * 2, ...(opts.fit ? { fit: opts.fit } : {}) });
+  const pool = roundRobin(proven.leads, max * cfg.pool_multiplier, cfg.max_per_opportunity * cfg.pool_multiplier);
 
   // the opportunity's buyers first (Head of BD / Capture for a recompete), searched only for the pool
   const preferred = new Map(pool.map((l) => [l.account.id, l.opportunity.buyers]));
@@ -527,7 +540,85 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   }
   leads.sort((a, b) => b.score.score - a.score.score);
   const out = roundRobin(leads, max, cfg.max_per_opportunity).sort((a, b) => b.score.score - a.score.score);
-  return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, leads: out.length } };
+  return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, leads: out.length, proven: proven.proven, unproven: proven.unproven, fitChecks: proven.checks } };
+}
+
+// ------------------------------------------------------------------------------------------------ proof of fit
+
+/** a proof check is reused this long (sites change slowly) */
+export const FIT_CHECK_DAYS = 60;
+/** events tried per lead before giving up on it */
+const EVENTS_TRIED = 2;
+export interface FitDeps {
+  /** site reader and checker (tests pass fakes) */
+  read?: (domain: string, words: string[], rendered: boolean) => Promise<{ pages: SitePage[]; usedFirecrawl: boolean }>;
+  llm?: LlmClient | null;
+  usage?: UsageStore;
+}
+
+/** the words worth looking for on their site: the opportunity's keywords and the event's longer words (pure) */
+export const siteWords = (quote: string, keywords: string[]) => [...new Set([...keywords, ...(quote.match(/\b[A-Za-z][a-z]{4,}\b/g) ?? [])].map((w) => w.toLowerCase()))].slice(0, 20);
+
+/**
+ * Keep the leads whose fit is proven (pure ordering, I/O through deps): federal leads and opportunities with
+ * `verify: false` pass as they are; a news / signal lead passes when one of its top events gets a "yes" with a quote
+ * from the company's own site (cached in fit_checks for FIT_CHECK_DAYS). Checks are capped per run (FIT_CHECKS_PER_RUN),
+ * Haiku by FIT_DAILY_CAP_USD (usage_daily "haiku_fit"), Firecrawl renders by FIRECRAWL_PER_DAY ("firecrawl").
+ * Unproven leads are dropped: without a site that shows the fit, the email would be a guess.
+ */
+export async function proveFits(cands: OppLead[], pack: Pack, opts: { now: Date; write: boolean; want: number; fit?: FitDeps }): Promise<{ leads: OppLead[]; proven: number; unproven: number; checks: number }> {
+  const db = getDb(), usage = opts.fit?.usage ?? neonUsage();
+  const cap = Number(process.env.FIT_DAILY_CAP_USD ?? 0.03), perRun = Number(process.env.FIT_CHECKS_PER_RUN ?? 30), fcCap = Number(process.env.FIRECRAWL_PER_DAY ?? 10);
+  let llm: (LlmClient & { spent?: number }) | null | undefined = opts.fit?.llm;
+  if (llm === undefined) {
+    const left = cap - (await usage.spentToday("haiku_fit"));
+    llm = process.env.ANTHROPIC_API_KEY && left > 0.001 ? new HaikuClient({ capUsd: left }) : null;
+  }
+  const read = opts.fit?.read ?? ((d: string, w: string[], r: boolean) => readSite(d, w, { rendered: r }));
+  const ids = [...new Set(cands.map((c) => c.account.id))];
+  const cached = new Map((ids.length ? await db.select().from(fitChecks).where(and(inArray(fitChecks.accountId, ids), sql`${fitChecks.checkedAt} > ${new Date(opts.now.getTime() - FIT_CHECK_DAYS * DAY)}`)) : [])
+    .map((r) => [`${r.accountId}|${r.eventKey}`, r]));
+  const sites = new Map<string, SitePage[]>();
+  const out: OppLead[] = [];
+  let proven = 0, unproven = 0, checks = 0;
+  for (const c of cands) {
+    if (out.length >= opts.want) break;
+    const op = pack.opportunities.opportunities[c.opportunity.id];
+    if (!op || op.kind === "usaspending_expiring" || !op.verify) { out.push(c); continue; }
+    let hit: { event: OppLead["events"][number]; v: { need: string; proof: string; url: string } } | null = null;
+    for (const e of c.events.slice(0, EVENTS_TRIED)) {
+      const k = `${c.account.id}|${e.url}`;
+      const prior = cached.get(k);
+      let v: FitVerdict | null = prior ? { verdict: prior.verdict as FitVerdict["verdict"], need: prior.need ?? "", proof: prior.proof, url: prior.proofUrl, reason: prior.reason ?? "" } : null;
+      if (!v) {
+        if (!llm || checks >= perRun) break;
+        let pages = sites.get(c.account.domain);
+        if (!pages) {
+          const rendered = (await usage.spentToday("firecrawl")) < fcCap;
+          const r = await read(c.account.domain, siteWords(e.quote, op.keywords), rendered).catch(() => ({ pages: [] as SitePage[], usedFirecrawl: false }));
+          if (r.usedFirecrawl) await usage.addSpend("firecrawl", 1, fcCap);
+          pages = r.pages;
+          sites.set(c.account.domain, pages);
+        }
+        checks++;
+        const before = llm.spent ?? 0;
+        v = await checkFit(llm, { event: e.quote, opportunity: c.opportunity.label, angle: c.opportunity.angle, company: c.account.name ?? c.account.domain, description: c.account.description, pages })
+          .catch(() => null);
+        if (llm.spent != null) await usage.addSpend("haiku_fit", llm.spent - before, cap);
+        if (!v) break; // the checker failed (cap, outage): this lead stays unproven today
+        if (opts.write) await db.insert(fitChecks).values({ accountId: c.account.id, eventKey: e.url, verdict: v.verdict, need: v.need || null, proof: v.proof, proofUrl: v.url, reason: v.reason || null, checkedAt: opts.now })
+          .onConflictDoUpdate({ target: [fitChecks.accountId, fitChecks.eventKey], set: { verdict: v.verdict, need: v.need || null, proof: v.proof, proofUrl: v.url, reason: v.reason || null, checkedAt: opts.now } });
+      }
+      if (v.verdict === "yes" && v.proof && v.url) { hit = { event: e, v: { need: v.need, proof: v.proof, url: v.url } }; break; }
+    }
+    if (!hit) { unproven++; continue; }
+    proven++;
+    // the proven event leads; the proof joins the reasons and the evidence the brief and the draft use
+    const events = [hit.event, ...c.events.filter((x) => x !== hit!.event)];
+    events[0] = { ...events[0]!, reasons: [...events[0]!.reasons, `their site: "${hit.v.proof}"`] };
+    out.push({ ...c, events, proof: { need: hit.v.need, quote: hit.v.proof, url: hit.v.url }, evidence: [{ quote: `Their site: "${hit.v.proof}"`, url: hit.v.url }, ...c.evidence] });
+  }
+  return { leads: out, proven, unproven, checks };
 }
 
 /** Up to `n` leads taken in turns across opportunities (each list strongest first), at most `per` from one (pure;

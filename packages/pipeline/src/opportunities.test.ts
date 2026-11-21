@@ -16,6 +16,7 @@ describe("news events", () => {
       { title: "Opinion: why every plant needs acres", url: "https://n.example/2", postedAt: NOW },
       { title: "Fabrikam acquires land for plant", url: "https://n.example/3", postedAt: new Date("2026-09-01T00:00:00Z") },
       { title: "Markets rally on Friday", url: "https://n.example/4", postedAt: NOW },
+      { title: "Manufacturing Momentum: plant capacity across the country", url: "https://n.example/5", postedAt: NOW }, // names no company
     ], newsOpp as never, NOW);
     expect(evs.map((e) => e.entityName)).toEqual(["Contoso Pharma"]);
     expect(evs[0]!.quote).toBe("Contoso Pharma to set up plant on 40 acres in Gujarat (Daily)");

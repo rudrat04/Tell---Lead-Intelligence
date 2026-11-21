@@ -50,7 +50,8 @@ export function signalWhen(l: Pick<OppLead, "opportunity">, e: { endDate: Date }
   return `${isoDay(e.endDate)} (${ago === 0 ? "today" : `${ago} day${ago === 1 ? "" : "s"} ago`})`;
 }
 /** How this company benefits, in one line: why it fits the signal, from its own record or what it sells (pure). */
-export const howTheyBenefit = (l: Pick<OppLead, "events">) => [...new Set(l.events.slice(0, MAX_EVENTS).flatMap((e) => e.reasons))].join("; ");
+export const howTheyBenefit = (l: Pick<OppLead, "events" | "proof">) => [...new Set(l.events.slice(0, MAX_EVENTS).flatMap((e) => e.reasons).filter((r) => !r.startsWith("their site:")))].join("; ")
+  + (l.proof ? `; proven: they offer ${l.proof.need} ("${l.proof.quote}")` : "");
 
 /**
  * The one-page brief, written by code from the facts only (pure; exported for tests), in the order you'd pitch it:
@@ -67,7 +68,8 @@ export function oppBrief(l: OppLead, now: Date): string {
     "2. WHO CAN BENEFIT, AND HOW",
     `${a.name ?? a.domain} (${a.domain})${[a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).length ? ` · ${[a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).join(" · ")}` : ""}`,
     ...(a.description ? [a.description] : []),
-    `Why them: ${howTheyBenefit(l)}`,
+    `Why them: ${howTheyBenefit({ events: l.events })}`,
+    ...(l.proof ? [`Proven from their own site: they offer ${l.proof.need}: "${l.proof.quote}" (${l.proof.url})`] : []),
     ...l.evidence.slice(0, 3).map((e) => `- ${e.quote}\n  ${e.url}`),
     "",
     `3. THE PLAY: ${l.opportunity.label}`,
@@ -117,7 +119,8 @@ export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, tes
     "🏭 <b>WHO CAN BENEFIT</b>",
     `<b>${link(`https://${a.domain}`, a.name ?? a.domain)}</b>${facts ? ` · ${facts}` : ""}`,
     ...(a.description ? [`<i>${tgEsc(a.description)}</i>`] : []),
-    `<b>How:</b> ${tgEsc(howTheyBenefit(l))}`,
+    `<b>How:</b> ${tgEsc(howTheyBenefit({ events: l.events }))}`,
+    ...(l.proof ? [`✅ <b>Proven from their site:</b> they offer ${tgEsc(l.proof.need)}: “${link(l.proof.url, l.proof.quote)}”`] : []),
     ...(l.evidence[0] && l.opportunity.kind === "usaspending_expiring" ? [`Their record: ${link(l.evidence[0].url, l.evidence[0].quote)}`] : []),
     "",
     `🎯 <b>THE PLAY: ${tgEsc(l.opportunity.label)}</b>`,

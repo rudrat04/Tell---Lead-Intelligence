@@ -496,3 +496,16 @@ export const opportunityMatches = pgTable("opportunity_matches", {
   reasons: jsonb("reasons").notNull(),
   matchedAt: ts("matched_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.eventId, t.accountId] }), index("opportunity_matches_account_idx").on(t.accountId)]);
+
+/** Proof checks (opportunities): does this beneficiary's own website show it can serve what the event needs? One row
+ *  per account + event, re-checked after FIT_CHECK_DAYS. `proof` is one sentence copied from its site (a fact). */
+export const fitChecks = pgTable("fit_checks", {
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  eventKey: text("event_key").notNull(),
+  verdict: text("verdict").notNull(), // yes | no | unclear
+  need: text("need"),
+  proof: text("proof"),
+  proofUrl: text("proof_url"),
+  reason: text("reason"),
+  checkedAt: ts("checked_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.accountId, t.eventKey] })]);
