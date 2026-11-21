@@ -163,7 +163,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   try {
     const an = await analyzeLeads(score.ranking.leads, contacts, pack); // Sonnet writer, own daily cap (WRITER_DAILY_CAP_USD)
     notes = an.analyses;
-    enrich.push(`analyst fresh=${an.fresh} cached=${an.cached} failed=${an.failed}${an.skipped ? ` (${an.skipped})` : ""}`);
+    enrich.push(`analyst fresh=${an.fresh} cached=${an.cached} failed=${an.failed} buyer_samples=${an.buyerSamples ?? 0}${an.skipped ? ` (${an.skipped})` : ""}`);
   } catch (e) { enrich.push("analyst failed"); if (!process.env.CI) console.error("analyst:", (e as Error).message); /* code-written openers stand */ }
   // touch back: past leads with a new fact, after today's drafts (they get the writer budget first); a test or dry run
   // lists the facts without writing drafts

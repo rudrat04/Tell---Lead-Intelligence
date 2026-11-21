@@ -40,6 +40,9 @@ export const accounts = pgTable("accounts", {
   /** what the company does, one or two sentences from its own company record (Exa), so plays, the judge and drafts
    *  know who they're talking to; a fact, not stored page text */
   description: text("description"),
+  /** who buys from this company and which signals show those buyers need it (Haiku, from the description):
+   *  { industries, signals, who, at } — the proof sample in drafts comes from accounts matching it */
+  buyers: jsonb("buyers"),
   maturityStage: text("maturity_stage"),
   stageChangedAt: ts("stage_changed_at"),
   status: text("status").notNull().default("active"), // active|tombstone|archived

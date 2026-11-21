@@ -6,6 +6,7 @@ import type { RankInput } from "@tell/intel";
 import { getDb, analyses, and, inArray } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
 import { proofSample } from "./sample-list.js";
+import { profileFor, buyerSample, sampleEvidence } from "./buyer-signals.js";
 import type { ScoredAccount } from "./score.js";
 
 /** Evidence items the analyst sees per lead (strongest first). */
@@ -42,7 +43,7 @@ function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefin
 export async function analyzeLeads(
   leads: RankInput<ScoredAccount>[], contacts: Map<string, Contact | null>, pack: Pack,
   opts: { write?: boolean; dailyCapUsd?: number; llm?: LlmClient; usage?: UsageStore } = {},
-): Promise<{ analyses: Map<string, LeadAnalysis>; fresh: number; cached: number; failed: number; spentUsd: number; skipped?: string }> {
+): Promise<{ analyses: Map<string, LeadAnalysis>; fresh: number; cached: number; failed: number; spentUsd: number; skipped?: string; /** drafts proved with their customers' signals */ buyerSamples?: number }> {
   const out = new Map<string, LeadAnalysis>();
   const res = { analyses: out, fresh: 0, cached: 0, failed: 0, spentUsd: 0 } as Awaited<ReturnType<typeof analyzeLeads>>;
   if (!leads.length) return res;
@@ -93,11 +94,21 @@ export async function analyzeLeads(
       // proof: a small real sample from the public list the play's free step names (2-3 rows + the true total)
       const free = p.l.score.plays.find((x) => x.free)?.free;
       const kind = free ? pack.capabilities.capabilities.find((c) => c.id === free)?.list : undefined;
+      let proved = false;
       if (kind) {
         try {
           const sample = await proofSample(pack, kind, p.input.evidence.map((e) => e.quote));
-          if (sample) p.input.evidence.push({ type: "public_record_sample", ageDays: 0, current: true, quote: sample.quote, url: sample.url });
+          if (sample) { p.input.evidence.push({ type: "public_record_sample", ageDays: 0, current: true, quote: sample.quote, url: sample.url }); proved = true; }
         } catch { /* the email goes without a sample */ }
+      }
+      // every industry: their customers showing new demand (accounts in the industries that buy from them, with a fresh
+      // signal), when no public-record list already proves the offer
+      if (!proved) {
+        try {
+          const prof = await profileFor(p.l.account, pack, critic, write);
+          const bs = prof ? await buyerSample(prof, { id: p.l.account.id, region: p.l.account.region }) : null;
+          if (bs) { p.input.evidence.push(...sampleEvidence(bs)); res.buyerSamples = (res.buyerSamples ?? 0) + 1; }
+        } catch { /* the email goes without it */ }
       }
       let a: Analysis | null = null;
       // TELL_DEBUG_DRAFTS=1 (local only: it prints lead details) shows why drafts were rejected

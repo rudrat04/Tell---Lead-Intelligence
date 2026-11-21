@@ -141,6 +141,13 @@
       "when": 1795241236562,
       "tag": "0019_account_description",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795257463686,
+      "tag": "0020_account_buyers",
+      "breakpoints": true
     }
   ]
 }

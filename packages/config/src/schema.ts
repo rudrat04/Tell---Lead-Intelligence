@@ -767,6 +767,19 @@ export const CopySchema = z.object({
   shapes: z.array(z.string().min(10)).default([]),
   /** closing-question styles per audience (segment name or "default"); falls back to `ctas` */
   ctas_by_segment: z.record(z.string(), z.array(z.string().min(5))).default({}),
+  /** what you do, said at the end of every email in plain words, a different way per play: `idea` is the thought,
+   *  `variants` the ways to say it (one per lead, picked by its play; always reworded, never pasted), `by_play` a
+   *  play's own way */
+  pitch: z.object({
+    idea: z.string().default(""),
+    variants: z.array(z.string().min(10)).default([]),
+    by_play: z.record(z.string(), z.string().min(10)).default({}),
+  }).default({ idea: "", variants: [], by_play: {} }),
+  /** words readers outside tech don't use: rejected in drafts for every industry not in `allow_segments` */
+  plain_words: z.object({
+    banned: z.array(z.string()).default([]),
+    allow_segments: z.array(z.string()).default([]),
+  }).default({ banned: [], allow_segments: [] }),
   /** the greeting the code writes above every email ({first} = first name; without a contact the name part is dropped) */
   greeting: z.string().default("Hi {first},"),
   /** the first LinkedIn message after they accept your connection (not the connection note): Sheet "LinkedIn message" */
@@ -779,7 +792,7 @@ export const CopySchema = z.object({
   }).default({ voice: "", greeting: "Hi {first},", max_words: 50, examples: [] }),
 });
 export type Copy = z.infer<typeof CopySchema>;
-const COPY_DEFAULT: Copy = { voice: "", mention: "", offers: [], ctas: [], never_say: [], allow_durations: false, examples: [], opening_patterns: [], voices: {}, shapes: [], ctas_by_segment: {}, greeting: "Hi {first},", linkedin: { voice: "", greeting: "Hi {first},", max_words: 50, examples: [] } };
+const COPY_DEFAULT: Copy = { voice: "", mention: "", offers: [], ctas: [], never_say: [], allow_durations: false, examples: [], opening_patterns: [], voices: {}, shapes: [], ctas_by_segment: {}, pitch: { idea: "", variants: [], by_play: {} }, plain_words: { banned: [], allow_segments: [] }, greeting: "Hi {first},", linkedin: { voice: "", greeting: "Hi {first},", max_words: 50, examples: [] } };
 
 export const PackSchema = z.object({
   meta: PackMetaSchema,
