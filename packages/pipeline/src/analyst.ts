@@ -7,6 +7,7 @@ import { getDb, analyses, and, inArray } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
 import { proofSample } from "./sample-list.js";
 import { researchFor, marketPlay, playEvidence, briefText, type MarketPlay } from "./buyer-signals.js";
+import type { LookupMemo } from "./market-lookups.js";
 import type { ScoredAccount } from "./score.js";
 
 /** Evidence items the analyst sees per lead (strongest first). */
@@ -64,11 +65,12 @@ export async function analyzeLeads(
     if (left > 0) researcher = new HaikuClient({ capUsd: Math.min(left, 0.2) });
   }
   const today = new Date().toISOString().slice(0, 10);
+  const memo: LookupMemo = {}; // the shortage list, approvals and recalls: fetched once for every lead in the run
   for (const p of prepared) {
     try {
       const top = p.l.score.drivers[0];
       const r = await researchFor(p.l.account, top?.quote, pack, researcher, write);
-      const mp = r ? await marketPlay(r, { id: p.l.account.id, region: p.l.account.region, segment: p.l.account.segment }, pack) : null;
+      const mp = r ? await marketPlay(r, { id: p.l.account.id, name: p.l.account.name, region: p.l.account.region, segment: p.l.account.segment }, pack, memo) : null;
       if (!mp) continue;
       plays.set(p.l.account.id, mp);
       briefs.set(p.l.account.id, briefText(mp, { company: p.l.account.name ?? p.l.account.domain, ...(top ? { trigger: { quote: top.quote, url: top.url } } : {}) }, today));

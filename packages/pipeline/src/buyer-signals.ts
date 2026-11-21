@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
 import { researchCompany, type Research, type LlmClient } from "@tell/extract";
 import { getDb, accounts, eq, sql } from "@tell/db";
+import { liveExamples, liveFresh, type LookupMemo } from "./market-lookups.js";
 
 /**
  * Steps 2-5 of the pitch, for one lead:
@@ -74,17 +75,36 @@ export async function researchFor(account: { id: string; name: string | null; do
 
 /** The play: each chosen change with live examples (the lead excluded; competitors in its region only). Null when fewer
  *  than two changes have an example. */
-export async function marketPlay(r: Research, lead: { id: string; region: string | null; segment: string | null }, pack: Pack): Promise<MarketPlay | null> {
+export async function marketPlay(r: Research, lead: { id: string; name?: string | null; region: string | null; segment: string | null }, pack: Pack, memo: LookupMemo = {}): Promise<MarketPlay | null> {
   const mod = pack.modules.modules.find((m) => m.id === r.module);
   if (!mod) return null;
   const db = getDb();
   const since = new Date(Date.now() - SAMPLE_DAYS * DAY);
   const used = new Set<string>();
   const changes: PlayChange[] = [];
+  // live rows found for this lead before (accounts.buyers.live), reused for LIVE_CACHE_DAYS
+  const [acc] = await db.select({ buyers: accounts.buyers }).from(accounts).where(eq(accounts.id, lead.id)).limit(1);
+  const cached = (acc?.buyers as { live?: { at?: string; rows?: Record<string, (Omit<ExampleRow, "observedAt"> & { observedAt: string })[]> } } | null)?.live;
+  const fresh = liveFresh(cached?.at) ? cached?.rows ?? {} : {};
+  const found: Record<string, ExampleRow[]> = {};
   for (const id of r.changes) {
     const c = mod.changes.find((x) => x.id === id);
-    const inds = c ? changeIndustries(c, r, lead.segment) : [];
-    if (!c || !inds.length) continue;
+    if (!c) continue;
+    const must = c.must ? new RegExp(c.must, "i") : null;
+    if (c.live !== "db") {
+      // searched for this lead with its own product words: places (for news) and required words still apply
+      const rows = fresh[c.id]?.map((x) => ({ ...x, observedAt: new Date(x.observedAt) }))
+        ?? await liveExamples(c, r, { name: lead.name ?? "", region: lead.region }, pack, memo);
+      found[c.id] = rows;
+      const ok = rows.filter((x) => (c.live !== "news" || inPlaces(x.quote, r.places ?? [])) && (!must || must.test(x.quote)));
+      const ex = pickExamples(ok, lead.region, PER_CHANGE, used);
+      if (!ex.length) continue;
+      ex.forEach((e) => used.add(e.accountId));
+      changes.push({ id: c.id, title: c.title, whose: c.whose, why: r.why[c.id] ?? c.why, action: c.action, examples: ex });
+      continue;
+    }
+    const inds = changeIndustries(c, r, lead.segment);
+    if (!inds.length) continue;
     const rows = (await db.execute(sql`
       select s.account_id, a.name, a.domain, a.region, s.type, s.evidence_quote, s.evidence_url, s.observed_at, s.strength
       from signals s join accounts a on a.id = s.account_id
@@ -96,11 +116,14 @@ export async function marketPlay(r: Research, lead: { id: string; region: string
     // market, channel and competitor examples must be about what they sell (a food maker's recompetes are food
     // contracts, not IT ones); customers' expansions are judged by the customer industries alone
     const productual = c.whose !== "customers";
-    const must = c.must ? new RegExp(c.must, "i") : null;
     const ex = pickExamples(rows.filter((x) => inPlaces(x.evidence_quote, r.places ?? []) && (!productual || aboutTheirProducts(x.evidence_quote, r.keywords ?? [])) && (!must || must.test(x.evidence_quote))).map((x) => ({ accountId: x.account_id, company: x.name ?? x.domain, region: x.region, type: x.type, quote: x.evidence_quote, url: x.evidence_url, observedAt: new Date(x.observed_at), strength: x.strength })), lead.region, PER_CHANGE, used);
     if (!ex.length) continue;
     ex.forEach((e) => used.add(e.accountId));
     changes.push({ id: c.id, title: c.title, whose: c.whose, why: r.why[c.id] ?? c.why, action: c.action, examples: ex });
+  }
+  if (Object.keys(found).length) {
+    const buyers = (acc?.buyers ?? {}) as Record<string, unknown>;
+    await db.update(accounts).set({ buyers: { ...buyers, live: { at: liveFresh(cached?.at) ? cached!.at : new Date().toISOString(), rows: { ...fresh, ...found } } } }).where(eq(accounts.id, lead.id)).catch(() => undefined);
   }
   // two changes, or one strong change with two companies behind it
   return changes.length >= 2 || (changes.length === 1 && changes[0]!.examples.length >= 2) ? { module: mod.id, moduleTitle: mod.title, offer: mod.offer, research: r, changes } : null;
