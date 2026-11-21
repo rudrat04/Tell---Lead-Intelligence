@@ -1,0 +1,6 @@
+{"segment":"pharma","signals":["first_role","funding_raise","adjacent_role_open"],"plays":[],"note":"sales hiring at a drug maker fired SaaS GTM plays (logistics / real estate / healthcare leads, Nov 2026): GTM signals don't count in a niche industry"}
+{"segment":"software","signals":["shortage_anda_dormant"],"plays":[],"note":"a drug-shortage record must never become an offer to a SaaS company"}
+{"segment":"construction","signals":["shortage_anda_dormant","building_permit"],"plays":["big_permit"],"note":"a contractor gets the permit play, never the pharma one"}
+{"segment":"pharma","signals":["shortage_anda_dormant","core_role_open_45d"],"plays":["shortage_relaunch"],"note":"a drug maker gets its own play; the stalled sales hire next to it doesn't add the GTM one"}
+{"segment":null,"signals":["shortage_anda_dormant","building_permit"],"plays":[],"note":"unknown industry ('?' leads): no niche play fires until the industry is known"}
+{"segment":"software","signals":["core_role_open_45d","building_permit"],"plays":["struggling_to_hire"],"note":"a SaaS company with a permit in its city still only gets GTM plays"}

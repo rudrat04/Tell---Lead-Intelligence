@@ -22,6 +22,8 @@ export interface JudgeContext {
   fixedHints: { title: string; angle: string }[];
   /** plays that got replies before, in this industry (the library) */
   examples: { title: string; angle: string; offer: string }[];
+  /** the capability ids this company's industry may be offered (capabilities.yaml `industries`); unset = all */
+  capabilities?: string[];
 }
 
 const Score = z.number().int().min(0).max(5);
@@ -63,7 +65,8 @@ export function judgeUser(company: string, facts: string, ev: JudgeEvidence[], c
   const ind = ctx.industry ? `Industry: ${ctx.industry.label}${ctx.industry.description ? ` (${ctx.industry.description})` : ""}.${ctx.industry.hint ? ` Opportunities here often look like: ${ctx.industry.hint}` : ""}${ctx.industry.buyers.length ? `\nUsual buyers here, most fitting first: ${ctx.industry.buyers.join(" | ")}` : ""}\n` : "";
   const fixed = ctx.fixedHints.length ? `Tested plays that fit these signals (use their angle unless the evidence says otherwise):\n${ctx.fixedHints.map((p) => `- ${p.title}: ${p.angle}`).join("\n")}\n` : "";
   const ex = ctx.examples.length ? `Plays that got replies before in this industry (shape only):\n${ctx.examples.map((p) => `- ${p.title}: ${p.angle} Offer: ${p.offer}`).join("\n")}\n` : "";
-  return `${ind}${fixed}${ex}<data>
+  const caps = ctx.capabilities ? `Offer only these capabilities to this company (the others are for other industries): ${ctx.capabilities.join(", ")}\n` : "";
+  return `${ind}${fixed}${ex}${caps}<data>
 Company: ${company}${facts ? ` (${facts})` : ""}
 Evidence:
 ${ev.map((e, i) => `[${i}] ${e.type.replace(/_/g, " ")}, ${e.current ? "current" : `${Math.round(e.ageDays)} days ago`}: "${e.quote.replaceAll("</data>", "").slice(0, 400)}"`).join("\n")}
@@ -80,7 +83,7 @@ const HIRING = /role_open|first_role|contract_role|role_reposted|new_role/;
  * Check the judge's answer (pure; exported for tests). `listReady(list, quotes)` says whether a list generator has its
  * inputs in these quotes (pipeline's listInputs), so "deliverable 5" can't promise a list nobody can build.
  */
-export function validateJudged(raw: string, ev: JudgeEvidence[], pack: Pack, listReady: (list: string, quotes: string[]) => boolean): JudgeResult {
+export function validateJudged(raw: string, ev: JudgeEvidence[], pack: Pack, listReady: (list: string, quotes: string[]) => boolean, offerable?: string[]): JudgeResult {
   let j: unknown;
   try { j = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1)); } catch { return { qualifies: false, reason: "judge reply was not JSON" }; }
   const p = Raw.safeParse(j);
@@ -103,7 +106,8 @@ export function validateJudged(raw: string, ev: JudgeEvidence[], pack: Pack, lis
   if (!cites.length) return { qualifies: false, reason: "judge play cites no evidence", rubric };
   const cited = cites.map((i) => ev[i]!);
   if (!cited.some((e) => e.strength >= 4) && new Set(cited.map((e) => e.type)).size < 2) return { qualifies: false, reason: "too little evidence: one weak signal", rubric };
-  const caps = new Map(pack.capabilities.capabilities.map((c) => [c.id, c]));
+  // a capability scoped to other industries is not on offer here (a permit list is no first step for a drug maker)
+  const caps = new Map(pack.capabilities.capabilities.filter((c) => !offerable || offerable.includes(c.id)).map((c) => [c.id, c]));
   const free = r.free_capability ? caps.get(r.free_capability) : undefined;
   if (!free || !free.free) return { qualifies: false, reason: "offer has no free first step from the catalog", rubric };
   const paid = (r.paid_capabilities ?? []).filter((id) => caps.has(id) && id !== free.id);
@@ -120,7 +124,7 @@ export function validateJudged(raw: string, ev: JudgeEvidence[], pack: Pack, lis
 export async function judgeOpportunity(llm: LlmClient, pack: Pack, company: string, facts: string, ev: JudgeEvidence[], ctx: JudgeContext, listReady: (list: string, quotes: string[]) => boolean): Promise<JudgeResult> {
   if (!ev.length) return { qualifies: false, reason: "no evidence" };
   const out = await llm.complete({ system: judgeSystem(pack), user: judgeUser(company, facts, ev, ctx) });
-  const r = validateJudged(out, ev, pack, listReady);
+  const r = validateJudged(out, ev, pack, listReady, ctx.capabilities);
   if (r.qualifies && !r.judged.personas.length && ctx.industry?.buyers.length) r.judged.personas = ctx.industry.buyers.slice(0, 3);
   return r;
 }

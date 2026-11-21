@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
 import { validateAnalysis, validateJudged, type AnalystInput } from "@tell/extract";
 import { listReady } from "@tell/pipeline";
-import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic, buildEvidence, scoreAccount, type JobRow, type SignalRow } from "@tell/intel";
+import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic, buildEvidence, scoreAccount, type JobRow, type SignalRow, type Evidence } from "@tell/intel";
+import type { Pack } from "@tell/config";
 
 const load = <T>(f: string): T[] =>
   readFileSync(fileURLToPath(new URL(`./golden/${f}`, import.meta.url)), "utf8").split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l) as T);
@@ -73,6 +74,27 @@ describe("golden sets", () => {
     const failures = report("ranking", rows.map((r) => {
       const [h, l] = [priority(r.higher), priority(r.lower)];
       return { ok: h > l, label: `${r.note}: ${h.toFixed(4)} vs ${l.toFixed(4)}` };
+    }));
+    expect(failures).toEqual([]);
+  });
+
+  it("industry scope: each industry gets only its own signals and plays (no GTM offer to a drug maker, no permit offer to SaaS)", () => {
+    // synthetic wiring (the fixture pack has no industries): GTM plays scoped to software, one niche play per niche industry
+    const sig = (strength: number) => ({ class: "implicit" as const, lr: 5, half_life_days: 60, strength, fast_lane: false });
+    const ind = (label: string, signals: string[]) => ({ label, aliases: [], description: `${label} companies`, buyers: [], list: "manual" as const, excluded: false, signals });
+    const niche = (title: string, type: string, seg: string) => ({ title, requires: [type], requires_any: [], absent: [], window_days: 120, angle: "a", min_count: {}, qualifies: true, personas: [], industries: [seg] });
+    const gtmTypes = Object.keys(pack.signals.signals);
+    const scoped: Pack = { ...pack,
+      signals: { ...pack.signals, signals: { ...pack.signals.signals, shortage_anda_dormant: sig(5), building_permit: sig(4) } },
+      icp: { ...pack.icp, industries: { software: ind("Software", gtmTypes), pharma: ind("Pharma", ["shortage_anda_dormant", "core_role_filled"]), construction: ind("Construction", ["building_permit"]) } },
+      plays: { ...pack.plays, plays: { ...Object.fromEntries(Object.entries(pack.plays.plays).map(([id, p]) => [id, { ...p, industries: ["software"] }])),
+        shortage_relaunch: niche("Shortage drug", "shortage_anda_dormant", "pharma"), big_permit: niche("Big permit", "building_permit", "construction") } },
+    };
+    const rows = load<{ segment: string | null; signals: string[]; plays: string[]; note: string }>("industry-scope.jsonl");
+    const failures = report("industry scope", rows.map((r) => {
+      const ev: Evidence[] = r.signals.map((type, i) => ({ type, class: scoped.signals.signals[type]?.class ?? "implicit", ageDays: 2, current: false, quote: type, url: `https://ev.example/${i}`, ref: { kind: "signal" as const, id: `${i}` } }));
+      const got = scoreAccount(ev, { sizeBand: "11-50", region: "India", segment: r.segment }, scoped).plays.map((p) => p.id).sort();
+      return { ok: JSON.stringify(got) === JSON.stringify([...r.plays].sort()), label: `${r.note}: got [${got.join(", ")}]` };
     }));
     expect(failures).toEqual([]);
   });

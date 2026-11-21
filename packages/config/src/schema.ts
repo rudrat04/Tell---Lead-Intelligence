@@ -81,6 +81,10 @@ export const IndustrySchema = z.object({
   list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes", "gtm", "manual"]).default("manual"),
   /** described so companies can be classified into it, but never admitted (consumer brands) */
   excluded: z.boolean().default(false),
+  /** the signal types that count for a company in this industry: what shows a need you can make an offer on. Evidence of
+   *  any other type is ignored for its companies (a permit says nothing to a SaaS company; a sales hire says little to
+   *  a generic drug maker). Unset = every type counts. Negative signals always count. */
+  signals: z.array(z.string()).optional(),
 });
 
 /** One thing you can actually deliver (capabilities.yaml). The judge composes each lead's offer from these: a free
@@ -96,6 +100,8 @@ export const CapabilitySchema = z.object({
   list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes"]).optional(),
   /** when it fits (a hint for the judge) */
   good_for: z.string().default(""),
+  /** only offered to companies in these industries (segment names); empty = any industry */
+  industries: z.array(z.string()).default([]),
 });
 export const CapabilitiesSchema = z.object({ capabilities: z.array(CapabilitySchema).default([]) });
 
@@ -278,6 +284,9 @@ export const PlaysSchema = z.object({
     offer: z.string().optional(),
     /** the free list `pnpm freelist` builds for this play (unset = the industry's) */
     list: z.enum(["federal_buyers", "anda_holders", "hospitals", "permits", "recompetes", "gtm", "manual"]).optional(),
+    /** only fires for companies in these industries (segment names): a play is an offer to one kind of company. Empty =
+     *  any industry, including companies whose industry is unknown. A scoped play never fires on an unknown industry. */
+    industries: z.array(z.string()).default([]),
   })),
 });
 
@@ -741,6 +750,25 @@ export const PackSchema = z.object({
 }).superRefine((p, ctx) => {
   const capIds = p.capabilities.capabilities.map((c) => c.id);
   if (new Set(capIds).size !== capIds.length) ctx.addIssue({ code: "custom", path: ["capabilities"], message: "capability ids must be unique" });
+  // industries wired end to end: a play or capability names real industries, an industry counts real signal types, and
+  // a play scoped to an industry can fire on the signals that industry counts (or it is dead config)
+  const inds = p.icp.industries;
+  for (const [seg, ind] of Object.entries(inds)) for (const t of ind.signals ?? []) {
+    if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["industries", seg, "signals"], message: `unknown signal type "${t}"` });
+  }
+  for (const [name, play] of Object.entries(p.plays.plays)) for (const seg of play.industries) {
+    const ind = inds[seg];
+    if (!ind) { ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "industries"], message: `unknown industry "${seg}" (industries.yaml: ${Object.keys(inds).join(", ")})` }); continue; }
+    if (ind.excluded) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "industries"], message: `industry "${seg}" is excluded (never admitted)` });
+    const counted = ind.signals;
+    if (!counted) continue;
+    const missing = play.requires.filter((t) => !counted.includes(t));
+    if (missing.length) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "requires"], message: `can never fire for "${seg}": it requires ${missing.join(", ")}, which "${seg}" doesn't count (industries.yaml ${seg}.signals)` });
+    if (play.requires_any.length && !play.requires_any.some((t) => counted.includes(t))) ctx.addIssue({ code: "custom", path: ["plays", "plays", name, "requires_any"], message: `can never fire for "${seg}": none of ${play.requires_any.join(", ")} counts there` });
+  }
+  p.capabilities.capabilities.forEach((c, i) => c.industries.forEach((seg) => {
+    if (!inds[seg]) ctx.addIssue({ code: "custom", path: ["capabilities", i, "industries"], message: `unknown industry "${seg}"` });
+  }));
   if (p.signals.score.mode === "judged" && !p.capabilities.capabilities.some((c) => c.free)) ctx.addIssue({ code: "custom", path: ["capabilities"], message: "judged scoring needs capabilities.yaml with at least one free capability (the first step an offer gives)" });
   for (const t of CODE_SIGNAL_TYPES) {
     if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["signals", "signals", t], message: `signal type "${t}" is emitted by the code and must be defined` });

@@ -1,4 +1,4 @@
-import type { Pack } from "@tell/config";
+import { industryCounts, type Pack } from "@tell/config";
 import { exaPeopleSearch, type PeopleSearch } from "@tell/watchers";
 import { gapVerdict, gapQuote, interleave, rolePattern } from "@tell/intel";
 import { acceptPeopleHit, type Person } from "@tell/people";
@@ -31,8 +31,9 @@ export async function checkRoleGaps(
   const recent = new Set((await db.select({ a: peopleSearches.accountId }).from(peopleSearches)
     .where(and(eq(peopleSearches.persona, PERSONA), inArray(peopleSearches.accountId, accountIds), sql`${peopleSearches.searchedAt} > ${new Date(now.getTime() - GAP_RECHECK_DAYS * DAY)}`)))
     .map((r) => r.a));
-  const rows = await db.select({ id: accounts.id, name: accounts.name, domain: accounts.domain }).from(accounts).where(inArray(accounts.id, accountIds));
-  const byId = new Map(rows.map((r) => [r.id, r]));
+  const rows = await db.select({ id: accounts.id, name: accounts.name, domain: accounts.domain, segment: accounts.segment }).from(accounts).where(inArray(accounts.id, accountIds));
+  // a GTM-seat search says nothing about a drug maker or a contractor: only industries that count what it writes
+  const byId = new Map(rows.filter((r) => industryCounts(pack, r.segment, "role_gap") || industryCounts(pack, r.segment, "ops_owner_known")).map((r) => [r.id, r]));
   const due = accountIds.filter((id) => byId.has(id) && !recent.has(id)).slice(0, opts.max ?? Number(process.env.ROLE_GAP_PER_RUN ?? 20));
 
   const allTitles = Object.values(groups).flat();

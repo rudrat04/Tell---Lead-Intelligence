@@ -5,4 +5,4 @@ import { runAlerts, gmailSender } from "@tell/deliver";
 const pack = await loadPack();
 const dryRun = process.argv.includes("--dry");
 const r = await runAlerts({ pack, sender: process.env.GMAIL_REFRESH_TOKEN ? gmailSender : null, dryRun });
-console.log(`alerts${dryRun ? " (dry: nothing sent)" : ""}: candidates=${r.candidates} sent=${r.sent} no_contact=${r.noContact}${r.skipped ? ` (${r.skipped})` : ""}`);
+console.log(`alerts${dryRun ? " (dry: nothing sent)" : ""}: candidates=${r.candidates} sent=${r.sent} no_contact=${r.noContact} off_industry=${r.offIndustry ?? 0}${r.skipped ? ` (${r.skipped})` : ""}`);

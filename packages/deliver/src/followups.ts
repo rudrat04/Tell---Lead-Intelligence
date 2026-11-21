@@ -1,4 +1,4 @@
-import type { Pack } from "@tell/config";
+import { industryCounts, type Pack } from "@tell/config";
 import { WriterClient, writerEffort, analyzeLead, type AnalystInput } from "@tell/extract";
 import { getDb, deliveries, labels, accounts, signals, jobs, jobBoards, eq, and, sql } from "@tell/db";
 import { neonUsage } from "@tell/pipeline";
@@ -57,7 +57,7 @@ export async function runFollowups(opts: { pack: Pack; dryRun?: boolean; now?: D
       const roles = await db.select({ title: jobs.title, url: jobs.url, firstSeenAt: jobs.firstSeenAt }).from(jobs).innerJoin(jobBoards, eq(jobs.boardId, jobBoards.id))
         .where(and(eq(jobBoards.accountId, d.account_id), sql`${jobs.firstSeenAt} > ${at}`, sql`${jobs.closedAt} is null`, sql`${jobs.family} in ('core', 'adjacent')`)).limit(4);
       const evidence: AnalystInput["evidence"] = [
-        ...sig.filter((x) => pack.signals.signals[x.type]).map((x) => ({ type: x.type, ageDays: (now.getTime() - x.observedAt.getTime()) / DAY, current: false, quote: x.quote, url: x.url })),
+        ...sig.filter((x) => pack.signals.signals[x.type] && industryCounts(pack, d.segment, x.type)).map((x) => ({ type: x.type, ageDays: (now.getTime() - x.observedAt.getTime()) / DAY, current: false, quote: x.quote, url: x.url })),
         ...roles.map((r) => ({ type: "new_role_posted", ageDays: (now.getTime() - r.firstSeenAt.getTime()) / DAY, current: true, quote: `Now hiring: ${r.title}`, url: r.url })),
       ];
       if (!evidence.length) { res.noNewFact++; continue; }

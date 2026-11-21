@@ -1,4 +1,4 @@
-import type { Pack } from "@tell/config";
+import { industryCounts, type Pack } from "@tell/config";
 import { getDb, signals, accounts, people, companySeeds, deliveries, eq, and, sql, inArray, desc } from "@tell/db";
 import { neonUsage } from "@tell/pipeline";
 import type { Sender } from "./gmail.js";
@@ -12,7 +12,7 @@ export function quoteDollars(q: string): number {
   return m ? Number(m[1]) * (m[2] === "B" ? 1e9 : m[2] === "M" ? 1e6 : 1e3) : 0;
 }
 
-export interface AlertResult { candidates: number; sent: number; noContact: number; skipped?: string }
+export interface AlertResult { candidates: number; sent: number; noContact: number; /** fresh signals its industry doesn't count (industries.yaml signals) */ offIndustry?: number; skipped?: string }
 
 /**
  * Every tick: a short same-day email for the strongest fresh signals (delivery.alerts.types; contracts only over
@@ -44,7 +44,9 @@ export async function runAlerts(opts: { pack: Pack; sender: Sender | null; now?:
     const [acc] = await db.select({ name: accounts.name, domain: accounts.domain, segment: accounts.segment }).from(accounts).where(eq(accounts.id, s.accountId!)).limit(1);
     const contacts = await db.select({ name: people.fullName, role: people.role, source: people.source }).from(people).where(eq(people.accountId, s.accountId!)).limit(3);
     if (!acc || !contacts.length) { res.noContact++; continue; }
-    const play = Object.values(opts.pack.plays.plays).find((p) => p.requires.includes(s.type));
+    // a signal its industry doesn't count is no lead (a contract award on a SaaS company); the play must be one for it
+    if (!industryCounts(opts.pack, acc.segment, s.type)) { res.offIndustry = (res.offIndustry ?? 0) + 1; continue; }
+    const play = Object.values(opts.pack.plays.plays).find((p) => p.requires.includes(s.type) && (!p.industries.length || (!!acc.segment && p.industries.includes(acc.segment))));
     const who = contacts.map((c) => `${c.name}${c.role ? ` (${c.role})` : ""}`).join(", ");
     const subject = `Lead now: ${acc.name ?? acc.domain}${play ? ` · ${play.title}` : ""}`;
     const text = `${acc.name ?? acc.domain} (${acc.domain})\n\n${s.quote}\n${s.url}\n\nContact: ${who}\n${play ? `Play: ${play.title}\n` : ""}Free list: pnpm freelist ${acc.domain}\n\nThe full lead (draft, Sheet row) comes in tomorrow's digest.`;

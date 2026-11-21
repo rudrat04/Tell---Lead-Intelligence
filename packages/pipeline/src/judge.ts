@@ -1,4 +1,4 @@
-import { regionGroupFor, type Pack } from "@tell/config";
+import { regionGroupFor, capabilitiesFor, type Pack } from "@tell/config";
 import { HaikuClient, judgeOpportunity, type LlmClient, type JudgeEvidence, type JudgeContext } from "@tell/extract";
 import { getDb, builtPlays, deliveries, labels, accounts, sql } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
@@ -68,6 +68,7 @@ export async function judgeAccounts(candidates: ScoreRunResult["judgeCandidates"
   const queues = [...byGroup.values()], fair: typeof candidates = [];
   for (let i = 0; fair.length < candidates.length; i++) for (const q of queues) if (q[i]) fair.push(q[i]!);
   let failedInRow = 0;
+  const scopedCaps = pack.capabilities.capabilities.some((x) => x.industries.length);
   try {
     for (const c of fair.slice(0, pack.signals.score.judge.per_run)) {
       // the API refusing (no credit, outage): stop after three in a row instead of failing the whole budget
@@ -79,6 +80,7 @@ export async function judgeAccounts(candidates: ScoreRunResult["judgeCandidates"
         ...(ind ? { industry: { label: ind.label, description: ind.description, hint: ind.hint ?? ind.opportunity, buyers: ind.buyers } } : {}),
         fixedHints: c.score.plays.filter((p) => !p.id.startsWith("built:") && !p.id.startsWith("judged:")).slice(0, 2).map((p) => ({ title: p.title, angle: p.angle })),
         examples: library.get(c.account.segment ?? "?") ?? [],
+        ...(scopedCaps ? { capabilities: capabilitiesFor(pack, c.account.segment).map((x) => x.id) } : {}),
       };
       const facts = [c.account.sizeBand && `${c.account.sizeBand} people`, c.account.segment, c.account.region].filter(Boolean).join(", ");
       let r;

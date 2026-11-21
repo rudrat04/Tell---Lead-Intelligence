@@ -271,7 +271,7 @@ describe("ranking bias: tiny team matching two plays vs big company with many sa
 describe("plays: min_count, qualifies, and fit influence", () => {
   it("a qualifying play (3+ sales roles, no ops) makes an account eligible even under a strict floor", () => {
     const strict = { ...pack, signals: { ...pack.signals, eligibility: { ...pack.signals.eligibility, alone_min_strength: 5 } },
-      plays: { ...pack.plays, plays: { ...pack.plays.plays, sales_without_ops: { title: "Sales without ops", requires: ["adjacent_role_open"], requires_any: [], min_count: { adjacent_role_open: 3 }, absent: ["core_role_open", "core_role_open_45d"], window_days: 60, angle: "a", qualifies: true, personas: [] } } } };
+      plays: { ...pack.plays, plays: { ...pack.plays.plays, sales_without_ops: { title: "Sales without ops", requires: ["adjacent_role_open"], requires_any: [], min_count: { adjacent_role_open: 3 }, absent: ["core_role_open", "core_role_open_45d"], window_days: 60, angle: "a", qualifies: true, personas: [], industries: [] } } } };
     const s = (jobs: JobRow[]) => scoreAccount(buildEvidence(jobs, [], strict, roles, now), facts, strict);
     expect(s([job("Account Executive", 3), job("SDR", 4)]).eligible).toBe(false);
     const three = s([job("Account Executive", 3), job("SDR", 4), job("BDR", 5)]);

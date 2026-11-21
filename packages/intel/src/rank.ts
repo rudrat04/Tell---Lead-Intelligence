@@ -206,9 +206,11 @@ export interface PlayMatch { id: string; title: string; angle: string; evidence:
  * A play fires when every required signal type is present within its window (current evidence always is), at least
  * one of its `requires_any` types is (when it lists any), and none of its `absent` types is (e.g. "just raised" + no RevOps role open).
  */
-export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"]): PlayMatch[] {
+export function matchPlays(ev: Evidence[], plays: Pack["plays"]["plays"], segment?: string | null): PlayMatch[] {
   const out: PlayMatch[] = [];
   for (const [id, p] of Object.entries(plays)) {
+    // a play is an offer to one kind of company: scoped plays fire only in their industries (never on an unknown one)
+    if ((p.industries ?? []).length && !(segment && p.industries.includes(segment))) continue;
     const inWindow = (e: Evidence) => e.current || e.ageDays <= p.window_days;
     if ((p.absent ?? []).some((t) => ev.some((e) => e.type === t && inWindow(e)))) continue;
     const used: Evidence[] = [];
@@ -286,7 +288,19 @@ export interface AccountScore {
  * `built`: the play built from this account's evidence when no pack play matched (plays.build): undefined = not built
  * yet (stays eligible so it can be built), null = the builder found no need (not eligible).
  */
-export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, built?: PlayMatch | null, learned?: LearnedFit): AccountScore {
+/**
+ * The evidence that counts for a company in this industry (industries.yaml `signals`): other types are dropped before
+ * anything is scored, so they can't make a lead, fire a play or reach the judge and the drafts. Negative signals always
+ * count. Unknown industry or no list = everything counts.
+ */
+export function industryEvidence(ev: Evidence[], segment: string | null | undefined, pack: Pick<Pack, "icp">): Evidence[] {
+  const counted = segment ? pack.icp.industries[segment]?.signals : undefined;
+  if (!counted) return ev;
+  return ev.filter((e) => e.class === "negative" || counted.includes(e.type));
+}
+
+export function scoreAccount(allEv: Evidence[], facts: AccountFacts, pack: Pack, built?: PlayMatch | null, learned?: LearnedFit): AccountScore {
+  const ev = industryEvidence(allEv, facts.segment, pack);
   const specs = pack.signals.signals;
   const cap = pack.signals.max_events_per_type;
 
@@ -324,8 +338,10 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, bu
   const timing = Number.isFinite(newestAge) ? timingScore(newestAge) : 0;
   const fit = softFit(facts, pack.icp);
 
-  const fixed = matchPlays(counted, pack.plays.plays).sort((a, b) => playStrength(b) - playStrength(a));
+  const fixed = matchPlays(counted, pack.plays.plays, facts.segment).sort((a, b) => playStrength(b) - playStrength(a));
   const judgedMode = pack.signals.score.mode === "judged";
+  // judged mode: nothing to offer this industry (capabilities.yaml scoped elsewhere, or industry unknown) = no lead
+  const offerable = !pack.capabilities.capabilities.some((c) => c.industries.length) || pack.capabilities.capabilities.some((c) => c.free && (!c.industries.length || (!!facts.segment && c.industries.includes(facts.segment))));
   const building = !judgedMode && !fixed.length && !!pack.plays.build?.enabled;
   const plays = building && built ? [built] : fixed;
   function playStrength(p: PlayMatch) { return p.evidence.reduce((n, e) => n + Math.log(specs[e.type]?.lr ?? 1) * 0.5 ** (e.ageDays / (specs[e.type]?.half_life_days ?? 30)), 0); }
@@ -352,7 +368,7 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, bu
   const w = pack.signals.score;
   // judged mode: the judge's ratings replace the per-signal weights and the guessed fit; a "no" drops the account; an
   // account not judged yet keeps its legacy score (so an API outage or spent cap never empties the digest)
-  if (judgedMode && built?.rubric) {
+  if (judgedMode && built?.rubric && offerable) {
     const r = built.rubric;
     const jparts = scoreParts({ need: (r.specific + r.prize + r.deliverable) / 15, fit: learned?.level ?? 0.5, timing: r.urgent / 5, buyer: UNKNOWN_BUYER }, w);
     return {
@@ -361,7 +377,7 @@ export function scoreAccount(ev: Evidence[], facts: AccountFacts, pack: Pack, bu
       judged: { rubric: r, learnedRate: learned?.rate ?? null, learnedN: learned?.n ?? 0 },
     };
   }
-  if (judgedMode && built === null) {
+  if (judgedMode && (built === null || !offerable)) {
     const p0 = scoreParts({ need: needLevel(intent, pack.signals.base_rate, w.full_need_lift), fit, timing, buyer: UNKNOWN_BUYER }, w);
     return { intent, fit, timing, priority: partsTotal(p0) / 100, parts: p0, baseRate: pack.signals.base_rate, lane: fast ? "fast" : "combined", eligible: false, evidence: ev, plays: fixed, drivers };
   }

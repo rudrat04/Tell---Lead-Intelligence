@@ -203,7 +203,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   const gapCandidates = Object.keys(gapPlays).length ? results
     .filter((r) => !(r.recentlyDelivered && !r.newSinceDelivery) && !r.score.evidence.some((e) => e.type === "role_gap")
       && !icpRecheck({ domain: r.account.domain, sizeBand: r.account.sizeBand, segment: r.account.segment, ycFitFailed: null }, pack)
-      && matchPlays([...r.score.evidence, probe], gapPlays).length > 0)
+      && matchPlays([...r.score.evidence, probe], gapPlays, r.account.segment).length > 0)
     .sort((a, b) => b.score.intent - a.score.intent)
     .map((r) => r.account.id) : [];
 
