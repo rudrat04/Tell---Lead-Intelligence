@@ -21,7 +21,9 @@ export interface PlayChange { id: string; title: string; whose: string; why: str
 export interface MarketPlay { module: string; moduleTitle: string; offer: string; research: Research; changes: PlayChange[] }
 
 /** modules + industries in the cache key: editing modules.yaml re-researches */
-export const researchVersion = (pack: Pack) => createHash("sha256").update(JSON.stringify([pack.modules.modules, Object.keys(pack.icp.industries)])).digest("hex").slice(0, 8);
+/** bumped when the research step itself changes (v2: Sonnet reading the company's site and news) */
+const RESEARCH_STEP = "v2";
+export const researchVersion = (pack: Pack) => createHash("sha256").update(JSON.stringify([RESEARCH_STEP, pack.modules.modules, Object.keys(pack.icp.industries)])).digest("hex").slice(0, 8);
 
 /** Best rows (pure; exported for tests): one per company, companies already used elsewhere skipped, same region first,
  *  then strongest, then newest. */

@@ -1,5 +1,5 @@
 import { regionGroupFor, capabilitiesFor, type Pack } from "@tell/config";
-import { HaikuClient, judgeOpportunity, type LlmClient, type JudgeEvidence, type JudgeContext } from "@tell/extract";
+import { SonnetClient, judgeOpportunity, type LlmClient, type JudgeEvidence, type JudgeContext } from "@tell/extract";
 import { getDb, builtPlays, deliveries, labels, accounts, sql } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
 import { listInputs } from "./sample-list.js";
@@ -51,14 +51,16 @@ export async function judgeAccounts(candidates: ScoreRunResult["judgeCandidates"
   const res = { judged: 0, qualified: 0, rejected: 0, failed: 0, reasons: {} as Record<string, number> };
   if (pack.signals.score.mode !== "judged") return { ...res, skipped: "legacy scoring" };
   if (!candidates.length) return { ...res, skipped: "nothing to judge" };
-  let llm = opts.llm ?? null, haiku: HaikuClient | null = null;
+  // the judge decides who you see and what you offer: Sonnet 5.5 at medium effort, its own daily cap
+  // (JUDGE_DAILY_CAP_USD, usage_daily "sonnet_judge"), so it never eats the drafts' budget
+  let llm = opts.llm ?? null, haiku: SonnetClient | null = null;
   const usage = opts.usage ?? (opts.llm ? null : neonUsage());
-  const cap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1);
+  const cap = Number(process.env.JUDGE_DAILY_CAP_USD ?? 1.5);
   if (!llm) {
     if (!process.env.ANTHROPIC_API_KEY) return { ...res, skipped: "no ANTHROPIC_API_KEY" };
-    const left = cap - (await usage!.spentToday("haiku"));
-    if (left <= 0) return { ...res, skipped: "Haiku daily cap reached" };
-    llm = haiku = new HaikuClient({ capUsd: left });
+    const left = cap - (await usage!.spentToday("sonnet_judge"));
+    if (left <= 0) return { ...res, skipped: "judge daily cap reached" };
+    llm = haiku = new SonnetClient({ capUsd: left, effort: "medium", label: "judge" });
   }
   const db = getDb();
   const library = await libraryExamples(pack).catch(() => new Map<string, JudgeContext["examples"]>());
@@ -96,7 +98,7 @@ export async function judgeAccounts(candidates: ScoreRunResult["judgeCandidates"
         .onConflictDoUpdate({ target: [builtPlays.accountId, builtPlays.evidenceKey], set: { play, reason: r.qualifies ? null : r.reason, createdAt: new Date() } });
     }
   } finally {
-    if (haiku && haiku.spent > 0) await usage?.addSpend("haiku", haiku.spent, cap);
+    if (haiku && haiku.spent > 0) await usage?.addSpend("sonnet_judge", haiku.spent, cap);
   }
   return res;
 }

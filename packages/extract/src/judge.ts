@@ -37,6 +37,21 @@ const Raw = z.object({
   personas: z.array(z.string()).max(4).nullish(), citations: z.array(z.number().int()).max(8).nullish(),
 });
 
+const ints = { type: "array", items: { type: "integer" } } as const;
+const optStr = { anyOf: [{ type: "string" }, { type: "null" }] } as const;
+/** The judge's reply as a JSON schema for structured outputs (the fields Raw checks; ranges are checked in code). */
+export const JUDGE_JSON_SCHEMA = {
+  type: "object", additionalProperties: false,
+  required: ["qualifies", "reason", "scores", "cites", "title", "need", "angle", "free_capability", "paid_capabilities", "offer", "personas", "citations"],
+  properties: {
+    qualifies: { type: "boolean" }, reason: optStr,
+    scores: { type: "object", additionalProperties: false, required: ["specific", "urgent", "prize", "deliverable"], properties: { specific: { type: "integer" }, urgent: { type: "integer" }, prize: { type: "integer" }, deliverable: { type: "integer" } } },
+    cites: { type: "object", additionalProperties: false, required: ["specific", "urgent", "prize", "deliverable"], properties: { specific: ints, urgent: ints, prize: ints, deliverable: ints } },
+    title: optStr, need: optStr, angle: optStr, offer: optStr, free_capability: optStr,
+    paid_capabilities: { type: "array", items: { type: "string" } }, personas: { type: "array", items: { type: "string" } }, citations: ints,
+  },
+} as const satisfies Record<string, unknown>;
+
 export function judgeSystem(pack: Pack): string {
   const caps = pack.capabilities.capabilities.map((c) => `- ${c.id}${c.free ? " (FREE first step)" : ""}: ${c.name}. Delivers: ${c.deliver}${c.good_for ? ` Fits: ${c.good_for}` : ""}`).join("\n");
   return `You judge whether a company shows a real, current opportunity a freelancer can act on, using ONLY the numbered evidence, then write the play and the offer.
@@ -123,7 +138,7 @@ export function validateJudged(raw: string, ev: JudgeEvidence[], pack: Pack, lis
 
 export async function judgeOpportunity(llm: LlmClient, pack: Pack, company: string, facts: string, ev: JudgeEvidence[], ctx: JudgeContext, listReady: (list: string, quotes: string[]) => boolean): Promise<JudgeResult> {
   if (!ev.length) return { qualifies: false, reason: "no evidence" };
-  const out = await llm.complete({ system: judgeSystem(pack), user: judgeUser(company, facts, ev, ctx) });
+  const out = await llm.complete({ system: judgeSystem(pack), user: judgeUser(company, facts, ev, ctx), effort: "medium", schema: JUDGE_JSON_SCHEMA });
   const r = validateJudged(out, ev, pack, listReady, ctx.capabilities);
   if (r.qualifies && !r.judged.personas.length && ctx.industry?.buyers.length) r.judged.personas = ctx.industry.buyers.slice(0, 3);
   return r;

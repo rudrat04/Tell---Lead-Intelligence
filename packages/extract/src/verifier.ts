@@ -24,6 +24,12 @@ export const VerdictSchema = z.object({
 });
 export type Verdict = z.infer<typeof VerdictSchema>;
 
+/** The verdict as a JSON schema for structured outputs (same fields as VerdictSchema). */
+export const VERDICT_JSON_SCHEMA = {
+  type: "object", additionalProperties: false, required: ["genuine_need", "disqualifier", "reason"],
+  properties: { genuine_need: { type: "boolean" }, disqualifier: { type: "string", enum: [...DISQUALIFIERS] }, reason: { type: "string" } },
+} as const satisfies Record<string, unknown>;
+
 export function verifierPrompt(needDescription: string): string {
   return `You are a skeptical reviewer. Decide whether the post shows a GENUINE need from ${needDescription}, or is a vendor, recruiter, student, enterprise, job seeker, or an already-solved problem.
 Someone looking to hire a freelancer, contractor, consultant or agency to do this work for their OWN company is a GENUINE need (disqualifier "none"): that is the buyer. "recruiter" means hiring on behalf of another company (a staffing firm, "for our client") or advertising a full-time employee job; "job_seeker" means the author wants work for themselves.
@@ -37,7 +43,8 @@ export type VerifyOutcome =
   | { decision: "uncertain"; reason: string };
 
 export async function verifyPost(llm: LlmClient, text: string, extraction: PostExtraction, needDescription: string): Promise<VerifyOutcome> {
-  const raw = await llm.complete({ system: verifierPrompt(needDescription), user: `<data>\n${text.replaceAll("</data>", "")}\n</data>` });
+  // the skeptical second opinion: a little thinking (effort low) and a schema, so a reply always parses
+  const raw = await llm.complete({ system: verifierPrompt(needDescription), user: `<data>\n${text.replaceAll("</data>", "")}\n</data>`, think: true, effort: "low", schema: VERDICT_JSON_SCHEMA });
   let json: unknown;
   try {
     json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));

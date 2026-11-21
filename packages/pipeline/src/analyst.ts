@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
-import { WriterClient, HaikuClient, WRITER_MODEL, writerEffort, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
+import { WriterClient, HaikuClient, SonnetClient, WRITER_MODEL, writerEffort, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
 import type { Contact } from "@tell/people";
 import type { RankInput } from "@tell/intel";
 import { getDb, analyses, and, inArray } from "@tell/db";
@@ -63,10 +63,13 @@ export async function analyzeLeads(
   // play means a new email; the brief is rebuilt every run from current facts.
   const plays = new Map<string, MarketPlay>();
   const briefs = new Map<string, string>();
-  let researcher: HaikuClient | null = null;
+  // research reads the company's own site and news: Sonnet 5.5 at medium effort with web search (3) and fetch (2),
+  // its own daily cap (RESEARCH_DAILY_CAP_USD, usage_daily "sonnet_research"); once per company per 120 days
+  let researcher: SonnetClient | null = null;
+  const rcap = Number(process.env.RESEARCH_DAILY_CAP_USD ?? 1);
   if (pack.modules.modules.length && !opts.llm && process.env.ANTHROPIC_API_KEY) {
-    const hcap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1), left = hcap - (await (opts.usage ?? neonUsage()).spentToday("haiku"));
-    if (left > 0) researcher = new HaikuClient({ capUsd: Math.min(left, 0.2) });
+    const left = rcap - (await (opts.usage ?? neonUsage()).spentToday("sonnet_research"));
+    if (left > 0) researcher = new SonnetClient({ capUsd: left, effort: "medium", web: { searches: 3, fetches: 2 }, label: "research" });
   }
   const today = new Date().toISOString().slice(0, 10);
   const memo: LookupMemo = {}; // the shortage list, approvals and recalls: fetched once for every lead in the run
@@ -81,7 +84,7 @@ export async function analyzeLeads(
       p.key = createHash("sha256").update(`${p.key}|${mp.module}|${mp.changes.map((c) => `${c.id}:${c.examples.map((e) => e.accountId).join(",")}`).join(";")}`).digest("hex").slice(0, 24);
     } catch { /* the lead goes without a market play */ }
   }
-  if (researcher && researcher.spent > 0) await (opts.usage ?? neonUsage()).addSpend("haiku", researcher.spent, Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
+  if (researcher && researcher.spent > 0) await (opts.usage ?? neonUsage()).addSpend("sonnet_research", researcher.spent, rcap);
   res.buyerSamples = plays.size;
 
   const prior = await db.select().from(analyses).where(and(

@@ -19,7 +19,11 @@ export type PostExtraction = z.infer<typeof PostExtractionSchema>;
 /** Minimal LLM interface so the extractor is testable without network. */
 export interface LlmClient {
   /** `think`: let the model reason before answering (writing tasks); classification calls leave it off */
-  complete(args: { system: string; user: string; think?: boolean }): Promise<string>;
+  complete(args: { system: string; user: string; think?: boolean;
+    /** reasoning depth for this call (clients that think); classification leaves it unset */
+    effort?: "low" | "medium" | "high";
+    /** a JSON schema the reply must match (structured outputs: no malformed JSON) */
+    schema?: Record<string, unknown> }): Promise<string>;
 }
 
 /** Business-specific parts of the Gate 3 / Gate 4 prompts, from the pack's extractor.yaml. */
