@@ -25,7 +25,7 @@ function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefin
     key, refs,
     input: {
       company: a.name ?? a.domain, domain: a.domain, segment: a.segment,
-      facts: [a.sizeBand && `${a.sizeBand} people`, a.segment?.toUpperCase(), a.region].filter(Boolean).join(", "),
+      facts: [a.sizeBand && `${a.sizeBand} people`, a.segment?.toUpperCase(), a.region].filter(Boolean).join(", ") + (a.description ? `. What they do: ${a.description}` : ""),
       contactRole: contact?.person.role ?? contact?.persona ?? null,
       // a play without its own offer uses its industry's (industries.yaml), unless that industry gets the GTM review
       plays: s.plays.map((p) => { const offer = p.offer ?? (industry && industry.list !== "gtm" ? industry.offer : undefined); return { id: p.id, title: p.title, angle: p.angle, ...(offer ? { offer } : {}) }; }),
@@ -60,7 +60,8 @@ export async function analyzeLeads(
   for (const p of prepared) {
     const hit = prior.find((r) => r.accountId === p.l.account.id && r.evidenceKey === p.key);
     if (hit?.opener && hit.angle) {
-      const urls = ((hit.cited ?? []) as { url: string }[]).map((c) => c.url);
+      // rows written before Nov 21 could hold null for a citation of the proof sample (no stored ref): skip those
+      const urls = ((hit.cited ?? []) as ({ url: string } | null)[]).flatMap((c) => (c?.url ? [c.url] : []));
       out.set(p.l.account.id, {
         hypothesis: hit.hypothesis, angle: hit.angle, opener: hit.opener, counterEvidence: hit.counterEvidence, confidence: hit.confidence ?? 0,
         email: hit.emailSubject && hit.emailBody ? { subject: hit.emailSubject, body: hit.emailBody } : null, linkedin: hit.linkedinMessage ?? null,
@@ -108,7 +109,8 @@ export async function analyzeLeads(
       if (write) {
         await db.insert(analyses).values({
           accountId: p.l.account.id, hypothesis: a.hypothesis, angle: a.angle, opener: a.opener, citations: [],
-          cited: a.citations.map((i) => p.refs[i]!), counterEvidence: a.counterEvidence, confidence: a.confidence,
+          // the proof sample is added to the evidence after refs were taken, so a citation of it has no ref: dropped
+          cited: a.citations.flatMap((i) => (p.refs[i] ? [p.refs[i]!] : [])), counterEvidence: a.counterEvidence, confidence: a.confidence,
           evidenceKey: p.key, model: WRITER_MODEL, emailSubject: a.email?.subject ?? null, emailBody: a.email?.body ?? null, linkedinMessage: a.linkedin,
         }).onConflictDoNothing({ target: [analyses.accountId, analyses.evidenceKey] });
       }

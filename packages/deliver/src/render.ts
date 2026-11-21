@@ -270,7 +270,10 @@ function gigHtml(g: DigestGig): string {
   return `<div style="margin:8px 0">${A(g.applyUrl ?? g.url, esc(g.title), `color:${C.ink};font-weight:600`)}<div style="font-size:12px;color:${C.muted}">${meta}${meta ? " · " : ""}${via}</div></div>`;
 }
 
-export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes, labels?: Map<string, { good: string; bad: string; enrich?: string }>, champions: ChampionMove[] = []): DigestEmail {
+/** A past lead with a new fact (runFollowups' TouchBack, without the id). */
+export interface TouchBackLine { company: string; domain: string; person: string; daysSince: number; fact: string; url: string; drafted: boolean }
+
+export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth, date: string, contacts?: Contacts, gigs: DigestGig[] = [], notes?: Notes, labels?: Map<string, { good: string; bad: string; enrich?: string }>, champions: ChampionMove[] = [], touchBacks: TouchBackLine[] = []): DigestEmail {
   const leads = r.ranking.leads, watch = r.ranking.watchlist, people = r.personLeads;
   const named = (l: Lead) => { const c = contacts?.get(l.account.id); const co = l.account.name ?? l.account.domain; return c ? `${firstName(c.person.name)} at ${co}` : co; };
   const subject = leads.length
@@ -317,6 +320,9 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
   const championsHtml = champions.length ? section(`Past clients who moved (${champions.length})`, champions.map((m) =>
     `<div style="font-size:13px;margin:6px 0">${m.url ? A(m.url, `<b>${esc(m.name)}</b>`) : `<b>${esc(m.name)}</b>`}: was at ${esc(m.was)}, now ${esc(m.title)} at <b>${esc(m.company)}</b> (since ${esc(month(m.since))}). New role, new budget, and they already trust you.</div>`).join("")) : "";
 
+  // past leads with a new fact: listed apart, so they never compete with today's leads for a slot
+  const touchHtml = touchBacks.length ? section(`Touch back: new since you saw them (${touchBacks.length})`, touchBacks.map((t) =>
+    `<div style="font-size:13px;margin:6px 0">${A(`https://${t.domain}`, `<b>${esc(t.company)}</b>`, `color:${C.ink}`)}${t.person ? ` · ${esc(t.person)}` : ""} <span style="color:${C.muted}">(sent ${t.daysSince} days ago)</span><br>${A(t.url, esc(t.fact.slice(0, 220)))}${t.drafted ? ` <span style="color:${C.muted}">· follow-up draft in the Sheet</span>` : ""}</div>`).join("")) : "";
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(subjectFull)}</title></head>
 <body style="margin:0;padding:0;background:${C.bg}">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:${C.bg}"><tr><td align="center" style="padding:24px 12px">
@@ -328,6 +334,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 </td></tr>
 <tr><td style="padding:8px 24px 0">
   ${championsHtml}
+  ${touchHtml}
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${leads.map((l, i) => groupHeading(l, i) + leadHtml(l, i, contacts, pack.icp.personas, notes, labels?.get(l.account.id), windowFor(l, date, pack))).join("")}</table>
   ${gigs.length ? section(`Freelance gigs (${gigs.length})`, gigs.map(gigHtml).join("")) : ""}
   ${watchHtml}${peopleHtml}
@@ -343,6 +350,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
     `${pack.meta.name} · ${date}`,
     leads.length ? `${leads.length} ${leads.length === 1 ? "PERSON" : "PEOPLE"} TO CONTACT` : "NO NEW LEADS TODAY",
     "",
+    touchBacks.length ? `TOUCH BACK: NEW SINCE YOU SAW THEM\n${touchBacks.map((t) => `- ${t.company}${t.person ? ` (${t.person})` : ""}, sent ${t.daysSince} days ago: ${t.fact.slice(0, 220)} ${t.url}${t.drafted ? " [follow-up draft in the Sheet]" : ""}`).join("\n")}\n` : "",
     champions.length ? `PAST CLIENTS WHO MOVED\n${champions.map((m) => `- ${m.name}: was at ${m.was}, now ${m.title} at ${m.company} (since ${month(m.since)})${m.url ? ` ${m.url}` : ""}`).join("\n")}\n` : "",
     ...leads.map((l, i) => (startsGroup(i) ? `${(l.group ?? "").toUpperCase()} (${groupCount(l.group)})\n` : "") + leadText(l, i, contacts, pack.icp.personas, notes, windowFor(l, date, pack)) + "\n"),
     gigs.length ? `FREELANCE GIGS\n${gigs.map((g) => `- ${g.title}${g.company ? ` (${g.company})` : ""}: ${g.applyUrl ?? g.url} (via ${SOURCE_NAME[g.source] ?? g.source}: ${g.url})`).join("\n")}\n` : "",
@@ -363,6 +371,7 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
   return {
     Date: date,
     Company: company,
+    "What they do": a.description ?? "",
     Website: `https://${a.domain}`,
     Score: String(displayScore(s)), // 0-100 = need + fit + timing + buyer points (scoreLine in "Why now")
     "ICP fit": String(Math.round(s.fit * 100)), // 0-100: size and segment against your ICP

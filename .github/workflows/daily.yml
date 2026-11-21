@@ -172,8 +172,8 @@ jobs:
           # public GitHub org commits for email patterns (5000 req/h instead of 60)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # second touch for leads delivered 5-10 days ago, only from a NEW fact (Sheet "Follow-up"); after the digest so
-      # today's leads get the writer budget first. Counts only.
+      # catch-up for touch-backs (the digest lists them and drafts up to 8): drafts the rest within the writer cap,
+      # only from a NEW fact (Sheet "Follow-up"). Counts only.
       - name: Follow-ups
         continue-on-error: true
         run: pnpm followups

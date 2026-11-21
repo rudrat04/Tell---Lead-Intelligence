@@ -37,6 +37,9 @@ export const accounts = pgTable("accounts", {
   segment: text("segment"), // saas | agency
   sizeBand: text("size_band"),
   region: text("region"),
+  /** what the company does, one or two sentences from its own company record (Exa), so plays, the judge and drafts
+   *  know who they're talking to; a fact, not stored page text */
+  description: text("description"),
   maturityStage: text("maturity_stage"),
   stageChangedAt: ts("stage_changed_at"),
   status: text("status").notNull().default("active"), // active|tombstone|archived

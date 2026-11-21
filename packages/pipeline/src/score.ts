@@ -19,6 +19,8 @@ export interface ScoredAccount {
   sizeBand: string | null;
   region: string | null;
   segment: string | null;
+  /** what the company does (company facts), when known */
+  description?: string | null;
 }
 
 export interface PersonLeadRank { platform: string; handle: string; type: string; quote: string; url: string; strength: number; score: number }
@@ -94,7 +96,7 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   const ids = [...byAccount.keys()];
   const accts = new Map<string, ScoredAccount>();
   for (const part of chunk(ids, 500)) {
-    const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, sizeBand: accounts.sizeBand, region: accounts.region, segment: accounts.segment, status: accounts.status })
+    const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, sizeBand: accounts.sizeBand, region: accounts.region, segment: accounts.segment, description: accounts.description, status: accounts.status })
       .from(accounts).where(inArray(accounts.id, part));
     for (const r of rows) if (r.status === "active" && regionInScope(r.region, pack.icp, r.segment)) accts.set(r.id, r);
   }

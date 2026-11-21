@@ -14,7 +14,7 @@ const API = "https://sheets.googleapis.com/v4/spreadsheets";
  * header name and rows by ID, never by position, so you can move columns around.
  */
 export const LEAD_COLUMNS = [
-  "Date", "Company", "Website", "Score", "ICP fit", "Timing", "Size", "Segment", "Region", "Why now", "Signals", "Plays",
+  "Date", "Company", "What they do", "Website", "Score", "ICP fit", "Timing", "Size", "Segment", "Region", "Why now", "Signals", "Plays",
   "Person", "Role", "LinkedIn", "Email", "Verified", "Risky", "Catch-all", "Enrich email",
   "Label", "Reason", "Outcome", "Notes",
   "Opener", "Angle", "Email draft", "LinkedIn message", "Follow-up", "ID",

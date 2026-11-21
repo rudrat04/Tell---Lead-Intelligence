@@ -204,4 +204,16 @@ describe("alerts: contract size from the quote", () => {
     expect(quoteDollars("a $1.1B award")).toBe(1_100_000_000);
     expect(quoteDollars("no money here")).toBe(0);
   });
+  it("touch back: past leads with a new fact get their own section, apart from today's list", () => {
+    const t = { company: "Northwind Labs", domain: "northwind.test", person: "Asha Rao", daysSince: 23, fact: "Now hiring: Head of Sales", url: "https://jobs.example/9", drafted: true };
+    const e = renderDigest(result(1), pack, health, "2026-11-21", undefined, [], undefined, undefined, [], [t]);
+    expect(e.html).toContain("Touch back: new since you saw them (1)");
+    expect(e.html).toContain("follow-up draft in the Sheet");
+    expect(e.text).toContain("Northwind Labs (Asha Rao), sent 23 days ago: Now hiring: Head of Sales");
+    expect(renderDigest(result(1), pack, health, "2026-11-21").text).not.toContain("TOUCH BACK");
+  });
+  it("Sheet row says what the company does", () => {
+    const l = { ...result(1).ranking.leads[0]!, account: { ...result(1).ranking.leads[0]!.account, description: "Makes payroll software for clinics." } };
+    expect(leadSheetRow(l, null, "2026-11-21")["What they do"]).toBe("Makes payroll software for clinics.");
+  });
 });

@@ -12,6 +12,9 @@ export function quoteDollars(q: string): number {
   return m ? Number(m[1]) * (m[2] === "B" ? 1e9 : m[2] === "M" ? 1e6 : 1e3) : 0;
 }
 
+/** signal types whose quote carries a contract value (USASpending) */
+export const CONTRACT_AMOUNT_TYPES = new Set(["contract_won", "contract_expiring"]);
+
 export interface AlertResult { candidates: number; sent: number; noContact: number; /** fresh signals its industry doesn't count (industries.yaml signals) */ offIndustry?: number; skipped?: string }
 
 /**
@@ -31,7 +34,8 @@ export async function runAlerts(opts: { pack: Pack; sender: Sender | null; now?:
   const fresh = await db.select({ id: signals.id, accountId: signals.accountId, type: signals.type, quote: signals.evidenceQuote, url: signals.evidenceUrl, at: signals.observedAt })
     .from(signals).where(and(inArray(signals.type, cfg.types), sql`${signals.observedAt} > ${new Date(now.getTime() - 3 * DAY)}`, sql`${signals.accountId} is not null`))
     .orderBy(desc(signals.observedAt)).limit(50);
-  const strong = fresh.filter((s) => !/contract/.test(s.type) || quoteDollars(s.quote) >= cfg.min_contract_usd);
+  // a contract award or expiry alerts only over min_contract_usd (a contract *role* or a freeze-to-contract has no amount)
+  const strong = fresh.filter((s) => !CONTRACT_AMOUNT_TYPES.has(s.type) || quoteDollars(s.quote) >= cfg.min_contract_usd);
   res.candidates = strong.length;
   for (const s of strong) {
     if (res.sent >= left) break;

@@ -82,7 +82,7 @@ export async function judgeAccounts(candidates: ScoreRunResult["judgeCandidates"
         examples: library.get(c.account.segment ?? "?") ?? [],
         ...(scopedCaps ? { capabilities: capabilitiesFor(pack, c.account.segment).map((x) => x.id) } : {}),
       };
-      const facts = [c.account.sizeBand && `${c.account.sizeBand} people`, c.account.segment, c.account.region].filter(Boolean).join(", ");
+      const facts = [c.account.sizeBand && `${c.account.sizeBand} people`, c.account.segment, c.account.region].filter(Boolean).join(", ") + (c.account.description ? `. What they do: ${c.account.description}` : "");
       let r;
       try { r = await judgeOpportunity(llm, pack, c.account.name ?? c.account.domain, facts, ev, ctx, listReady); } catch { res.failed++; failedInRow++; continue; }
       failedInRow = 0;

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import { parseExaCompanies } from "@tell/watchers";
-import { bandForHeadcount, companyFor, parseSegment, segmentPrompt } from "./company-facts.js";
+import { bandForHeadcount, companyFor, parseSegment, segmentPrompt, profileLine } from "./company-facts.js";
 
 describe("company facts", async () => {
   const base = await loadFixturePack();
@@ -38,5 +38,13 @@ describe("company facts", async () => {
     expect(parseSegment(" B2B\n", pack)).toBe("b2b");
     expect(parseSegment("d2c.", pack)).toBe("d2c");
     expect(parseSegment("enterprise", pack)).toBeNull();
+  });
+  it("what they do: a short description stays whole; a long one is cut at a sentence end", () => {
+    expect(profileLine("  Northwind makes generic injectables\nfor US hospitals.  ")).toBe("Northwind makes generic injectables for US hospitals.");
+    const long = `Northwind makes generic injectables for hospitals across the US and Europe. ${"It also runs a contract manufacturing arm for oncology drugs with three plants. ".repeat(4)}`;
+    const cut = profileLine(long);
+    expect(cut.length).toBeLessThanOrEqual(240);
+    expect(cut.endsWith(".")).toBe(true);
+    expect(profileLine("x".repeat(300) + " y")).toMatch(/…$/);
   });
 });

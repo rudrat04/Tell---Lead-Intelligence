@@ -6,18 +6,30 @@ import { getDb, accounts, peopleSearches, and, eq, inArray, sql } from "@tell/db
 import { neonUsage, type UsageStore } from "./usage.js";
 
 /**
- * Company size and segment for accounts no source gave them for (Keka, Workable, JSearch accounts): one Exa company
+ * Company size, segment and what the company does (description) for pool accounts missing any of them: one Exa company
  * search per account (name + domain), accepted only when the result's website is the account's own domain, or its
  * LinkedIn company page address is the domain's name and the company name agrees (never a name alone).
  *   size:    headcount -> the pack's size band; under team_size.min or over the last band gets a band the pack doesn't
  *            have ("under 5", "201+"), so the critic's ICP check drops it
  *   segment: Haiku picks one of pack icp.segment_descriptions from the company's description
+ *   description: the record's own description, cut to a sentence or two (`profileLine`), for the judge, drafts and Sheet
  * Checked once per CHECK_DAYS (people_searches, provider "exa", persona "company:facts": counts in the Exa usage guard),
  * capped per run.
  */
 const CHECK_DAYS = 90;
 const DAY = 86_400_000;
-const PERSONA = "company:facts";
+// "company:profile" since Nov 21 2026 (description added): accounts checked under the old key get one more lookup
+const PERSONA = "company:profile";
+const PROFILE_MAX = 240;
+
+/** A company description cut to whole sentences within PROFILE_MAX characters (pure; exported for tests). */
+export function profileLine(description: string): string {
+  const t = description.replace(/\s+/g, " ").trim();
+  if (t.length <= PROFILE_MAX) return t;
+  const cut = t.slice(0, PROFILE_MAX);
+  const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  return end > 60 ? cut.slice(0, end + 1) : `${cut.slice(0, cut.lastIndexOf(" "))}…`;
+}
 
 /** Headcount -> size band label (pure; exported for tests). */
 export function bandForHeadcount(n: number, icp: Pack["icp"]): string {
@@ -57,15 +69,15 @@ export function parseSegment(text: string, pack: Pack): string | null {
 export async function fillCompanyFacts(
   accountIds: string[], pack: Pack,
   opts: { write?: boolean; max?: number; search?: (domain: string) => Promise<CompanyHit[]>; llm?: LlmClient | null; usage?: UsageStore; dailyCapUsd?: number } = {},
-): Promise<{ looked: number; sized: number; segmented: number; changed: string[]; skipped?: string }> {
-  const res = { looked: 0, sized: 0, segmented: 0, changed: [] as string[] };
+): Promise<{ looked: number; sized: number; segmented: number; described: number; changed: string[]; skipped?: string }> {
+  const res = { looked: 0, sized: 0, segmented: 0, described: 0, changed: [] as string[] };
   if (!accountIds.length) return res;
   const search = opts.search ?? (process.env.EXA_API_KEY ? (d: string) => exaCompanySearch(d) : null);
   if (!search) return { ...res, skipped: "no EXA_API_KEY" };
   const write = opts.write !== false;
   const db = getDb();
-  const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, size: accounts.sizeBand, segment: accounts.segment }).from(accounts)
-    .where(and(inArray(accounts.id, accountIds), sql`(${accounts.sizeBand} is null or ${accounts.segment} is null)`));
+  const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, size: accounts.sizeBand, segment: accounts.segment, description: accounts.description }).from(accounts)
+    .where(and(inArray(accounts.id, accountIds), sql`(${accounts.sizeBand} is null or ${accounts.segment} is null or ${accounts.description} is null)`));
   if (!rows.length) return res;
   // keep the caller's order: the per-run budget goes to the first ids (pool leads, then the closest under the floor)
   const order = new Map(accountIds.map((id, i) => [id, i]));
@@ -93,7 +105,8 @@ export async function fillCompanyFacts(
       let hit: CompanyHit | null = null;
       // name + domain finds the company's own record more often than the bare domain
       try { hit = companyFor(a.domain, await search(a.name ? `${a.name} ${a.domain}` : a.domain), a.name); } catch { continue; /* Exa down: try next run */ }
-      const set: { sizeBand?: string; segment?: string } = {};
+      const set: { sizeBand?: string; segment?: string; description?: string } = {};
+      if (hit?.description && !a.description) { set.description = profileLine(hit.description); res.described++; }
       if (hit?.employees && !a.size) { set.sizeBand = bandForHeadcount(hit.employees, pack.icp); res.sized++; }
       if (hit?.description && !a.segment && llm) {
         try {
@@ -101,9 +114,9 @@ export async function fillCompanyFacts(
           if (seg) { set.segment = seg; res.segmented++; }
         } catch { /* Haiku cap reached or API down: segment stays unknown */ }
       }
-      if (set.sizeBand || set.segment) res.changed.push(a.id);
+      if (set.sizeBand || set.segment || set.description) res.changed.push(a.id);
       if (write) {
-        if (set.sizeBand || set.segment) await db.update(accounts).set(set).where(eq(accounts.id, a.id));
+        if (set.sizeBand || set.segment || set.description) await db.update(accounts).set(set).where(eq(accounts.id, a.id));
         await db.insert(peopleSearches).values({ accountId: a.id, persona: PERSONA, provider: "exa", found: hit ? 1 : 0, searchedAt: new Date() })
           .onConflictDoUpdate({ target: [peopleSearches.accountId, peopleSearches.persona, peopleSearches.provider], set: { found: hit ? 1 : 0, searchedAt: new Date() } });
       }

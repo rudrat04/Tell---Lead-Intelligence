@@ -5,6 +5,7 @@ import {
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
 import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
+import { runFollowups, type TouchBack } from "./followups.js";
 import { appendPendingLeads } from "./sheet-sync.js";
 import { assignDeliveryIds, labelLinks, enrichLink } from "./label-links.js";
 import { appendRows } from "./sheets.js";
@@ -88,7 +89,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     // pool accounts first, then accounts under min_score only because size/segment is unknown (they may pass once known)
     const ids = [...new Set([...[...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), ...score.factsCandidates])];
     const f = await fillCompanyFacts(ids, pack, { write: !opts.dryRun });
-    factsNote = f.skipped ? `company facts: ${f.skipped}` : `company facts: ${f.looked} looked up, ${f.sized} sized, ${f.segmented} segmented`;
+    factsNote = f.skipped ? `company facts: ${f.skipped}` : `company facts: ${f.looked} looked up, ${f.sized} sized, ${f.segmented} segmented, ${f.described} described`;
     if (f.changed.length) score = await scoreRun(false);
   } catch { factsNote = "company facts failed"; }
   // validate the need: who holds the GTM / Founder's Office / Product Marketing seats today (roles.yaml gaps). A gap
@@ -163,7 +164,15 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     const an = await analyzeLeads(score.ranking.leads, contacts, pack); // Sonnet writer, own daily cap (WRITER_DAILY_CAP_USD)
     notes = an.analyses;
     enrich.push(`analyst fresh=${an.fresh} cached=${an.cached} failed=${an.failed}${an.skipped ? ` (${an.skipped})` : ""}`);
-  } catch { enrich.push("analyst failed"); /* code-written openers stand */ }
+  } catch (e) { enrich.push("analyst failed"); if (!process.env.CI) console.error("analyst:", (e as Error).message); /* code-written openers stand */ }
+  // touch back: past leads with a new fact, after today's drafts (they get the writer budget first); a test or dry run
+  // lists the facts without writing drafts
+  let touched: TouchBack[] = [];
+  try {
+    const f = await runFollowups({ pack, dryRun: opts.dryRun || opts.test, draft: !opts.dryRun && !opts.test, exclude: new Set(score.ranking.leads.map((l) => l.account.id)) });
+    touched = f.touched;
+    enrich.push(`touch back ${f.touched.length} (${f.written} drafted)${f.skipped ? ` (${f.skipped})` : ""}`);
+  } catch { enrich.push("touch back failed"); }
   const gigList = await gigsForDigest(pack);
   const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
   h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;
@@ -172,7 +181,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   const labelUrl = process.env.TELL_LABEL_URL, labelSecret = process.env.LABEL_SECRET;
   const taps = !opts.dryRun && !opts.test && labelUrl && labelSecret
     ? new Map([...ids].map(([a, d]) => [a, { ...labelLinks(labelUrl, labelSecret, d), enrich: enrichLink(labelUrl, labelSecret, d) }])) : undefined;
-  const email = renderDigest(score, pack, h, day, contacts, gigList, notes, taps, champions);
+  const email = renderDigest(score, pack, h, day, contacts, gigList, notes, taps, champions, touched);
   const counts = { enrich: enrich.join("; "), leads: score.ranking.leads.length, watchlist: score.ranking.watchlist.length, personLeads: score.personLeads.length };
   if (opts.dryRun) return { status: "dry-run", email, score, ...counts };
   const deliveryRows = (at: Date) => score.ranking.leads.map((l) => ({
