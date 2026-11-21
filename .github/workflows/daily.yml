@@ -65,6 +65,8 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
+          DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
           OPENFDA_API_KEY: ${{ secrets.OPENFDA_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
           SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
@@ -165,6 +167,10 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
+          QUICKEMAILVERIFICATION_API_KEY: ${{ secrets.QUICKEMAILVERIFICATION_API_KEY }}
+          HUNTER_API_KEY: ${{ secrets.HUNTER_API_KEY }}
+          PROSPEO_API_KEY: ${{ secrets.PROSPEO_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # one-tap Good/Bad links (Worker URL + signing secret); without them the digest has no buttons
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}

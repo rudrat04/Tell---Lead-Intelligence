@@ -53,6 +53,8 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
+          DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
       # same-day alert for the strongest fresh signals with a named contact (pack delivery.alerts); counts only
