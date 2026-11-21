@@ -52,6 +52,9 @@ jobs:
         run: pnpm niche drain
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # segment "auto" records resolved from the queue are classified by Haiku (shared daily cap)
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
           DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}

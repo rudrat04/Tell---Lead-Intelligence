@@ -5,7 +5,7 @@ import { runScheduledTick } from "@tell/pipeline";
 
 const res = await runScheduledTick({
   pack: await loadPack(),
-  dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1),
+  dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06),
   maxPerSource: Number(process.argv[2] ?? 3),
 });
 console.log(JSON.stringify(res, null, 2));

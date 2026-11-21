@@ -22,7 +22,7 @@ if (i > 0) {
 
 const res = await runScheduledTick({
   pack: await loadPack(),
-  dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1),
+  dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06),
   maxPerSource: process.env.TICK_MAX_PER_SOURCE ? Number(process.env.TICK_MAX_PER_SOURCE) : undefined,
 });
 

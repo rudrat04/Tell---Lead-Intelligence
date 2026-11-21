@@ -207,6 +207,24 @@ export function scoreBeneficiary(ms: ScoredMatch[], sweet: [number, number], buy
   return { score, parts, line: `Score ${score} = opportunity ${parts.opportunity} · fit ${parts.fit} · timing ${parts.timing} · buyer ${parts.buyer}` };
 }
 
+/** events shown on an opportunity lead (Telegram, brief, draft: deliveries.context.events) */
+export const SHOWN_EVENTS = 3;
+
+/** What a past opportunity delivery covered (pure): the urls of its top events (`context.topEvents`, recorded since
+ *  Nov 22 2026), else, for older rows, only the SHOWN_EVENTS it showed (`legacy`). */
+export function deliveredEvents(ctx: unknown): { urls: Set<string>; legacy: boolean } {
+  const c = (ctx ?? {}) as { topEvents?: unknown; events?: { url?: unknown }[] };
+  if (Array.isArray(c.topEvents)) return { urls: new Set(c.topEvents.filter((u): u is string => typeof u === "string")), legacy: false };
+  return { urls: new Set((c.events ?? []).map((e) => e?.url).filter((u): u is string => typeof u === "string")), legacy: true };
+}
+
+/** Is one of today's top events (urls, strongest first) new since that delivery? (pure) A legacy row is compared on
+ *  the events it showed only: comparing TOP_EVENTS against 3 stored urls made events 4-5 look new every day, so a lead
+ *  with 4+ events was sent again daily instead of being held back. */
+export function hasNewTopEvent(todayUrls: string[], last: { urls: Set<string>; legacy: boolean }): boolean {
+  return todayUrls.slice(0, last.legacy ? SHOWN_EVENTS : TOP_EVENTS).some((u) => !last.urls.has(u));
+}
+
 /** Held back from today's list? A delivered beneficiary returns after `holdDays`, or earlier when one of its top events
  *  was not on the lead it got (pure). */
 export function heldBack(lastDelivered: Date | null, hasNewTopEvent: boolean, holdDays: number, now: Date): boolean {

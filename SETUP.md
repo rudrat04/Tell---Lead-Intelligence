@@ -11,7 +11,7 @@ cp .env.example .env
 
 ## 2. Accounts (free tiers)
 1. **Neon** (neon.tech): create a project (Postgres only; no other services needed). Cap autoscaling at 0.5 CU (Settings, Compute). Copy the **pooled** connection string to `DATABASE_URL`.
-2. **Anthropic** (console.anthropic.com): create an API key (`ANTHROPIC_API_KEY`) and set a monthly spend limit. `HAIKU_DAILY_CAP_USD` caps daily spend in code (default 1).
+2. **Anthropic** (console.anthropic.com): create an API key (`ANTHROPIC_API_KEY`) and set a monthly spend limit. `HAIKU_DAILY_CAP_USD` caps daily spend in code (default 0.06).
 3. **Cloudflare R2**: create a bucket and an API token with Object Read & Write on that bucket only. Set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`. Your private pack lives here.
 4. **Reddit: optional and on hold.** Reddit's Responsible Builder Policy requires approval before any API access, and written approval for commercial use. Request it honestly via the commercial contact link in that policy. Until approved, Reddit stays off in code (`packages/watchers/src/policy.ts`). The policy bans re-identifying users, so Reddit authors are only ever linked to a company the post itself names or links.
 

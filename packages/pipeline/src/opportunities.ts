@@ -6,7 +6,7 @@ import { regionName } from "./niche.js";
 import { profileLine } from "./company-facts.js";
 import { neonUsage, type UsageStore } from "./usage.js";
 import {
-  rosterFromAwards, isJointVenture, expiringEvents, eventQuote, matchEvent, matchGeneral, matchValue, scoreBeneficiary, heldBack, timingFor, generalFacts, TOP_EVENTS,
+  rosterFromAwards, isJointVenture, expiringEvents, eventQuote, matchEvent, matchGeneral, matchValue, scoreBeneficiary, heldBack, hasNewTopEvent, deliveredEvents, timingFor, generalFacts, TOP_EVENTS,
   type MemberFacts, type OppEvent, type BeneficiaryScore, type GeneralEvent, type ScoredMatch,
 } from "@tell/intel";
 import type { Contact } from "@tell/people";
@@ -473,11 +473,11 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   const accts = new Map((await db.select().from(accounts).where(and(inArray(accounts.id, ids), eq(accounts.status, "active")))).map((a) => [a.id, a]));
   const members = new Map((await db.select().from(rosterMembers).where(inArray(rosterMembers.accountId, ids))).map((m) => [`${m.roster}:${m.accountId}`, m]));
   // the last opportunity delivery per account, with the events it showed (a lead returns early only with a new top event)
-  const lastDelivered = new Map<string, { at: Date; urls: Set<string> }>();
+  const lastDelivered = new Map<string, { at: Date; urls: Set<string>; legacy: boolean }>();
   for (const r of await db.select({ a: deliveries.accountId, at: deliveries.deliveredAt, ctx: deliveries.context }).from(deliveries)
     .where(and(inArray(deliveries.accountId, ids), eq(deliveries.kind, "opportunity"))).orderBy(sql`${deliveries.deliveredAt} desc`)) {
     if (!r.a || lastDelivered.has(r.a)) continue;
-    lastDelivered.set(r.a, { at: new Date(r.at), urls: new Set(((r.ctx as { events?: { url: string }[] } | null)?.events ?? []).map((e) => e.url)) });
+    lastDelivered.set(r.a, { at: new Date(r.at), ...deliveredEvents(r.ctx) });
   }
 
   // one lead per beneficiary and opportunity kind (its strongest opportunity when it has several)
@@ -510,7 +510,7 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
     // new = one of its top events wasn't on the lead you got (a weekly refresh brings far-off contracts into the window,
     // which alone is no reason to send the same company again)
     const last = lastDelivered.get(aid);
-    const fresh = !!last && best.events.slice(0, TOP_EVENTS).some((e) => !last.urls.has(e.url));
+    const fresh = !!last && hasNewTopEvent(best.events.map((e) => e.url), last);
     if (heldBack(last?.at ?? null, fresh, cfg.redeliver_after_days, now)) { held++; continue; }
     scored.push(best);
   }

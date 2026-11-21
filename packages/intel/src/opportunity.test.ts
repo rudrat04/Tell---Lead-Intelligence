@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rosterFromAwards, expiringEvents, matchEvent, matchValue, scoreBeneficiary, heldBack, timingFor, eventQuote, sameEntity, entityKey, affiliates, type AwardLike } from "./opportunity.js";
+import { rosterFromAwards, expiringEvents, matchEvent, matchValue, scoreBeneficiary, heldBack, hasNewTopEvent, deliveredEvents, timingFor, eventQuote, sameEntity, entityKey, affiliates, type AwardLike } from "./opportunity.js";
 
 const NOW = new Date("2026-11-21T00:00:00Z");
 const d = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -113,6 +113,22 @@ describe("score", () => {
     expect(heldBack(d("2026-11-10"), true, 30, NOW)).toBe(false);
     expect(heldBack(d("2026-09-01"), false, 30, NOW)).toBe(false);
     expect(heldBack(null, false, 30, NOW)).toBe(false);
+  });
+  it("a lead with 4+ events is not new again the next day (only 3 were shown)", () => {
+    const today = ["u1", "u2", "u3", "u4", "u5"];
+    // a delivery from before topEvents: the 3 events it showed; events 4-5 must not count as new
+    const legacy = deliveredEvents({ events: [{ url: "u1" }, { url: "u2" }, { url: "u3" }] });
+    expect(legacy.legacy).toBe(true);
+    expect(hasNewTopEvent(today, legacy)).toBe(false);
+    expect(hasNewTopEvent(["u9", "u1", "u2"], legacy)).toBe(true);
+    // a delivery that recorded its top events: same five = nothing new, a sixth climbing in = new
+    const rec = deliveredEvents({ events: [{ url: "u1" }], topEvents: today });
+    expect(rec.legacy).toBe(false);
+    expect(hasNewTopEvent(today, rec)).toBe(false);
+    expect(hasNewTopEvent(["u1", "u2", "u3", "u4", "u6"], rec)).toBe(true);
+    // fewer events then, one more now: new
+    expect(hasNewTopEvent(["u1", "u2", "u3"], deliveredEvents({ events: [{ url: "u1" }, { url: "u2" }], topEvents: ["u1", "u2"] }))).toBe(true);
+    expect(deliveredEvents(null)).toEqual({ urls: new Set(), legacy: true });
   });
 });
 

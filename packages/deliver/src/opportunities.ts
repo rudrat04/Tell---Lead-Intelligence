@@ -2,7 +2,8 @@ import type { Pack } from "@tell/config";
 import { collectOpportunities, rankOpportunityLeads, timingLine, istDay, neonUsage, WRITER_USAGE, type OppLead, type OppRunStats } from "@tell/pipeline";
 import { WriterClient, HaikuClient, writerEffort, writeOpportunityDraft, type OppDraftInput, type LlmClient } from "@tell/extract";
 import { firstName, type Contact } from "@tell/people";
-import { getDb, deliveries, runs, eq, inArray } from "@tell/db";
+import { SHOWN_EVENTS, TOP_EVENTS } from "@tell/intel";
+import { getDb, deliveries, runs, eq, and, inArray, sql } from "@tell/db";
 import { assignDeliveryIds, enrichLink, draftLink, fetchDraftRequests, ackDraftRequests } from "./label-links.js";
 import { emailCells, fillColumnById, ensureLeadHeaders, type OppRow } from "./sheets.js";
 import { appendPendingLeads } from "./sheet-sync.js";
@@ -23,6 +24,8 @@ export interface OppContext {
   opportunity: string; angle: string;
   contact: { name: string; role: string | null; persona: string | null } | null;
   events: { quote: string; url: string; reasons: string[]; about?: string }[];
+  /** urls of the lead's top events (TOP_EVENTS, beyond the ones shown), so the hold-back sees what is really new */
+  topEvents?: string[];
   record: string[];
   brief: string;
   /** the event kind (contract recompete vs news / signal), so the draft speaks about it the right way */
@@ -30,7 +33,7 @@ export interface OppContext {
   draft?: { subject: string; body: string; at: string } | null;
 }
 
-const MAX_EVENTS = 3;
+const MAX_EVENTS = SHOWN_EVENTS;
 
 /** "What could follow" when the pack says nothing (pure; exported for tests): careful, never a promise. */
 export function followText(l: Pick<OppLead, "opportunity">): string {
@@ -147,7 +150,8 @@ export function oppContext(l: OppLead, now: Date): OppContext {
   return {
     kind: "opportunity", company: a.name ?? a.domain, domain: a.domain, description: a.description, opportunity: l.opportunity.label, angle: l.opportunity.angle,
     contact: c ? { name: c.person.name, role: c.person.role, persona: c.persona } : null, kindOf: l.opportunity.kind,
-    events: l.events.slice(0, MAX_EVENTS).map((e) => ({ quote: e.quote, url: e.url, reasons: e.reasons, ...(e.entityName ? { about: e.entityName } : {}) })), record: l.evidence.map((e) => e.quote), brief: oppBrief(l, now),
+    events: l.events.slice(0, MAX_EVENTS).map((e) => ({ quote: e.quote, url: e.url, reasons: e.reasons, ...(e.entityName ? { about: e.entityName } : {}) })),
+    topEvents: l.events.slice(0, TOP_EVENTS).map((e) => e.url), record: l.evidence.map((e) => e.quote), brief: oppBrief(l, now),
   };
 }
 
@@ -175,11 +179,21 @@ export async function runOpportunityDigest(opts: { pack: Pack; dryRun?: boolean;
   const url = process.env.TELL_LABEL_URL, secret = process.env.LABEL_SECRET;
   let sheetRows = 0;
   if (real) {
-    await db.insert(deliveries).values(ranked.leads.map((l) => {
+    const rows = ranked.leads.map((l) => {
       const id = ids.get(l.account.id)!;
       const links = url && secret ? { enrich: enrichLink(url, secret, id), draft: draftLink(url, secret, id) } : {};
       return { id, accountId: l.account.id, deliveredAt: now, kind: "opportunity", configVersion: `opps:${pack.meta.name}`, sheetRow: oppSheetRow(l, day, now, links), context: oppContext(l, now) };
-    }));
+    });
+    // one lead per account per IST day (unique index deliveries_opp_day_uq): a retry skips what an earlier attempt wrote
+    const written = new Set((await db.insert(deliveries).values(rows).onConflictDoNothing().returning({ id: deliveries.id })).map((r) => r.id));
+    const skipped = rows.filter((r) => !written.has(r.id)).map((r) => r.accountId);
+    if (skipped.length) {
+      // the earlier attempt's delivery ids go to Telegram, so its buttons and stored texts match the rows
+      const dayStart = new Date(`${day}T00:00:00+05:30`);
+      const prior = await db.select({ id: deliveries.id, accountId: deliveries.accountId }).from(deliveries)
+        .where(and(eq(deliveries.kind, "opportunity"), inArray(deliveries.accountId, skipped), sql`${deliveries.deliveredAt} >= ${dayStart}`));
+      for (const p of prior) if (p.accountId) ids.set(p.accountId, p.id);
+    }
     try { sheetRows = await appendPendingLeads(pack); } catch { /* the nightly sheet:sync retries */ }
   }
   let telegram = 0;

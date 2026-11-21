@@ -10,5 +10,5 @@ export const tick = schedules.task({
   id: "tick-30min",
   cron: "*/30 * * * *",
   maxDuration: 240,
-  run: async () => runScheduledTick({ pack: await loadPack(), dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 1) }),
+  run: async () => runScheduledTick({ pack: await loadPack(), dailyCapUsd: Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06) }),
 });

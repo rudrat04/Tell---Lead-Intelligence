@@ -64,6 +64,9 @@ jobs:
         run: pnpm niche
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # segment "auto" records (SME IPO, SBIR, PLI) get their industry from Haiku; without the key they get none
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
           BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
           DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
@@ -152,6 +155,8 @@ jobs:
         run: pnpm digest
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # live "news" examples for a play's changes (market-lookups, pack sources.niche.market_news_per_day)
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '0.08' }}
           ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}
@@ -182,6 +187,10 @@ jobs:
         run: pnpm opps
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # the proof-of-fit check (Haiku) and the rendered site reads (Firecrawl): without them news / signal leads stay unproven and drop
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          FIT_DAILY_CAP_USD: ${{ vars.FIT_DAILY_CAP_USD || '0.03' }}
           AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
           AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
