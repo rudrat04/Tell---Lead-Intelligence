@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ExpiringAward, AndaApproval, NewsItem, Shortage, CompletedTrial } from "@tell/watchers";
-import { sameCompany, splitKeywords, stateCodes, endingRows, approvalRows, shortageRows, trialRows, newsRows, newsQuery, liveFresh } from "./market-lookups.js";
+import { anyWholeWord, sameCompany, splitKeywords, stateCodes, endingRows, approvalRows, shortageRows, trialRows, newsRows, newsQuery, liveFresh } from "./market-lookups.js";
 
 const lead = { name: "Northwind Foods Inc", region: "United States of America" };
 const ending = (o: Partial<ExpiringAward>): ExpiringAward => ({ awardId: "A1", recipient: "CONTOSO PROVISIONS LLC", amount: 2_400_000, endDate: new Date(Date.UTC(2027, 2, 1)), agency: "Department of Agriculture", description: "FROZEN CHICKEN STRIPS FOR DONATION PROGRAMS", naics: "3116", state: "AR", url: "https://www.usaspending.gov/award/A1", ...o });
@@ -43,5 +43,9 @@ describe("live market lookups", () => {
     expect(liveFresh("2026-11-18T00:00:00Z", now)).toBe(true);
     expect(liveFresh("2026-11-10T00:00:00Z", now)).toBe(false);
     expect(liveFresh(undefined, now)).toBe(false);
+  });
+  it("a contract example must name their topic in what it is for", () => {
+    expect(anyWholeWord("weather radar network sustainment", ["weather"])).toBe(true);
+    expect(anyWholeWord("centralized integrated real-time IT services", ["weather"])).toBe(false);
   });
 });

@@ -30,7 +30,7 @@ export interface Research {
   keywords: string[];
 }
 
-const GENERIC_WORDS = new Set(["sbir", "sttr", "phase ii", "contract", "contracts", "federal", "government", "services", "service", "products", "product", "solutions", "systems", "company", "manufacturing", "supply", "supplies", "support", "research", "development", "r&d", "technology", "technologies", "software", "it services", "consulting", "construction", "pharmaceuticals", "pharma", "healthcare", "medical", "food", "logistics"]);
+const GENERIC_WORDS = new Set(["sbir", "sttr", "phase ii", "contract", "contracts", "federal", "government", "services", "service", "products", "product", "solutions", "systems", "company", "manufacturing", "supply", "supplies", "support", "research", "development", "r&d", "technology", "technologies", "software", "it services", "consulting", "construction", "pharmaceuticals", "pharma", "healthcare", "medical", "food", "logistics", "research and development", "advanced technology", "innovation", "saas", "software as a service", "b2b", "nasa", "dod", "usda", "federal contracts", "government contracts", "real estate", "it professional support", "sbir phase ii", "sttr phase ii", "technology development", "federal r&d", "nasa contract", "dod contract", "r&d contracts", "government r&d"]);
 
 /** A change is kept only at this fit or above (1-5: how directly it creates buyers for exactly what they sell, where they sell) */
 export const MIN_FIT = 4;
@@ -85,7 +85,8 @@ export function validateResearch(raw: string, pack: Pack): Research | null {
   const who = !selfy && rawWho ? rawWho : customers.map((k) => pack.icp.industries[k]!.label.toLowerCase()).join(" and ");
   const places = [...new Set(list(j.places).map((x) => x.trim()).filter((x) => x.length >= 2 && x.length <= 40))].slice(0, 12);
   // words every record shares ("sbir", "contract", "federal") match anything: they don't say what they sell
-  const keywords = [...new Set(list(j.keywords).map((x) => x.trim().toLowerCase()).filter((x) => x.length >= 3 && x.length <= 40 && !GENERIC_WORDS.has(x)))].slice(0, 10);
+  // "naics 541715" is a code, kept as "541715"
+  const keywords = [...new Set(list(j.keywords).map((x) => x.trim().toLowerCase().replace(/^naics\s*/, "")).filter((x) => x.length >= 3 && x.length <= 40 && !GENERIC_WORDS.has(x)))].slice(0, 10);
   return changes.length >= 1 && sells && who ? { sells, who, customers, channel: str(j.channel, 100), module: mod.id, changes, why, places, keywords } : null;
 }
 

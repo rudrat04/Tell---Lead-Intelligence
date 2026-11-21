@@ -29,15 +29,25 @@ export function pickExamples(rows: ExampleRow[], region: string | null, n: numbe
   const key = (r: ExampleRow) => [r.region === region ? 1 : 0, r.strength, r.observedAt.getTime()];
   const better = (a: ExampleRow, b: ExampleRow) => { const x = key(a), y = key(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i]! > y[i]!; return false; };
   const best = new Map<string, ExampleRow>();
-  for (const r of rows) { if (used.has(r.accountId)) continue; const p = best.get(r.accountId); if (!p || better(r, p)) best.set(r.accountId, r); }
+  // live rows aren't accounts: two articles about one company are one example
+  const id = (r: ExampleRow) => (r.accountId.startsWith("live:") ? `live:${r.company.toLowerCase()}` : r.accountId);
+  for (const r of rows) { if (used.has(r.accountId) || used.has(id(r))) continue; const p = best.get(id(r)); if (!p || better(r, p)) best.set(id(r), r); }
   return [...best.values()].sort((a, b) => (better(a, b) ? -1 : better(b, a) ? 1 : 0)).slice(0, n);
 }
 
 /** Whether a quote is in one of their places (pure; exported for tests): whole words, case-insensitive, except two-letter
  *  state codes, which must be capitals ("IN" is Indiana, "in" is a word). No places = anywhere. */
+/** places that records name another way: city records say "Manhattan", not "New York City" */
+const PLACE_ALIASES: Record<string, string[]> = {
+  "new york city": ["manhattan", "brooklyn", "queens", "bronx", "staten island", "nyc"], "new york": ["manhattan", "brooklyn", "queens", "bronx", "staten island", "nyc"],
+  bengaluru: ["bangalore"], bangalore: ["bengaluru"], mumbai: ["bombay", "navi mumbai", "thane"], gurugram: ["gurgaon"], gurgaon: ["gurugram"],
+  delhi: ["new delhi", "ncr", "noida", "gurugram", "gurgaon"], "new delhi": ["delhi", "ncr"], chennai: ["madras"], kolkata: ["calcutta"],
+  "washington, dc": ["washington", "district of columbia"], "district of columbia": ["washington, dc", "washington d.c."],
+};
 export function inPlaces(quote: string, places: string[]): boolean {
   if (!places.length) return true;
-  return places.some((p) => {
+  const all = [...places, ...places.flatMap((p) => PLACE_ALIASES[p.toLowerCase()] ?? [])];
+  return all.some((p) => {
     const esc = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return /^[A-Z]{2}$/.test(p) ? new RegExp(`(^|[^A-Za-z])${esc}($|[^A-Za-z])`).test(quote) : new RegExp(`(^|[^a-z])${esc.toLowerCase()}($|[^a-z])`).test(quote.toLowerCase());
   });
@@ -99,7 +109,7 @@ export async function marketPlay(r: Research, lead: { id: string; name?: string 
       const ok = rows.filter((x) => (c.live !== "news" || inPlaces(x.quote, r.places ?? [])) && (!must || must.test(x.quote)));
       const ex = pickExamples(ok, lead.region, PER_CHANGE, used);
       if (!ex.length) continue;
-      ex.forEach((e) => used.add(e.accountId));
+      ex.forEach((e) => { used.add(e.accountId); used.add(`live:${e.company.toLowerCase()}`); });
       changes.push({ id: c.id, title: c.title, whose: c.whose, why: r.why[c.id] ?? c.why, action: c.action, examples: ex });
       continue;
     }
@@ -116,9 +126,15 @@ export async function marketPlay(r: Research, lead: { id: string; name?: string 
     // market, channel and competitor examples must be about what they sell (a food maker's recompetes are food
     // contracts, not IT ones); customers' expansions are judged by the customer industries alone
     const productual = c.whose !== "customers";
-    const ex = pickExamples(rows.filter((x) => inPlaces(x.evidence_quote, r.places ?? []) && (!productual || aboutTheirProducts(x.evidence_quote, r.keywords ?? [])) && (!must || must.test(x.evidence_quote))).map((x) => ({ accountId: x.account_id, company: x.name ?? x.domain, region: x.region, type: x.type, quote: x.evidence_quote, url: x.evidence_url, observedAt: new Date(x.observed_at), strength: x.strength })), lead.region, PER_CHANGE, used);
+    let ex = pickExamples(rows.filter((x) => inPlaces(x.evidence_quote, r.places ?? []) && (!productual || aboutTheirProducts(x.evidence_quote, r.keywords ?? [])) && (!must || must.test(x.evidence_quote))).map((x) => ({ accountId: x.account_id, company: x.name ?? x.domain, region: x.region, type: x.type, quote: x.evidence_quote, url: x.evidence_url, observedAt: new Date(x.observed_at), strength: x.strength })), lead.region, PER_CHANGE, used);
+    // nothing collected in their places (no permit feed for Ohio): the change's news search, when it has one
+    if (!ex.length && c.news) {
+      const rows2 = fresh[c.id]?.map((x) => ({ ...x, observedAt: new Date(x.observedAt) })) ?? await liveExamples({ ...c, live: "news" }, r, { name: lead.name ?? "", region: lead.region }, pack, memo);
+      found[c.id] = rows2;
+      ex = pickExamples(rows2.filter((x) => inPlaces(x.quote, r.places ?? []) && (!must || must.test(x.quote))), lead.region, PER_CHANGE, used);
+    }
     if (!ex.length) continue;
-    ex.forEach((e) => used.add(e.accountId));
+    ex.forEach((e) => { used.add(e.accountId); used.add(`live:${e.company.toLowerCase()}`); });
     changes.push({ id: c.id, title: c.title, whose: c.whose, why: r.why[c.id] ?? c.why, action: c.action, examples: ex });
   }
   if (Object.keys(found).length) {

@@ -45,4 +45,8 @@ describe("market play", () => {
     expect(aboutTheirProducts("veteran suicide prevention support (NAICS 541611)", ["chicken", "3116"])).toBe(false);
     expect(aboutTheirProducts("anything", [])).toBe(false);
   });
+  it("places match the names records use (New York City = Manhattan, Bengaluru = Bangalore)", () => {
+    expect(inPlaces("Mechanical Systems permit for 522 5 Avenue, Manhattan", ["New York City", "NY"])).toBe(true);
+    expect(inPlaces("opens a plant in Bangalore", ["Bengaluru"])).toBe(true);
+  });
 });

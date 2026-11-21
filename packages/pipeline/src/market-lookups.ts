@@ -35,6 +35,8 @@ export function splitKeywords(r: Pick<Research, "keywords">): { naics: string | 
 export const stateCodes = (places: string[]) => places.filter((p) => /^[A-Z]{2}$/.test(p));
 const anyWord = (text: string, words: string[]) => { const t = text.toLowerCase(); return words.some((w) => t.includes(w.toLowerCase())); };
 const live = (key: string) => `live:${key}`;
+/** a word or phrase as a whole word (pure; exported for tests) */
+export const anyWholeWord = (text: string, words: string[]) => { const t = text.toLowerCase(); return words.some((w) => new RegExp(`(^|[^a-z0-9])${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9])`).test(t)); };
 
 // ------------------------------------------------------------------------------------------------ row builders (pure)
 
@@ -109,15 +111,20 @@ export async function liveExamples(c: Change, r: Research, lead: Lead, pack: Pac
   switch (c.live) {
     case "contracts_ending": {
       if (!words.length && !naics) return [];
-      const aw = await soft(fetchExpiringAwards({ naics, keywords: naics ? [] : words, setAsides: [], from: new Date(now.getTime() + 30 * DAY), to: new Date(now.getTime() + 365 * DAY), minAmount: 100_000, maxPages: 1, now }));
+      let aw = words.length ? await soft(fetchExpiringAwards({ naics: null, keywords: words, setAsides: [], from: new Date(now.getTime() + 30 * DAY), to: new Date(now.getTime() + 365 * DAY), minAmount: 100_000, maxPages: 1, now })) : [];
+      if (!aw.length && naics) { await pause(); aw = await soft(fetchExpiringAwards({ naics, setAsides: [], from: new Date(now.getTime() + 30 * DAY), to: new Date(now.getTime() + 365 * DAY), minAmount: 100_000, maxPages: 1, now })); }
       await pause();
-      return endingRows(aw, lead, states);
+      // the search matches the whole record: an example must name one of their words in what the contract is for
+      return endingRows(words.length ? aw.filter((a) => anyWholeWord(a.description, words)) : aw, lead, states);
     }
     case "awards": {
       if (!words.length && !naics) return [];
-      const aw = await soft(fetchNewAwards({ naics, keywords: naics ? [] : words, setAsides: [], since: new Date(now.getTime() - 60 * DAY), now, minAmount: 100_000, maxPages: 1 }));
+      // a year of awards: R&D topics ("particle accelerator") win a few contracts a year, not a month
+      const since = new Date(now.getTime() - 365 * DAY);
+      let aw = words.length ? await soft(fetchNewAwards({ naics: null, keywords: words, setAsides: [], since, now, minAmount: 100_000, maxPages: 1 })) : [];
+      if (!aw.length && naics) { await pause(); aw = await soft(fetchNewAwards({ naics, setAsides: [], since, now, minAmount: 100_000, maxPages: 1 })); }
       await pause();
-      return awardRows(aw, lead);
+      return awardRows(words.length ? aw.filter((a) => anyWholeWord(a.description, words)) : aw, lead);
     }
     case "fda_shortages":
       memo.shortages ??= soft(fetchShortages());
