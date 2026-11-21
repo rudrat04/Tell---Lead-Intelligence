@@ -22,7 +22,7 @@ export interface OppContext {
   company: string; domain: string; description: string | null;
   opportunity: string; angle: string;
   contact: { name: string; role: string | null; persona: string | null } | null;
-  events: { quote: string; url: string; reasons: string[] }[];
+  events: { quote: string; url: string; reasons: string[]; about?: string }[];
   record: string[];
   brief: string;
   /** the event kind (contract recompete vs news / signal), so the draft speaks about it the right way */
@@ -144,7 +144,7 @@ export function oppContext(l: OppLead, now: Date): OppContext {
   return {
     kind: "opportunity", company: a.name ?? a.domain, domain: a.domain, description: a.description, opportunity: l.opportunity.label, angle: l.opportunity.angle,
     contact: c ? { name: c.person.name, role: c.person.role, persona: c.persona } : null, kindOf: l.opportunity.kind,
-    events: l.events.slice(0, MAX_EVENTS).map((e) => ({ quote: e.quote, url: e.url, reasons: e.reasons })), record: l.evidence.map((e) => e.quote), brief: oppBrief(l, now),
+    events: l.events.slice(0, MAX_EVENTS).map((e) => ({ quote: e.quote, url: e.url, reasons: e.reasons, ...(e.entityName ? { about: e.entityName } : {}) })), record: l.evidence.map((e) => e.quote), brief: oppBrief(l, now),
   };
 }
 

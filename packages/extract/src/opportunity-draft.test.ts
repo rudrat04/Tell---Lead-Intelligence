@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
-import { draftProblems, writeOpportunityDraft, type OppDraftInput } from "./opportunity-draft.js";
+import { draftProblems, writeOpportunityDraft, entityNames, type OppDraftInput } from "./opportunity-draft.js";
 
 const input: OppDraftInput = {
   company: "Northwind Systems", opportunity: "Federal recompete", angle: "",
-  events: [{ quote: `Contoso Federal LLC's $8.0M Department of Veterans Affairs contract for "it modernization support" (NAICS 541512) ends 2027-06-30`, url: "https://x.test", reasons: ["won 3 contracts in NAICS 541512"] }],
+  events: [{ quote: `Contoso Federal LLC's $8.0M Department of Veterans Affairs contract for "it modernization support" (NAICS 541512) ends 2027-06-30`, url: "https://x.test", reasons: ["won 3 contracts in NAICS 541512"], about: "Contoso Federal LLC" }],
   record: ["Won $4.0M from Department of Veterans Affairs in 2025"],
 };
-const good = { subject: "va it contract ending", body: "Contoso Federal's $8.0M VA IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it, and track them as they appear. Want to see what we found?" };
+const good = { subject: "a va it contract is ending", body: "A VA contractor's $8.0M IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it; we build intelligence systems that surface these for teams like yours as they appear. Want to see what we found?" };
 
 describe("opportunity draft checks", () => {
   it("a short, factual draft that ends on a question passes", async () => {
@@ -20,6 +20,14 @@ describe("opportunity draft checks", () => {
     expect(draftProblems({ ...good, body: `You're the only contractor who fits. ${good.body}` }, input, pack)).toMatch(/overclaims/);
     expect(draftProblems({ ...good, body: `The recompete is confirmed. ${good.body}` }, input, pack)).toMatch(/recompete as fact/);
     expect(draftProblems({ ...good, body: good.body.replace(/\?$/, ".") }, input, pack)).toMatch(/end on a question/);
+  });
+  it("never names the company behind the signal, and always pitches the system", async () => {
+    const pack = await loadFixturePack();
+    expect(draftProblems({ ...good, body: good.body.replace("A VA contractor's", "Contoso Federal's") }, input, pack)).toMatch(/names "Contoso Federal", the company behind the signal/);
+    expect(draftProblems({ ...good, subject: "contoso's va contract" }, input, pack)).toMatch(/names "Contoso"/);
+    expect(draftProblems({ ...good, body: good.body.replace("; we build intelligence systems that surface these for teams like yours as they appear", "") }, input, pack)).toMatch(/doesn't say we build systems/);
+    expect(entityNames("Contoso Pharma Ltd.")).toEqual(["Contoso Pharma", "Contoso"]);
+    expect(entityNames("Global Health Services LLC")).toEqual(["Global Health Services"]);
   });
   it("rewrites with the reasons, then gives up (no template)", async () => {
     const pack = await loadFixturePack();

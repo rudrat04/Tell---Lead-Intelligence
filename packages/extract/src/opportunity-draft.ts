@@ -16,8 +16,9 @@ export interface OppDraftInput {
   contactRole?: string | null;
   opportunity: string;
   angle: string;
-  /** the events matched to them, strongest first: quote + why it fits them */
-  events: { quote: string; url: string; reasons: string[] }[];
+  /** the events matched to them, strongest first: quote + why it fits them; `about` = the company the event is
+   *  about, which the email never names (the lead wants to know who: that's the reason to reply) */
+  events: { quote: string; url: string; reasons: string[]; about?: string }[];
   /** their own record (largest wins) or what they do */
   record: string[];
   /** a federal contract recompete (vs a news or signal event) */
@@ -31,10 +32,10 @@ export function oppDraftSystemPrompt(pack: Pack, contract = true): string {
   return `You write the first cold email from ${pack.meta.name} to a company that could act on a market event we found.
 What we sell: ${pack.meta.offer}
 The email follows the brief's order, each part one or two short sentences, in plain words:
-1. The signal: one specific, verifiable fact from the facts given (who, what, how much, where, when). Open with it; no "we noticed" or "hope you're well".
+1. The signal, without naming who: one specific, verifiable fact from the facts given (what, how much, where, when), with the company behind it described only by its kind ("a generic drug maker", "a VA contractor", "a hospital group"). Never name that company: who it is, is what they will reply to find out. Open with it; no "we noticed" or "hope you're well".
 2. How they could benefit: tie it to ${contract ? "their own record (contracts they won, agencies they work with, set-asides they qualify for)" : "what they sell (from their description)"}. Say "could", never claim it will become business for them.
 3. The play: the one move it opens for them right now (${contract ? "start capture before the RFP: shape requirements, line up teaming partners" : "reach the company in the news before its suppliers are chosen"}), from the angle given.
-4. The bait and the ask: we found this one and others like it, and track them as they appear; then a short question asking whether they want to see what we found. Never ask for a call, meeting or time.
+4. The bait, the pitch and the ask: we found this one and others like it; we build GTM and intelligence systems that surface opportunities like these for a team like theirs as they appear (one line, plain words, the word "system" in it); then a short question asking whether they want to see what we found. Never ask for a call, meeting or time.
 Rules: under ${pack.delivery.email.max_words} words in the body. No greeting and no signature (code adds them). Never introduce yourself or say "I help companies".
 Only use numbers, names and dates that appear in the facts. ${contract ? "Never say a recompete or RFP is confirmed: a contract ending means the agency MAY buy again." : "Never claim the company in the news is buying from anyone: it MAY need suppliers."}
 Never say: ${[...c.never_say, "guaranteed", "exclusive", "the only"].join("; ")}.
@@ -47,7 +48,7 @@ export function oppDraftUserPrompt(i: OppDraftInput): string {
 Company: ${i.company}${i.description ? `\nWhat they do: ${i.description}` : ""}${i.contactRole ? `\nWriting to: ${i.contactRole}` : ""}
 Opportunity: ${i.opportunity}${i.angle ? ` (${i.angle})` : ""}
 Events:
-${i.events.map((e, n) => `${n + 1}. ${e.quote}\n   Fits them because: ${e.reasons.join("; ")}`).join("\n")}
+${i.events.map((e, n) => `${n + 1}. ${e.quote}${e.about ? `\n   About (never name them in the email): ${e.about}` : ""}\n   Fits them because: ${e.reasons.join("; ")}`).join("\n")}
 Their record:
 ${i.record.map((r) => `- ${r}`).join("\n")}
 </data>`;
@@ -57,6 +58,17 @@ const ASKS_TIME = /\b(call|meeting|meet|calendar|book a|hop on|zoom|minutes|15 m
 const SELF_INTRO = /\b(my name is|i'm reaching out|i am reaching out|i help (companies|businesses|teams)|we help (companies|businesses|teams)|hope (this|you're|you are))\b/i;
 /** number tokens: 5.2, 2027, $5.2M, 541512 (single digits are words like "one", not facts) */
 const numbers = (s: string) => (s.match(/\$?\d[\d,]*(\.\d+)?\s?(k|m|b|bn|million|billion)?\b/gi) ?? []).map((t) => t.toLowerCase().replace(/[$,\s]/g, "").replace(/million$/, "m").replace(/billion$|bn$/, "b")).filter((t) => t.replace(/\D/g, "").length >= 2);
+
+const LEGAL = /\b(inc|incorporated|llc|l\.l\.c|ltd|limited|pvt|private|corp|corporation|co|company|lp|llp|pllc|plc|group|the)\b\.?/gi;
+const COMMON_WORD = new Set(["pharma", "pharmaceuticals", "pharmaceutical", "health", "healthcare", "systems", "solutions", "services", "technologies", "technology", "industries", "international", "global", "india", "indian", "american", "national", "federal", "united", "general", "life", "sciences", "labs", "medical", "hospital", "hospitals", "construction", "engineering", "energy", "power", "steel", "foods", "motors"]);
+/** The ways a draft could name the company behind a signal: its name without legal words, and its first distinctive
+ *  word ("Contoso" in "Contoso Pharma Ltd") (pure; exported for tests). */
+export function entityNames(about: string): string[] {
+  const name = about.replace(LEGAL, " ").replace(/[^\p{L}\p{N}&' -]+/gu, " ").replace(/\s+/g, " ").trim();
+  if (name.length < 3) return [];
+  const first = name.split(" ").find((w) => w.length >= 4 && !COMMON_WORD.has(w.toLowerCase()));
+  return [...new Set([name, ...(first ? [first] : [])])];
+}
 
 /** Why a draft fails the checks, "" = it passes (pure; exported for tests). */
 export function draftProblems(d: OppDraft, i: OppDraftInput, pack: Pick<Pack, "copy" | "delivery">): string {
@@ -74,6 +86,12 @@ export function draftProblems(d: OppDraft, i: OppDraftInput, pack: Pick<Pack, "c
   const factText = [i.company, ...i.events.map((e) => e.quote), ...i.record].join(" ").toLowerCase();
   for (const s of pack.copy.never_say) if (body.toLowerCase().includes(s.toLowerCase()) && !factText.includes(s.toLowerCase())) p.push(`says "${s}"`);
   if (/\b(confirmed|will be re-?competed|rfp is out)\b/i.test(body)) p.push("states a recompete as fact");
+  // the company behind the signal stays unnamed (who it is, is the reason to reply)
+  const text = `${d.subject} ${body}`.toLowerCase();
+  for (const n of i.events.flatMap((e) => (e.about ? entityNames(e.about) : []))) {
+    if (new RegExp(`(^|[^\\p{L}\\p{N}])${n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\p{L}\\p{N}])`, "u").test(text)) { p.push(`names "${n}", the company behind the signal: describe it by its kind instead`); break; }
+  }
+  if (!/\bsystems?\b/i.test(body)) p.push(`doesn't say we build systems that surface opportunities like this`);
   const allowed = new Set(numbers([i.company, i.description ?? "", ...i.events.flatMap((e) => [e.quote, ...e.reasons]), ...i.record].join(" ")));
   const allowedDigits = [...allowed].map((t) => t.replace(/[^\d.]/g, ""));
   for (const n of numbers(`${d.subject} ${body}`)) if (!allowed.has(n) && !allowedDigits.includes(n.replace(/[^\d.]/g, ""))) p.push(`number "${n}" is not in the facts`);
