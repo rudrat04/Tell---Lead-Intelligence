@@ -138,7 +138,7 @@ export function validateJudged(raw: string, ev: JudgeEvidence[], pack: Pack, lis
 
 export async function judgeOpportunity(llm: LlmClient, pack: Pack, company: string, facts: string, ev: JudgeEvidence[], ctx: JudgeContext, listReady: (list: string, quotes: string[]) => boolean): Promise<JudgeResult> {
   if (!ev.length) return { qualifies: false, reason: "no evidence" };
-  const out = await llm.complete({ system: judgeSystem(pack), user: judgeUser(company, facts, ev, ctx), effort: "medium", schema: JUDGE_JSON_SCHEMA });
+  const out = await llm.complete({ system: judgeSystem(pack), user: judgeUser(company, facts, ev, ctx), think: true, effort: "medium", schema: JUDGE_JSON_SCHEMA });
   const r = validateJudged(out, ev, pack, listReady, ctx.capabilities);
   if (r.qualifies && !r.judged.personas.length && ctx.industry?.buyers.length) r.judged.personas = ctx.industry.buyers.slice(0, 3);
   return r;

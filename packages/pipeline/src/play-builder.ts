@@ -18,7 +18,7 @@ export async function buildMissingPlays(candidates: ScoreRunResult["playCandidat
   if (!pack.plays.build?.enabled || !candidates.length) return { ...res, ...(candidates.length ? {} : { skipped: "nothing to build" }) };
   let llm = opts.llm ?? null, haiku: HaikuClient | null = null;
   const usage = opts.usage ?? (opts.llm ? null : neonUsage());
-  const cap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1);
+  const cap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06);
   if (!llm) {
     if (!process.env.ANTHROPIC_API_KEY) return { ...res, skipped: "no ANTHROPIC_API_KEY" };
     const left = cap - (await usage!.spentToday("haiku"));

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
-import { WriterClient, HaikuClient, SonnetClient, WRITER_MODEL, writerEffort, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
+import { WriterClient, HaikuClient, SonnetClient, WRITER_MODEL, HAIKU_MODEL, writerEffort, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
 import type { Contact } from "@tell/people";
 import type { RankInput } from "@tell/intel";
 import { getDb, analyses, and, inArray } from "@tell/db";
@@ -63,13 +63,14 @@ export async function analyzeLeads(
   // play means a new email; the brief is rebuilt every run from current facts.
   const plays = new Map<string, MarketPlay>();
   const briefs = new Map<string, string>();
-  // research reads the company's own site and news: Sonnet 5.5 at medium effort with web search (3) and fetch (2),
-  // its own daily cap (RESEARCH_DAILY_CAP_USD, usage_daily "sonnet_research"); once per company per 120 days
-  let researcher: SonnetClient | null = null;
-  const rcap = Number(process.env.RESEARCH_DAILY_CAP_USD ?? 1);
+  // research: Haiku with thinking (effort medium), its own small daily cap (RESEARCH_DAILY_CAP_USD, usage_daily
+  // "haiku_research"); once per company per 120 days. (Sonnet + web search reads their site better but costs ~15x:
+  // set RESEARCH_MODEL=sonnet to use it.)
+  let researcher: LlmClient & { spent: number } | null = null;
+  const rcap = Number(process.env.RESEARCH_DAILY_CAP_USD ?? 0.03);
   if (pack.modules.modules.length && !opts.llm && process.env.ANTHROPIC_API_KEY) {
-    const left = rcap - (await (opts.usage ?? neonUsage()).spentToday("sonnet_research"));
-    if (left > 0) researcher = new SonnetClient({ capUsd: left, effort: "medium", web: { searches: 3, fetches: 2 }, label: "research" });
+    const left = rcap - (await (opts.usage ?? neonUsage()).spentToday("haiku_research"));
+    if (left > 0) researcher = process.env.RESEARCH_MODEL === "sonnet" ? new SonnetClient({ capUsd: left, effort: "medium", web: { searches: 3, fetches: 2 }, label: "research" }) : new HaikuClient({ capUsd: left });
   }
   const today = new Date().toISOString().slice(0, 10);
   const memo: LookupMemo = {}; // the shortage list, approvals and recalls: fetched once for every lead in the run
@@ -84,7 +85,7 @@ export async function analyzeLeads(
       p.key = createHash("sha256").update(`${p.key}|${mp.module}|${mp.changes.map((c) => `${c.id}:${c.examples.map((e) => e.accountId).join(",")}`).join(";")}`).digest("hex").slice(0, 24);
     } catch { /* the lead goes without a market play */ }
   }
-  if (researcher && researcher.spent > 0) await (opts.usage ?? neonUsage()).addSpend("sonnet_research", researcher.spent, rcap);
+  if (researcher && researcher.spent > 0) await (opts.usage ?? neonUsage()).addSpend("haiku_research", researcher.spent, rcap);
   res.buyerSamples = plays.size;
 
   const prior = await db.select().from(analyses).where(and(
@@ -108,21 +109,33 @@ export async function analyzeLeads(
   }
   if (!todo.length) return res;
 
+  // drafts: Sonnet for the first few a day (WRITER_DAILY_CAP_USD, small), then Haiku with thinking (HAIKU_WRITER_DAILY_CAP_USD,
+  // usage_daily "haiku_writer"), so every lead gets a draft on a few dollars a month
   let llm = opts.llm;
-  let writer: WriterClient | null = null;
+  let writer: WriterClient | null = null, haikuWriter: HaikuClient | null = null;
   const usage = opts.usage ?? (opts.llm ? null : neonUsage());
-  const cap = opts.dailyCapUsd ?? Number(process.env.WRITER_DAILY_CAP_USD ?? 1);
+  const cap = opts.dailyCapUsd ?? Number(process.env.WRITER_DAILY_CAP_USD ?? 0.08);
+  const hwCap = Number(process.env.HAIKU_WRITER_DAILY_CAP_USD ?? 0.03);
+  let sonnetLeft = 0;
   if (!llm) {
     if (!process.env.ANTHROPIC_API_KEY) return { ...res, skipped: "no ANTHROPIC_API_KEY" };
-    const remaining = cap - (await usage!.spentToday(WRITER_USAGE));
-    if (remaining <= 0) return { ...res, skipped: "daily writer cap reached" };
-    llm = writer = new WriterClient({ capUsd: remaining, effort: writerEffort() });
+    sonnetLeft = cap - (await usage!.spentToday(WRITER_USAGE));
+    const haikuLeft = hwCap - (await usage!.spentToday("haiku_writer"));
+    if (sonnetLeft > 0) writer = new WriterClient({ capUsd: sonnetLeft, effort: writerEffort() });
+    if (haikuLeft > 0) haikuWriter = new HaikuClient({ capUsd: haikuLeft });
+    if (!writer && !haikuWriter) return { ...res, skipped: "daily writer caps reached" };
   }
+  /** Sonnet while a full draft (about $0.03 with rewrites) still fits its budget, else Haiku */
+  const writerFor = (): { llm: LlmClient; model: string } | null => {
+    if (opts.llm) return { llm: opts.llm, model: WRITER_MODEL };
+    if (writer && sonnetLeft - writer.spent >= 0.03) return { llm: writer, model: WRITER_MODEL };
+    return haikuWriter ? { llm: haikuWriter, model: HAIKU_MODEL } : null;
+  };
   // the reply check runs on Haiku (fractions of a cent per draft), within the Haiku daily cap
   let critic: HaikuClient | null = null;
   if (!opts.llm && process.env.ANTHROPIC_API_KEY) {
-    const hcap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1), left = hcap - (await (usage ?? neonUsage()).spentToday("haiku"));
-    if (left > 0) critic = new HaikuClient({ capUsd: Math.min(left, 0.2) });
+    const hcap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06), left = hcap - (await (usage ?? neonUsage()).spentToday("haiku"));
+    if (left > 0) critic = new HaikuClient({ capUsd: Math.min(left, 0.02) });
   }
   try {
     for (const p of todo) {
@@ -146,7 +159,9 @@ export async function analyzeLeads(
       let a: Analysis | null = null;
       // TELL_DEBUG_DRAFTS=1 (local only: it prints lead details) shows why drafts were rejected
       const debug = process.env.TELL_DEBUG_DRAFTS && !process.env.CI ? (r: string) => console.error(`[draft rejected] ${p.input.company}: ${r}`) : undefined;
-      try { a = await analyzeLead(llm, pack, p.input, debug, critic ?? undefined); } catch (e) { debug?.(`error: ${(e as Error).message}`); }
+      const w = writerFor();
+      if (!w) { res.failed++; continue; }
+      try { a = await analyzeLead(w.llm, pack, p.input, debug, critic ?? undefined); } catch (e) { debug?.(`error: ${(e as Error).message}`); }
       if (!a) { res.failed++; continue; }
       out.set(p.l.account.id, { ...a, ...(briefs.has(p.l.account.id) ? { brief: briefs.get(p.l.account.id)!, market: marketLines(plays.get(p.l.account.id)) } : {}) });
       res.fresh++;
@@ -155,13 +170,14 @@ export async function analyzeLeads(
           accountId: p.l.account.id, hypothesis: a.hypothesis, angle: a.angle, opener: a.opener, citations: [],
           // the proof sample is added to the evidence after refs were taken, so a citation of it has no ref: dropped
           cited: a.citations.flatMap((i) => (p.refs[i] ? [p.refs[i]!] : [])), counterEvidence: a.counterEvidence, confidence: a.confidence,
-          evidenceKey: p.key, model: WRITER_MODEL, emailSubject: a.email?.subject ?? null, emailBody: a.email?.body ?? null, linkedinMessage: a.linkedin,
+          evidenceKey: p.key, model: w.model, emailSubject: a.email?.subject ?? null, emailBody: a.email?.body ?? null, linkedinMessage: a.linkedin,
         }).onConflictDoNothing({ target: [analyses.accountId, analyses.evidenceKey] });
       }
     }
   } finally {
     if (writer) { res.spentUsd = writer.spent; await usage?.addSpend(WRITER_USAGE, writer.spent, cap); }
-    if (critic && critic.spent > 0) await usage?.addSpend("haiku", critic.spent, Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
+    if (haikuWriter && haikuWriter.spent > 0) { res.spentUsd += haikuWriter.spent; await usage?.addSpend("haiku_writer", haikuWriter.spent, hwCap); }
+    if (critic && critic.spent > 0) await usage?.addSpend("haiku", critic.spent, Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06));
   }
   return res;
 }

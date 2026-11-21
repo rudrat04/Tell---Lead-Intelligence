@@ -34,7 +34,7 @@ export async function checkRoleGaps(
   const rows = await db.select({ id: accounts.id, name: accounts.name, domain: accounts.domain, segment: accounts.segment }).from(accounts).where(inArray(accounts.id, accountIds));
   // a GTM-seat search says nothing about a drug maker or a contractor: only industries that count what it writes
   const byId = new Map(rows.filter((r) => industryCounts(pack, r.segment, "role_gap") || industryCounts(pack, r.segment, "ops_owner_known")).map((r) => [r.id, r]));
-  const due = accountIds.filter((id) => byId.has(id) && !recent.has(id)).slice(0, opts.max ?? Number(process.env.ROLE_GAP_PER_RUN ?? 20));
+  const due = accountIds.filter((id) => byId.has(id) && !recent.has(id)).slice(0, opts.max ?? Number(process.env.ROLE_GAP_PER_RUN ?? 3));
 
   const allTitles = Object.values(groups).flat();
   const anyRole = [rolePattern(allTitles)];

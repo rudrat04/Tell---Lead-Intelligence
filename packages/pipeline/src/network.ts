@@ -52,7 +52,7 @@ export async function runChampionWatch(opts: { pack: Pack; now?: Date; search?: 
 
   const month = now.toISOString().slice(0, 7);
   const [used] = (await db.execute(sql`select coalesce(sum(used), 0)::int as n from ${usageDaily} where service = 'exa_champion' and to_char(day, 'YYYY-MM') = ${month}`)).rows as { n: number }[];
-  const perMonth = opts.perMonth ?? Number(process.env.CHAMPION_PER_MONTH ?? 40);
+  const perMonth = opts.perMonth ?? Number(process.env.CHAMPION_PER_MONTH ?? 10);
   let budget = Math.min(opts.perRun ?? Number(process.env.CHAMPION_PER_RUN ?? 10), perMonth - (used?.n ?? 0));
   if (budget <= 0) return { ...res, skipped: "monthly champion search cap reached" };
 

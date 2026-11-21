@@ -43,7 +43,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
-          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
+          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           TICK_MAX_PER_SOURCE: ${{ inputs.max_per_source }}
       # niche records over the per-run lookup cap wait in niche_queue; each tick looks up the most valuable few,
       # until the day's search budget (sources.niche.daily_budget) is spent. Counts only.

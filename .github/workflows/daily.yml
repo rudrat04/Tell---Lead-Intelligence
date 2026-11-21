@@ -115,7 +115,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
-          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
+          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
 
       # Your labels from the Sheet (and any rows a failed append left behind) before today's scoring
       - name: Sheet sync
@@ -158,8 +158,8 @@ jobs:
         run: pnpm digest
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '1' }}
-          WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '1' }}
+          HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
+          WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '0.08' }}
           ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}
           AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
           AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
@@ -188,7 +188,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '1' }}
+          WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '0.08' }}
           ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}

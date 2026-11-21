@@ -28,7 +28,7 @@ export async function runUsageGuard(): Promise<UsageResult> {
   } catch { /* R2 not configured: skip */ }
 
   const [haiku] = (await db.execute(sql`select coalesce(sum(used), 0)::float as used from usage_daily where service = 'haiku' and day = ${day}`)).rows as { used: number }[];
-  add("haiku_usd_today", haiku?.used ?? 0, Number(env.HAIKU_DAILY_CAP_USD ?? 1), "USD");
+  add("haiku_usd_today", haiku?.used ?? 0, Number(env.HAIKU_DAILY_CAP_USD ?? 0.06), "USD");
 
   const [exa] = (await db.execute(sql`select count(*)::int as n from people_searches where provider = 'exa' and searched_at >= date_trunc('month', now())`)).rows as { n: number }[];
   // funding-news company searches are counted per day in usage_daily (they have no account yet)

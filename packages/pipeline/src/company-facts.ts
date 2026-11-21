@@ -95,13 +95,13 @@ export async function fillCompanyFacts(
   let llm = opts.llm ?? null, haiku: HaikuClient | null = null;
   const usage = opts.usage ?? neonUsage();
   if (wantSegments && opts.llm === undefined && process.env.ANTHROPIC_API_KEY) {
-    const cap = opts.dailyCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1);
+    const cap = opts.dailyCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06);
     const left = cap - (await usage.spentToday("haiku"));
     if (left > 0) llm = haiku = new HaikuClient({ capUsd: left });
   }
   const system = wantSegments ? segmentPrompt(pack) : "";
 
-  let budget = opts.max ?? Number(process.env.EXA_COMPANY_PER_RUN ?? 20);
+  let budget = opts.max ?? Number(process.env.EXA_COMPANY_PER_RUN ?? 3);
   try {
     for (const a of rows) {
       if (recent.has(a.id) || budget-- <= 0) continue;
@@ -130,7 +130,7 @@ export async function fillCompanyFacts(
       }
     }
   } finally {
-    if (haiku && haiku.spent > 0) await usage.addSpend("haiku", haiku.spent, opts.dailyCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
+    if (haiku && haiku.spent > 0) await usage.addSpend("haiku", haiku.spent, opts.dailyCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06));
   }
   return res;
 }

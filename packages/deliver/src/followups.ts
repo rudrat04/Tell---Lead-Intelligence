@@ -51,14 +51,14 @@ export async function runFollowups(opts: { pack: Pack; dryRun?: boolean; now?: D
   res.due = due.length;
   if (!due.length) return res;
   const usage = neonUsage();
-  const cap = Number(process.env.WRITER_DAILY_CAP_USD ?? 1);
+  const cap = Number(process.env.WRITER_DAILY_CAP_USD ?? 0.08);
   let writer: WriterClient | null = null;
   if (opts.draft === false) res.skipped = "facts only";
   else if (!process.env.ANTHROPIC_API_KEY) res.skipped = "no ANTHROPIC_API_KEY";
   else {
     const left = cap - (await usage.spentToday("sonnet"));
     if (left <= 0) res.skipped = "daily writer cap reached";
-    else writer = new WriterClient({ capUsd: Math.min(left, 0.4), effort: writerEffort() });
+    else writer = new WriterClient({ capUsd: Math.min(left, 0.03), effort: writerEffort() });
   }
   const written = new Map<string, string>();
   try {

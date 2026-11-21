@@ -22,7 +22,7 @@ export interface MarketPlay { module: string; moduleTitle: string; offer: string
 
 /** modules + industries in the cache key: editing modules.yaml re-researches */
 /** bumped when the research step itself changes (v2: Sonnet reading the company's site and news) */
-const RESEARCH_STEP = "v2";
+const RESEARCH_STEP = "v3";
 export const researchVersion = (pack: Pack) => createHash("sha256").update(JSON.stringify([RESEARCH_STEP, pack.modules.modules, Object.keys(pack.icp.industries)])).digest("hex").slice(0, 8);
 
 /** Best rows (pure; exported for tests): one per company, companies already used elsewhere skipped, same region first,

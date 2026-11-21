@@ -94,6 +94,7 @@ export function validateResearch(raw: string, pack: Pack): Research | null {
 
 export async function researchCompany(llm: LlmClient, pack: Pack, company: { name: string; domain: string; description: string; segment: string | null; trigger?: string }): Promise<Research | null> {
   const out = await llm.complete({
+    think: true, effort: "medium",
     system: researchPrompt(pack, company.segment),
     user: `<data>\nCompany: ${company.name} (${company.domain})${company.segment ? `, industry ${company.segment}` : ""}\nWhat they do: ${company.description.replaceAll("</data>", "")}${company.trigger ? `\nThe news that found them: ${company.trigger.replaceAll("</data>", "").slice(0, 300)}` : ""}\n</data>`,
   });

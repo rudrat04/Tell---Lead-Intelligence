@@ -51,7 +51,7 @@ async function health(pack: Pack, capUsd: number): Promise<DigestHealth> {
   return {
     boardsTotal: b?.total ?? 0, boardsChecked24h: b?.checked ?? 0, boardsFailing: b?.failing ?? 0,
     ticks24h: t?.n ?? 0, tickErrors24h: t?.errors ?? 0, haikuTodayUsd: spend[0]?.used ?? 0, haikuCapUsd: capUsd,
-    writerTodayUsd: writer[0]?.used ?? 0, writerCapUsd: writer[0]?.limit ?? Number(process.env.WRITER_DAILY_CAP_USD ?? 1), indiaTracked: india?.n ?? 0, usage, metrics, tuningPending: tp?.n ?? 0,
+    writerTodayUsd: writer[0]?.used ?? 0, writerCapUsd: writer[0]?.limit ?? Number(process.env.WRITER_DAILY_CAP_USD ?? 0.08), indiaTracked: india?.n ?? 0, usage, metrics, tuningPending: tp?.n ?? 0,
   };
 }
 
@@ -178,7 +178,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     enrich.push(`touch back ${f.touched.length} (${f.written} drafted)${f.skipped ? ` (${f.skipped})` : ""}`);
   } catch { enrich.push("touch back failed"); }
   const gigList = await gigsForDigest(pack);
-  const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
+  const h = await health(pack, opts.haikuCapUsd ?? Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06));
   h.indiaInLeads = score.ranking.leads.filter((l) => l.account.region === "India").length;
   // one-tap labels only on the real send (test and dry runs record no deliveries for the links to point at)
   const ids = assignDeliveryIds(score.ranking.leads.map((l) => l.account.id));

@@ -729,7 +729,7 @@ export async function drainNicheQueue(deps: Deps & { limit?: number }): Promise<
 /** Haiku segment classifier for "auto" records, within the shared Haiku daily cap; null without a key or budget. */
 async function makeClassifier(pack: Pack, usage: UsageStore): Promise<((name: string, domain: string, description: string) => Promise<string | null>) | null> {
   if (!process.env.ANTHROPIC_API_KEY || !Object.keys(pack.icp.segment_descriptions).length) return null;
-  const cap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1);
+  const cap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 0.06);
   const left = cap - (await usage.spentToday("haiku"));
   if (left <= 0) return null;
   const llm = new HaikuClient({ capUsd: Math.min(left, 0.2) });
