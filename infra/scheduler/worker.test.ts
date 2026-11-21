@@ -4,21 +4,29 @@ import worker from "./worker.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
-async function run(cron: string, status = 204) {
+// a Monday in IST, so the Sunday rule doesn't skip the dispatch
+const MONDAY = Date.parse("2026-11-23T06:00:00Z");
+async function run(cron: string, status = 204, scheduledTime = MONDAY) {
   const calls: { url: string; init: RequestInit }[] = [];
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => { calls.push({ url, init }); return new Response(null, { status }); });
   const waits: Promise<unknown>[] = [];
-  await worker.scheduled({ cron }, { GH_TOKEN: "t", GH_REPO: "o/r" }, { waitUntil: (p: Promise<unknown>) => waits.push(p) });
+  await worker.scheduled({ cron, scheduledTime }, { GH_TOKEN: "t", GH_REPO: "o/r" }, { waitUntil: (p: Promise<unknown>) => waits.push(p) });
   await Promise.all(waits);
   return calls;
 }
 
 describe("scheduler worker", () => {
-  it.each([["*/30 * * * *", "tick.yml"], ["0 2 * * *", "daily.yml"], ["15 22 * * 6", "boards.yml"]])("%s dispatches %s on main", async (cron, wf) => {
+  it.each([["*/30 * * * *", "tick.yml"], ["0 2 * * *", "daily.yml"], ["15 22 * * 5", "boards.yml"]])("%s dispatches %s on main", async (cron, wf) => {
     const [c] = await run(cron);
     expect(c!.url).toBe(`https://api.github.com/repos/o/r/actions/workflows/${wf}/dispatches`);
     expect(JSON.parse(c!.init.body as string)).toEqual({ ref: "main" });
     expect((c!.init.headers as Record<string, string>).authorization).toBe("Bearer t");
+  });
+  it("nothing runs on Sunday in IST (Sat 18:30 to Sun 18:30 UTC); Saturday night UTC before that still runs", async () => {
+    expect(await run("0 2 * * *", 204, Date.parse("2026-11-22T02:00:00Z"))).toEqual([]); // Sunday 07:30 IST
+    expect(await run("*/30 * * * *", 204, Date.parse("2026-11-21T19:00:00Z"))).toEqual([]); // Sunday 00:30 IST
+    expect(await run("*/30 * * * *", 204, Date.parse("2026-11-21T18:00:00Z"))).toHaveLength(1); // Saturday 23:30 IST
+    expect(await run("*/30 * * * *", 204, Date.parse("2026-11-22T18:30:00Z"))).toHaveLength(1); // Monday 00:00 IST
   });
   it("fails loudly when GitHub refuses (visible in Cloudflare logs)", async () => {
     await expect(run("0 2 * * *", 403)).rejects.toThrow("HTTP 403");
@@ -125,5 +133,20 @@ describe("telegram buttons", () => {
     await worker.fetch(tap(`e:${D}`), e, { waitUntil: (p: Promise<unknown>) => waits.push(p) });
     await Promise.all(waits);
     expect(e.LABELS.m.has(`enrich:${D}`)).toBe(true);
+  });
+  it("Create draft queues a draft request and dispatches drafts.yml; the Sheet link needs its own signature", async () => {
+    stub(); const e = env(); const waits: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waits.push(p) };
+    await worker.fetch(tap(`cd:${D}`), e, ctx);
+    await Promise.all(waits);
+    expect(e.LABELS.m.has(`draft:${D}`)).toBe(true);
+    expect(calls.some((c) => c.url.endsWith("/workflows/drafts.yml/dispatches"))).toBe(true);
+    const { sign } = await import("./sign.js");
+    expect((await worker.fetch(new Request(`https://w.test/cd?d=${D}&s=${await sign("s3cret", D, "enrich")}`), e, ctx)).status).toBe(400);
+    const get = await worker.fetch(new Request(`https://w.test/cd?d=${D}&s=${await sign("s3cret", D, "draft")}`), e, ctx);
+    expect(await get.text()).toContain("Create draft");
+    expect((await worker.fetch(new Request("https://w.test/draft-requests"), e, ctx)).status).toBe(403);
+    const list = await (await worker.fetch(new Request("https://w.test/draft-requests", { headers: { authorization: "Bearer s3cret" } }), e, ctx)).json();
+    expect(list.map((x: { d: string }) => x.d)).toEqual([D]);
   });
 });

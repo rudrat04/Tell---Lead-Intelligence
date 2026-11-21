@@ -11,3 +11,4 @@ export * from "./sheet-rebuild.js";
 export * from "./followups.js";
 export * from "./alerts.js";
 export * from "./telegram.js";
+export * from "./opportunities.js";

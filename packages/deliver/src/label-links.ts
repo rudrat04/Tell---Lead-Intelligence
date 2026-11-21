@@ -57,3 +57,22 @@ export async function ackEnrichRequests(baseUrl: string, secret: string, ids: st
   const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/enrich-requests/ack`, { method: "POST", headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" }, body: JSON.stringify(ids), signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`enrich requests ack: HTTP ${res.status}`);
 }
+
+/** Create-draft link (the Worker's /cd): queues one draft for this delivery, written only when clicked (saves tokens). */
+export function draftLink(baseUrl: string, secret: string, deliveryId: string): string {
+  const sig = createHmac("sha256", secret).update(`${deliveryId}|draft`).digest("hex").slice(0, 32);
+  return `${baseUrl.replace(/\/+$/, "")}/cd?d=${deliveryId}&s=${sig}`;
+}
+
+/** Create-draft clicks waiting in the Worker (Telegram "Create draft" or the Sheet link). */
+export async function fetchDraftRequests(baseUrl: string, secret: string): Promise<EnrichRequest[]> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/draft-requests`, { headers: { authorization: `Bearer ${secret}` }, signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`draft requests: HTTP ${res.status}`);
+  return ((await res.json()) as EnrichRequest[]).filter((r) => /^[0-9a-f-]{36}$/i.test(r.d));
+}
+
+export async function ackDraftRequests(baseUrl: string, secret: string, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/draft-requests/ack`, { method: "POST", headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" }, body: JSON.stringify(ids), signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`draft requests ack: HTTP ${res.status}`);
+}

@@ -267,6 +267,9 @@ export const deliveries = pgTable("deliveries", {
   /** the Google Sheet row written for this lead (kept so a failed append can be retried without resending) */
   sheetRow: jsonb("sheet_row"),
   sheetAppendedAt: ts("sheet_appended_at"),
+  /** what an on-click draft needs (opportunity leads: the events, the angle, the contact), so the draft job writes from
+   *  the same facts the lead showed */
+  context: jsonb("context"),
 });
 
 export const labels = pgTable("labels", {
@@ -438,3 +441,58 @@ export const builtPlays = pgTable("built_plays", {
   reason: text("reason"),
   createdAt: ts("created_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.accountId, t.evidenceKey] })]);
+
+/**
+ * Opportunities (pack opportunities.yaml): an event is an opportunity for OTHER companies. The company behind the event
+ * (signal entity, e.g. the incumbent of an expiring contract) is stored by name only: it is never the prospect.
+ * Events are public facts (quote + URL + counted facts), keyed per opportunity so re-runs refresh, never duplicate.
+ */
+export const marketEvents = pgTable("market_events", {
+  id: id(),
+  /** pack opportunity id (opportunities.yaml) */
+  opportunity: text("opportunity").notNull(),
+  /** the record's own id (USASpending award id) */
+  key: text("key").notNull(),
+  /** who the event is about (the incumbent): excluded from its own event */
+  entityName: text("entity_name").notNull(),
+  entityKey: text("entity_key"),
+  /** who controls the opportunity (the awarding agency) */
+  owner: text("owner"),
+  quote: text("quote").notNull(),
+  url: text("url").notNull(),
+  amount: real("amount"),
+  /** the date the opportunity turns on (contract end date) */
+  eventDate: ts("event_date"),
+  /** counted facts for matching and drafts: { naics, agency, subAgency, setAside, state, psc, uei, description } */
+  facts: jsonb("facts").notNull(),
+  firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("market_events_opportunity_key_uq").on(t.opportunity, t.key), index("market_events_seen_idx").on(t.lastSeenAt)]);
+
+/** Companies that can benefit from a kind of event, each proven by its own record (past awards). `accountId` is set
+ *  once the name resolves to a website (the niche resolvers); until then the member waits. */
+export const rosterMembers = pgTable("roster_members", {
+  roster: text("roster").notNull(),
+  /** company key (companyKey of the name), the same key the niche resolvers seed under */
+  key: text("key").notNull(),
+  name: text("name").notNull(),
+  accountId: uuid("account_id").references(() => accounts.id),
+  /** { naics[], agencies[], subAgencies[], setAsides[], awards, total, largest, lastAwardAt, ueis[], evidence: [{quote, url}] } */
+  facts: jsonb("facts").notNull(),
+  /** pending (not looked up yet) | resolved | miss */
+  status: text("status").notNull().default("pending"),
+  /** how much the record weighs (awards x amount), lookups go in this order */
+  priority: real("priority").notNull().default(0),
+  refreshedAt: ts("refreshed_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.roster, t.key] }), index("roster_members_account_idx").on(t.accountId)]);
+
+/** One event matched to one beneficiary, with why (computed in code, pure: intel/opportunity.ts). */
+export const opportunityMatches = pgTable("opportunity_matches", {
+  eventId: uuid("event_id").notNull().references(() => marketEvents.id, { onDelete: "cascade" }),
+  accountId: uuid("account_id").notNull().references(() => accounts.id),
+  roster: text("roster").notNull(),
+  /** 0-1 */
+  fit: real("fit").notNull(),
+  reasons: jsonb("reasons").notNull(),
+  matchedAt: ts("matched_at").notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.eventId, t.accountId] }), index("opportunity_matches_account_idx").on(t.accountId)]);

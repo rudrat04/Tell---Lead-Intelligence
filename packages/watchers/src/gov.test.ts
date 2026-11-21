@@ -61,3 +61,24 @@ describe("CMS new providers", () => {
     expect(p[0]).toMatchObject({ name: "Sampleville Home Health LLC", city: "Austin", state: "TX", url: "https://www.medicare.gov/care-compare/details/home-health/999001" });
   });
 });
+
+describe("federal awards for opportunities", () => {
+  it("reads the vehicle an order sits under from the generated id (-NONE- = standalone)", async () => {
+    const { parentAward } = await import("./gov.js");
+    expect(parentAward("CONT_AWD_36C10B24F0420_3600_GS35F0441Y_4732")).toBe("GS35F0441Y");
+    expect(parentAward("CONT_AWD_HHSM500201500252C_7530_-NONE-_-NONE-")).toBeNull();
+  });
+});
+
+describe("SAM websites by UEI", () => {
+  it("maps each UEI to its registered site, keeping the record that lists one", async () => {
+    const { parseSamWebsites } = await import("./gov2.js");
+    const m = parseSamWebsites({ entityData: [
+      { entityRegistration: { ueiSAM: "AAAAAAAAAAAA" }, coreData: { entityInformation: { entityURL: null } } },
+      { entityRegistration: { ueiSAM: "AAAAAAAAAAAA" }, coreData: { entityInformation: { entityURL: "www.northwind.example" } } },
+      { entityRegistration: { ueiSAM: "BBBBBBBBBBBB" }, coreData: { entityInformation: {} } },
+    ] });
+    expect(m.get("AAAAAAAAAAAA")).toBe("www.northwind.example");
+    expect(m.get("BBBBBBBBBBBB")).toBeNull();
+  });
+});

@@ -93,11 +93,31 @@ const normCo = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-
  * one of the person's current roles (no end date) is at this company and its title matches the persona.
  * People who have left the company are rejected even if their old title matches.
  */
-/** The same company by name (normalised) or by the domain's label: never a fuzzy match. */
+/** The same company by name (normalised) or by the domain's label: never a fuzzy match. A one-word name ("Proseware")
+ *  is shared by many companies worldwide, so it counts only when the website is that word too (proseware.example, not
+ *  proseware-steels.example.in: a founder "at Proseware" may be anywhere). */
 export function isSameCompany(name: string, company: string, domain: string): boolean {
   const co = normCo(company), n = normCo(name);
-  const label = domain.split(".")[0]!.toLowerCase();
-  return (co.length >= 3 && n === co) || (label.length >= 4 && n.replace(/ /g, "") === label);
+  const label = domain.split(".")[0]!.toLowerCase().replace(/-/g, "");
+  if (label.length >= 4 && n.replace(/ /g, "") === label) return true;
+  if (co.length < 3 || n !== co) return false;
+  // name-to-name checks (your network's past employers) have no website to hold a one-word name to
+  if (!domain) return true;
+  const words = company.toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]+/g, " ").replace(/\b(inc|llc|ltd|limited|gmbh|corp|co|pvt|private|plc)\b/g, " ").trim().split(/\s+/).filter(Boolean);
+  return words.length >= 2 || co.replace(/ /g, "") === label;
+}
+
+/** The company a free-text title names ("Founder | Studio Harbor Design", "CEO at Acme", "VP Sales @ Acme"), if any (pure). */
+export function companyInTitle(title: string): string | null {
+  const m = title.match(/(?:\s+at\s+|\s*@\s*|\s+[|·–—-]\s+)([^|·–—@,]+?)\s*$/i);
+  return m?.[1]?.trim() || null;
+}
+
+/** A person found by the company's domain (Air Waterfall discover) whose title names a company: it must be this one
+ *  (a "Founder | Studio Harbor Design" found for harbor-design.example is someone else). No company named = accepted. */
+export function titleFitsCompany(title: string, company: string, domain: string): boolean {
+  const named = companyInTitle(title);
+  return !named || isSameCompany(named, company, domain);
 }
 
 const GTM_LEADER = /\b(head of (sales|growth|marketing|revenue|gtm|go[- ]to[- ]market)|vp,? (of )?(sales|marketing|growth|revenue)|chief (revenue|marketing|growth) officer|cro|cmo|(director|head) of (demand gen|partnerships)|director of (sales|marketing|growth))\b/i;

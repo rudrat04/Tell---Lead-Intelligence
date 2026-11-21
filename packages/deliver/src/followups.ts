@@ -31,7 +31,7 @@ export async function runFollowups(opts: { pack: Pack; dryRun?: boolean; now?: D
   const due = (await db.execute(sql`
     select d.id, d.account_id, d.delivered_at, d.sheet_row, a.name, a.domain, a.segment, a.size_band, a.region, a.description
     from ${deliveries} d join ${accounts} a on a.id = d.account_id left join ${labels} l on l.delivery_id = d.id
-    where d.kind <> 'alert' and d.sheet_row is not null
+    where d.kind not in ('alert', 'opportunity') and d.sheet_row is not null
       and d.delivered_at between ${new Date(now.getTime() - windowDays * DAY)} and ${new Date(now.getTime() - FOLLOWUP_MIN_DAYS * DAY)}
       and coalesce(d.sheet_row->>'Follow-up', '') = ''
       and not exists (select 1 from ${deliveries} d2 where d2.account_id = d.account_id and d2.delivered_at > d.delivered_at)

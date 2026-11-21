@@ -403,3 +403,79 @@ export async function fetchFormDDetail(txtUrl: string, filedAt: Date, ua = proce
   if (!res.ok) return null;
   return parseFormDXml(await res.text(), filedAt, txtUrl.replace(/\.txt$/, "-index.htm"));
 }
+
+// ------------------------------------------------------------------------------------------------ USASpending: awards for opportunities
+
+/** One federal award with what opportunity matching needs. `setAside` is the family the row was found under (the
+ *  search filters on set-aside codes but never returns them), null = found without a set-aside filter. */
+export interface FedAward {
+  awardId: string; recipient: string; uei: string | null; amount: number;
+  startDate: Date | null; endDate: Date | null; agency: string; subAgency: string;
+  naics: string; naicsName: string; psc: string; description: string; state: string | null; setAside: string | null; url: string;
+  /** the contract vehicle an order sits under (IDIQ, GSA schedule, BPA), null = a standalone contract */
+  parent: string | null;
+  /** "DEFINITIVE CONTRACT", "DELIVERY ORDER", "PURCHASE ORDER", "BPA CALL" ... */
+  awardType: string;
+}
+
+/** The parent award (vehicle) id from USASpending's generated id ("CONT_AWD_<piid>_<agency>_<parent piid>_<parent agency>");
+ *  "-NONE-" = standalone (pure; exported for tests). */
+export function parentAward(generatedId: string): string | null {
+  const m = generatedId.match(/^CONT_AWD_.+?_\d+_(.+)_(?:-NONE-|\d+)$/);
+  return m && m[1] !== "-NONE-" ? m[1]! : null;
+}
+
+/** spending_by_award rows -> FedAward (pure; exported for tests). */
+export function parseFedAwards(results: unknown[], setAside: string | null, minAmount = 0): FedAward[] {
+  return results.flatMap((x) => {
+    const r = x as Record<string, unknown>;
+    const recipient = String(r["Recipient Name"] ?? "").replace(/\s+/g, " ").trim(), id = String(r.generated_internal_id ?? ""), amount = Number(r["Award Amount"] ?? 0);
+    if (!recipient || !id || !Number.isFinite(amount) || amount < minAmount || /^(multiple recipients|redacted)/i.test(recipient)) return [];
+    const naics = (r.NAICS ?? {}) as { code?: string; description?: string }, psc = (r.PSC ?? {}) as { code?: string };
+    return [{
+      awardId: String(r["Award ID"] ?? id), recipient, uei: typeof r["Recipient UEI"] === "string" && r["Recipient UEI"] ? r["Recipient UEI"] as string : null, amount,
+      startDate: anyDate(r["Start Date"] as string), endDate: anyDate(r["End Date"] as string),
+      agency: String(r["Awarding Agency"] ?? "").trim(), subAgency: String(r["Awarding Sub Agency"] ?? "").trim(),
+      naics: String(naics.code ?? ""), naicsName: String(naics.description ?? "").toLowerCase(), psc: String(psc.code ?? ""),
+      description: String(r.Description ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+      state: (r["Place of Performance State Code"] as string | null) ?? null, setAside, url: `https://www.usaspending.gov/award/${encodeURIComponent(id)}`,
+      parent: parentAward(id), awardType: String(r["Contract Award Type"] ?? "").trim().toUpperCase(),
+    }];
+  });
+}
+
+const FED_FIELDS = ["Contract Award Type", "Award ID", "Recipient Name", "Recipient UEI", "Award Amount", "Start Date", "End Date", "Awarding Agency", "Awarding Sub Agency", "NAICS", "PSC", "Description", "Place of Performance State Code"];
+
+/**
+ * Contract awards in one NAICS code, optionally under one set-aside family's codes.
+ *   sort "Award Amount": largest first, stops when a page falls under minAmount (rosters: who wins this work)
+ *   sort "End Date": latest end date first, stops once end dates fall before `endAfter` (expiring contracts)
+ */
+export async function searchFedAwards(opts: {
+  naics: string; setAside: string | null; setAsideCodes: string[]; start: Date; end: Date; dateType?: "date_signed" | "action_date";
+  sort: "Award Amount" | "End Date"; maxPages: number; minAmount: number; endAfter?: Date; pauseMs?: number;
+}): Promise<FedAward[]> {
+  const out: FedAward[] = [];
+  for (let page = 1; page <= opts.maxPages; page++) {
+    const body = {
+      filters: {
+        award_type_codes: ["A", "B", "C", "D"], naics_codes: [opts.naics], ...(opts.setAsideCodes.length ? { set_aside_type_codes: opts.setAsideCodes } : {}),
+        time_period: [{ start_date: opts.start.toISOString().slice(0, 10), end_date: opts.end.toISOString().slice(0, 10), ...(opts.dateType ? { date_type: opts.dateType } : {}) }],
+      },
+      fields: FED_FIELDS, sort: opts.sort, order: "desc", limit: 100, page,
+    };
+    const j = (await json("https://api.usaspending.gov/api/v2/search/spending_by_award/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })) as
+      { results?: unknown[]; page_metadata?: { hasNext?: boolean } } | null;
+    const raw = j?.results ?? [];
+    const rows = parseFedAwards(raw, opts.setAside, opts.minAmount);
+    out.push(...rows);
+    if (!j?.page_metadata?.hasNext) break;
+    if (opts.sort === "Award Amount" && rows.length < raw.length) break; // the rest are under the minimum
+    if (opts.sort === "End Date" && opts.endAfter) {
+      const last = anyDate((raw.at(-1) as Record<string, unknown> | undefined)?.["End Date"] as string);
+      if (last && last < opts.endAfter) break;
+    }
+    await sleep(opts.pauseMs ?? 400);
+  }
+  return out;
+}

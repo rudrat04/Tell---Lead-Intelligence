@@ -3,7 +3,7 @@ name: Weekly discovery + account watch
 # Weekly: YC companies -> ICP hard filters -> accounts + job boards.
 # The daily board diff runs inside daily.yml. Public repo: the script prints counts only.
 on:
-  # Triggered Sundays 03:45 IST by the Cloudflare scheduler Worker (infra/scheduler).
+  # Triggered Saturdays 03:45 IST by the Cloudflare scheduler Worker (infra/scheduler). Nothing runs on Sunday (IST).
   workflow_dispatch:
 
 concurrency:
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      # migrations are additive and idempotent: a schema change can land before Sunday's first daily run
+      # migrations are additive and idempotent: a schema change can land before the next daily run
       - run: pnpm db:migrate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

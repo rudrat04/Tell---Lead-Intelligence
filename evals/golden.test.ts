@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
 import { validateAnalysis, validateJudged, type AnalystInput } from "@tell/extract";
 import { listReady } from "@tell/pipeline";
+import { matchEvent, entityKey, type OppEvent } from "@tell/intel";
 import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic, buildEvidence, scoreAccount, type JobRow, type SignalRow, type Evidence } from "@tell/intel";
 import type { Pack } from "@tell/config";
 
@@ -95,6 +96,18 @@ describe("golden sets", () => {
       const ev: Evidence[] = r.signals.map((type, i) => ({ type, class: scoped.signals.signals[type]?.class ?? "implicit", ageDays: 2, current: false, quote: type, url: `https://ev.example/${i}`, ref: { kind: "signal" as const, id: `${i}` } }));
       const got = scoreAccount(ev, { sizeBand: "11-50", region: "India", segment: r.segment }, scoped).plays.map((p) => p.id).sort();
       return { ok: JSON.stringify(got) === JSON.stringify([...r.plays].sort()), label: `${r.note}: got [${got.join(", ")}]` };
+    }));
+    expect(failures).toEqual([]);
+  });
+
+  it("opportunity matching: the incumbent, ineligible set-asides and other industries never match", () => {
+    const rows = load<{ event: { recipient: string; uei: string; naics: string; setAside: string | null }; member: { name: string; ueis: string[]; naics: Record<string, number>; setAsides: string[] }; expect: boolean; note: string }>("opportunity-match.jsonl");
+    const failures = report("opportunity match", rows.map((r) => {
+      const e: OppEvent = { key: "k", entityName: r.event.recipient, entityKey: entityKey(r.event.recipient), uei: r.event.uei, amount: 5e6, endDate: new Date("2027-08-01T00:00:00Z"),
+        naics: r.event.naics, agency: "Department of Energy", subAgency: "", setAside: r.event.setAside, description: "support", state: null, url: "https://ev.example/1" };
+      const m = { key: entityKey(r.member.name), name: r.member.name, facts: { naics: r.member.naics, agencies: {}, subAgencies: {}, setAsides: r.member.setAsides, awards: 3, total: 5e6, largest: 2e6, lastAwardAt: null, ueis: r.member.ueis, states: [], evidence: [] } };
+      const got = matchEvent(e, m) != null;
+      return { ok: got === r.expect, label: `${r.note}: got ${got}` };
     }));
     expect(failures).toEqual([]);
   });

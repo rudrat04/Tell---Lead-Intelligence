@@ -300,6 +300,7 @@ export async function loadLearned(pack: Pack): Promise<LearnedStats> {
     from ${deliveries} d join ${accounts} a on a.id = d.account_id
     left join ${labels} l on l.delivery_id = d.id
     left join ${playsMatched} pm on pm.account_id = d.account_id and pm.matched_at <= d.delivered_at + interval '1 day'
+    where d.kind <> 'opportunity'
     group by 1, 2`)).rows as { seg: string; play: string; pos: number; n: number }[];
   const add = (m: Map<string, { pos: number; n: number }>, k: string, r: { pos: number; n: number }) => { const c = m.get(k) ?? { pos: 0, n: 0 }; c.pos += r.pos; c.n += r.n; m.set(k, c); };
   const bySegment = new Map<string, { pos: number; n: number }>(), byPlay = new Map<string, { pos: number; n: number }>();

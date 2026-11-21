@@ -180,6 +180,48 @@ jobs:
           # public GitHub org commits for email patterns (5000 req/h instead of 60)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Opportunity leads (pack opportunities.yaml): events first (federal contracts ending), then the companies that can
+      # bid on them (past winners in the same NAICS codes; the incumbent is never its own lead). Telegram + Sheet, no
+      # drafts here: "Create draft" writes one on click (drafts.yml). Counts only.
+      - name: Opportunity leads
+        continue-on-error: true
+        run: pnpm opps
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
+          AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
+          SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
+          DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
+          LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Create-draft clicks left over (the Worker dispatches drafts.yml at once; this catches any it missed)
+      - name: Create-draft clicks
+        continue-on-error: true
+        run: pnpm drafts:requests
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '0.08' }}
+          ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}
+          TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
+          LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+
       # catch-up for touch-backs (the digest lists them and drafts up to 8): drafts the rest within the writer cap,
       # only from a NEW fact (Sheet "Follow-up"). Counts only.
       - name: Follow-ups

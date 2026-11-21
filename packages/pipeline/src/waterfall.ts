@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { toRegex, type Pack } from "@tell/config";
-import { pickContact, type Contact, type Person } from "@tell/people";
+import { pickContact, titleFitsCompany, type Contact, type Person } from "@tell/people";
 import { airWaterfall, type AirWaterfall, type WaterfallEmail } from "@tell/watchers";
 import { getDb, accounts, people, peopleSearches, emails, suppressionList, and, eq, inArray, sql } from "@tell/db";
 
@@ -34,7 +34,7 @@ export async function waterfallContacts(
   const recent = new Set((await db.select({ a: peopleSearches.accountId }).from(peopleSearches).where(and(
     inArray(peopleSearches.accountId, todo), eq(peopleSearches.provider, SOURCE), sql`${peopleSearches.searchedAt} > ${new Date(Date.now() - REFRESH_DAYS * DAY)}`,
   ))).map((r) => r.a));
-  const accts = await db.select({ id: accounts.id, domain: accounts.domain, size: accounts.sizeBand }).from(accounts).where(inArray(accounts.id, todo));
+  const accts = await db.select({ id: accounts.id, domain: accounts.domain, size: accounts.sizeBand, name: accounts.name }).from(accounts).where(inArray(accounts.id, todo));
   const titles = [...new Set(pack.icp.personas.map((p) => p.search ?? p.title.split("/")[0]!.trim()))];
   let budget = opts.max ?? Number(process.env.AIR_WATERFALL_MAX_LOOKUPS ?? 10), looked = 0, found = 0;
   for (const a of accts) {
@@ -44,7 +44,8 @@ export async function waterfallContacts(
     try {
       const hits = await client.discover(a.domain, titles);
       const rx = pack.icp.personas.flatMap((p) => p.patterns.map(toRegex));
-      list = hits.filter((h) => !h.nameShared && h.title && rx.some((r) => r.test(h.title))).map((h) => ({
+      // a title naming another company ("Founder | Studio Harbor Design") is someone else with a similar name
+      list = hits.filter((h) => !h.nameShared && h.title && rx.some((r) => r.test(h.title)) && titleFitsCompany(h.title, a.name ?? a.domain, a.domain)).map((h) => ({
         name: `${h.firstName} ${h.lastName}`.trim(), role: h.title, source: SOURCE, sourceUrl: h.sourceUrl,
         linkedin: h.sourceUrl && /linkedin\.com\/in\//i.test(h.sourceUrl) ? h.sourceUrl : null,
       }));

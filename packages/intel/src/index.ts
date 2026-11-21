@@ -13,3 +13,4 @@ export * from "./gate2.js";
 export * from "./send-window.js";
 export * from "./gaps.js";
 export * from "./explore.js";
+export * from "./opportunity.js";

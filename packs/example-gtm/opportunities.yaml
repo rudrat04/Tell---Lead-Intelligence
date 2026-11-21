@@ -1,0 +1,38 @@
+# OPPORTUNITIES (Nov 21 2026): the event first, then the companies that can benefit from it.
+# An event (a federal contract ending) is an opportunity for OTHER companies (contractors who can bid on the recompete).
+# A roster lists those companies, each proven by its own record (contracts it won in the same NAICS codes, for the same
+# agencies, under the same set-aside). Code matches events to roster members; the company behind an event (the
+# incumbent) is never its own lead. Leads go to Telegram + the Sheet; drafts are written only when you tap Create draft.
+#   pnpm opps --dry --show   (local) to see who would be on today's list
+# This example is off: a GTM pack has no govcon industry. Copy it into a pack that has one (industries.yaml `govcon`).
+enabled: false
+window_days: 60          # events collected in the last N days count
+max_leads: 10
+pool_multiplier: 2       # candidates searched for contacts = max_leads x this
+redeliver_after_days: 30 # a delivered beneficiary comes back sooner only with a new event
+max_people_searches: 20
+rosters: {}
+#  federal_it:
+#    kind: usaspending_awardees
+#    label: Federal IT contractors
+#    segment: govcon
+#    naics: [ "541512", "541511", "541519" ]
+#    set_asides: [ 8a, sdvosb, wosb, hubzone ]   # queried on their own: eligibility comes from what they won
+#    lookback_days: 1095
+#    min_awards: 2
+#    min_amount: 100000
+#    max_pages: 2
+#    refresh_days: 30
+#    per_run: 20          # company-name lookups per run (free resolvers first, Exa inside sources.niche.daily_budget)
+opportunities: {}
+#  federal_recompete:
+#    kind: usaspending_expiring
+#    label: Federal recompete
+#    roster: federal_it
+#    set_asides: [ 8a, sdvosb, wosb, hubzone ]
+#    min_days: 90
+#    max_days: 365
+#    min_amount: 1000000
+#    sweet_spot_days: [ 180, 365 ]   # capture work pays most 6-12 months before the end date
+#    buyers: [ Head of BD / Capture, Founder / CEO ]
+#    angle: A contract in their lane is ending; the agency may buy it again, and capture starts months before the RFP.

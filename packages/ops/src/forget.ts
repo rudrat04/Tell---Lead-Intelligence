@@ -58,6 +58,9 @@ export async function forgetPerson(req: ForgetRequest, pack: Pack): Promise<Forg
       await db.update(deliveries).set({ sheetRow: scrubRow(r.row, n) }).where(eq(deliveries.id, r.id));
       res.deliveryRows++;
     }
+    // opportunity leads keep the contact and the on-click draft in deliveries.context: dropped whole (the draft names them)
+    const ctx = await db.update(deliveries).set({ context: null }).where(sql`${deliveries.context}::text like ${"%" + n + "%"}`).returning({ id: deliveries.id });
+    res.deliveryRows += ctx.length;
   }
 
   // the leads Sheet: clear cells that contain the name
@@ -89,7 +92,8 @@ export async function forgetPerson(req: ForgetRequest, pack: Pack): Promise<Forg
       const before = JSON.stringify(doc.rows);
       doc.rows = doc.rows
         .filter((r) => !(ids.includes(String(r.id)) || ids.includes(String(r.person_id)) || (req.email && String(r.address ?? "").toLowerCase() === req.email.toLowerCase())))
-        .map((r) => (r.sheet_row ? { ...r, sheet_row: allNames.reduce((row, n) => scrubRow(row, n), r.sheet_row as unknown) } : r));
+        .map((r) => (r.sheet_row ? { ...r, sheet_row: allNames.reduce((row, n) => scrubRow(row, n), r.sheet_row as unknown) } : r))
+        .map((r) => (r.context && allNames.some((n) => JSON.stringify(r.context).includes(n)) ? { ...r, context: null } : r));
       if (JSON.stringify(doc.rows) !== before) {
         await bucket.put(f.key, gzipSync(Buffer.from(JSON.stringify(doc))), "application/gzip");
         res.backupFiles++;

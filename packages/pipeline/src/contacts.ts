@@ -14,7 +14,9 @@ export const PEOPLE_REFRESH_DAYS = 30;
  */
 export async function contactsFor(
   accountIds: string[], pack: Pack,
-  opts: { write?: boolean; search?: PeopleSearch | null; searchFor?: string[]; maxSearches?: number; preferred?: Map<string, string[]> } = {},
+  opts: { write?: boolean; search?: PeopleSearch | null; searchFor?: string[]; maxSearches?: number; preferred?: Map<string, string[]>;
+    /** search only each account's preferred buyers (opportunity leads: the opportunity's buyers), so the budget reaches more accounts */
+    onlyPreferred?: boolean } = {},
 ): Promise<Map<string, Contact | null>> {
   applyPackIdentity(pack);
   const out = new Map<string, Contact | null>();
@@ -68,7 +70,7 @@ export async function contactsFor(
       if (!targets.has(acct.id)) continue;
       const company = acct.name ?? acct.domain;
       const pref = opts.preferred?.get(acct.id) ?? [];
-      const order = [...pref.map((t) => pack.icp.personas.find((p) => p.title === t)).filter((p): p is (typeof pack.icp.personas)[number] => !!p), ...pack.icp.personas.filter((p) => !pref.includes(p.title))];
+      const order = [...pref.map((t) => pack.icp.personas.find((p) => p.title === t)).filter((p): p is (typeof pack.icp.personas)[number] => !!p), ...(opts.onlyPreferred && pref.length ? [] : pack.icp.personas.filter((p) => !pref.includes(p.title)))];
       for (const persona of order) {
         if (budget <= 0) break;
         if (!pref.includes(persona.title) && persona.size_bands.length && acct.size && !persona.size_bands.includes(acct.size)) continue;

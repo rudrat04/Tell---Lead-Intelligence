@@ -6,3 +6,4 @@ export * from "./analyst.js";
 export * from "./play-builder.js";
 export * from "./judge.js";
 export * from "./buyers.js";
+export * from "./opportunity-draft.js";

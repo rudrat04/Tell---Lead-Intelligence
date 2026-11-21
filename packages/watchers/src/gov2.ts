@@ -187,3 +187,32 @@ export async function serperPlaces(apiKey: string, query: string, gl: string): P
   const j = (await res.json()) as { places?: { title?: string; website?: string; address?: string }[] };
   return (j.places ?? []).map((p) => ({ name: p.title ?? "", website: p.website ?? null, address: p.address ?? "" }));
 }
+
+// ------------------------------------------------------------------------------------------------ SAM: websites by UEI
+
+/** SAM entity records -> UEI -> the website the company registered (pure; exported for tests). A UEI with several
+ *  records keeps the first one that lists a site. */
+export function parseSamWebsites(j: unknown): Map<string, string | null> {
+  const out = new Map<string, string | null>();
+  for (const e of ((j as { entityData?: unknown[] } | null)?.entityData ?? []) as { entityRegistration?: { ueiSAM?: string }; coreData?: { entityInformation?: { entityURL?: string | null } } }[]) {
+    const uei = e.entityRegistration?.ueiSAM;
+    if (!uei) continue;
+    const site = e.coreData?.entityInformation?.entityURL?.trim() || null;
+    if (!out.get(uei)) out.set(uei, site);
+  }
+  return out;
+}
+
+/** UEIs per SAM request: the API returns 10 records a page and some UEIs have two, so 8 fit one page. */
+export const SAM_UEIS_PER_REQUEST = 8;
+
+/** The websites companies registered in SAM.gov, for up to SAM_UEIS_PER_REQUEST UEIs in ONE request (personal keys
+ *  allow 10 requests a day). UEIs SAM doesn't return are absent from the map. */
+export async function samWebsitesByUei(key: string, ueis: string[]): Promise<Map<string, string | null>> {
+  const list = ueis.filter((u) => /^[A-Z0-9]{12}$/.test(u)).slice(0, SAM_UEIS_PER_REQUEST);
+  if (!list.length) return new Map();
+  const res = await fetch(samUrl("entities", key, { ueiSAM: `[${list.join("~")}]`, includeSections: "entityRegistration,coreData", samRegistered: "Yes" }), { signal: AbortSignal.timeout(30_000) });
+  if (res.status === 429) throw new Error("SAM daily quota reached");
+  if (!res.ok) throw new Error(`SAM entities ${res.status}`);
+  return parseSamWebsites(await res.json());
+}

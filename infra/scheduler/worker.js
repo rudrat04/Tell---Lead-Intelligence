@@ -25,6 +25,7 @@
  * secret_token = TG_WEBHOOK_SECRET; requests without that header are refused, and only TELEGRAM_CHAT_ID is served).
  *   g:<id> / b:<id>  label good / bad (stored as tap:<id>, exactly like the email links)
  *   e:<id>           find email (queued as enrich:<id>, enrich.yml dispatched, as the email button)
+ *   cd:<id>          create draft (queued as draft:<id>, drafts.yml dispatched; the Sheet's /cd link does the same)
  *   br:<id> / dr:<id> send the brief / the email draft, which the digest stored with POST /tg-store (bearer LABEL_SECRET)
  * Extra secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TG_WEBHOOK_SECRET.
  */
@@ -35,8 +36,11 @@ import { sign } from "./sign.js";
 const SCHEDULE = {
   "*/30 * * * *": "tick.yml",    // every 30 minutes
   "0 2 * * *": "daily.yml",      // 07:30 IST: boards, gigs, scoring, digest
-  "15 22 * * 6": "boards.yml",   // Sunday 03:45 IST: weekly discovery
+  "15 22 * * 5": "boards.yml",   // Saturday 03:45 IST: weekly discovery
 };
+
+/** No scheduled runs on Sunday in India (IST = UTC+5:30). Clicks (Find email, Create draft) still run: you asked for them. */
+export const isSundayIst = (d = new Date()) => new Date(d.getTime() + 330 * 60_000).getUTCDay() === 0;
 
 async function dispatch(env, workflow) {
   const res = await fetch(`https://api.github.com/repos/${env.GH_REPO}/actions/workflows/${workflow}/dispatches`, {
@@ -69,6 +73,10 @@ async function valid(env, d, v, s) {
 
 async function validEnrich(env, d, s) {
   return !!env.LABEL_SECRET && UUID.test(d ?? "") && sameText(s, await sign(env.LABEL_SECRET, d, "enrich"));
+}
+
+async function validDraft(env, d, s) {
+  return !!env.LABEL_SECRET && UUID.test(d ?? "") && sameText(s, await sign(env.LABEL_SECRET, d, "draft"));
 }
 
 /** Read or ack queued requests ("<prefix>:<delivery id>" keys) for a job holding the secret. */
@@ -122,6 +130,36 @@ async function queueEnrich(env, ctx, d) {
   }
 }
 
+/** Queue a create-draft request and dispatch drafts.yml at most once a minute (Telegram "Create draft" and the Sheet link).
+ *  Drafts are written only on a click, so no tokens go to leads you never write to. */
+async function queueDraft(env, ctx, d) {
+  await env.LABELS.put(`draft:${d}`, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 7 });
+  const last = await env.LABELS.get("draft-dispatched-at");
+  if (!last || Date.now() - Number(last) > 60_000) {
+    await env.LABELS.put("draft-dispatched-at", String(Date.now()), { expirationTtl: 3600 });
+    ctx?.waitUntil(dispatch(env, "drafts.yml").catch(() => { /* the daily run picks the request up */ }));
+  }
+}
+
+async function createDraft(request, env, ctx) {
+  const url = new URL(request.url);
+  if (request.method === "GET") {
+    const d = url.searchParams.get("d"), s = url.searchParams.get("s");
+    if (!(await validDraft(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    return page("Create draft", `<p>Write the opening email for this lead?</p><p style="color:#6b7280;font-size:14px">One draft, checked against the lead's facts. It replaces this link in your Sheet's <b>Email draft</b> column.</p>
+<form method="post" action="/cd"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}">
+<button style="font-size:18px;padding:12px 24px;border-radius:8px;border:0;background:#1d4ed8;color:#fff">Create draft</button></form>`);
+  }
+  if (request.method === "POST") {
+    const f = await request.formData();
+    const d = f.get("d"), s = f.get("s");
+    if (!(await validDraft(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    await queueDraft(env, ctx, d);
+    return page("Writing the draft", "<p>Writing it now. It appears in your Sheet's <b>Email draft</b> column (and on Telegram) in about 2 minutes.</p>");
+  }
+  return new Response("method not allowed", { status: 405 });
+}
+
 /** Telegram cuts a message at 4,096 characters: send long text in parts, split at lines. */
 function tgParts(text, max = 4000) {
   const out = []; let cur = "";
@@ -148,11 +186,14 @@ async function telegram(request, env, ctx) {
     } else if (op === "e") {
       await queueEnrich(env, ctx, d);
       answer = "Finding the email: it appears in your Sheet in about 2 minutes";
+    } else if (op === "cd") {
+      await queueDraft(env, ctx, d);
+      answer = "Writing the draft: it arrives here in about 2 minutes";
     } else if (op === "br" || op === "dr") {
       const t = await env.LABELS.get(`tgtext:${d}`, "json");
       const text = op === "br" ? t?.brief : t?.draft;
       if (text) { for (const part of tgParts(text)) await tgApi(env, "sendMessage", { chat_id: chat, text: part, disable_web_page_preview: true, reply_to_message_id: q.message?.message_id }); answer = "Sent below"; }
-      else answer = op === "br" ? "No brief for this lead" : "No draft for this lead (it is in your Sheet when written)";
+      else answer = op === "br" ? "No brief for this lead" : "No draft yet: tap Create draft";
     }
   }
   await tgApi(env, "answerCallbackQuery", { callback_query_id: q.id, text: answer });
@@ -177,6 +218,11 @@ async function labels(request, env, ctx) {
     return queue(request, env, "enrich");
   }
   if (url.pathname === "/e") return enrich(request, env, ctx);
+  if (url.pathname === "/cd") return createDraft(request, env, ctx);
+  if (url.pathname === "/draft-requests" || url.pathname === "/draft-requests/ack") {
+    if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
+    return queue(request, env, "draft");
+  }
   if (url.pathname === "/taps" || url.pathname === "/taps/ack") {
     if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
     if (url.pathname === "/taps/ack") {
@@ -217,6 +263,7 @@ export default {
   async scheduled(event, env, ctx) {
     const workflow = SCHEDULE[event.cron];
     if (!workflow) throw new Error(`no workflow mapped for cron "${event.cron}"`);
+    if (isSundayIst(new Date(event.scheduledTime ?? Date.now()))) return; // Sunday (IST): nothing runs
     ctx.waitUntil(dispatch(env, workflow));
   },
   // Visiting the Worker URL shows only that it is alive (no dispatch, nothing secret).

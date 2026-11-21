@@ -148,6 +148,13 @@
       "when": 1795257463686,
       "tag": "0020_account_buyers",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795280266812,
+      "tag": "0021_opportunities",
+      "breakpoints": true
     }
   ]
 }

@@ -37,3 +37,20 @@ describe("people search hits", () => {
     expect(acceptPeopleHit(parseExaPerson(exa("A B", [{ title: "Head of Marketing", company: "Acme Labs, Inc." }]))!, "Acme Labs", "acmelabs.com", marketing)).not.toBeNull();
   });
 });
+
+import { isSameCompany, titleFitsCompany, companyInTitle } from "./contacts.js";
+describe("same company, not a look-alike", () => {
+  it("a one-word name counts only when the website is that word", () => {
+    expect(isSameCompany("Proseware", "Proseware", "proseware-steels.example.in")).toBe(false); // a founder "at Proseware" may be anywhere
+    expect(isSameCompany("Proseware", "Proseware", "proseware.example")).toBe(true);
+    expect(isSameCompany("Proseware Steels", "Proseware Steels", "proseware-steels.example.in")).toBe(true);
+    expect(isSameCompany("ProsewareSteels", "Proseware", "proseware-steels.example.in")).toBe(true);
+  });
+  it("a title naming another company rejects a person found by domain", () => {
+    expect(companyInTitle("Founder | Studio Harbor Design")).toBe("Studio Harbor Design");
+    expect(companyInTitle("CEO at Acme Builders")).toBe("Acme Builders");
+    expect(titleFitsCompany("Founder | Studio Harbor Design", "Harbor Design Builders, LLC", "harbor-design.example")).toBe(false);
+    expect(titleFitsCompany("President at Harbor Design Builders", "Harbor Design Builders, LLC", "harbor-design.example")).toBe(true);
+    expect(titleFitsCompany("Chief Executive Officer", "Harbor Design Builders", "harbor-design.example")).toBe(true);
+  });
+});

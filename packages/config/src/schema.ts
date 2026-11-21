@@ -764,6 +764,182 @@ export const DeliverySchema = z.object({
   }).default({ next_step: "a short call", signature: "", max_words: 110 }),
 });
 
+/**
+ * Opportunities (opportunities.yaml, Nov 21 2026): the event and the prospect are different companies. An event (a
+ * federal contract ending) is an opportunity for OTHER companies (contractors who can bid on its recompete); a roster
+ * lists those companies, proven by their own record (past federal awards in the same NAICS codes), and code matches
+ * each event to roster members. The company behind the event is never the prospect for its own event.
+ */
+export const SET_ASIDE_FAMILIES = ["8a", "sdvosb", "wosb", "hubzone", "small_business"] as const;
+export type SetAsideFamily = (typeof SET_ASIDE_FAMILIES)[number];
+/** USASpending set_aside_type_codes per family (the award search can filter on them but never returns them, so each
+ *  family is queried on its own and the rows carry the family they were found under) */
+export const SET_ASIDE_CODES: Record<SetAsideFamily, string[]> = {
+  "8a": ["8A", "8AN"], sdvosb: ["SDVOSBC", "SDVOSBS"], wosb: ["WOSB", "WOSBSS", "EDWOSB", "EDWOSBSS"], hubzone: ["HZC", "HZS"], small_business: ["SBA", "SBP"],
+};
+const naicsCode = z.string().regex(/^(\d{2}|\d{4}|\d{6})$/, "NAICS must be 2, 4 or 6 digits");
+
+const UsaRosterSchema = z.object({
+  /** usaspending_awardees: companies that won federal contracts in these NAICS codes (their awards are the proof) */
+  kind: z.literal("usaspending_awardees"),
+  label: z.string().min(1),
+  /** the industry roster companies are filed under (industries.yaml) */
+  segment: z.string().min(1),
+  naics: z.array(naicsCode).min(1),
+  /** set-aside families also queried, so a member's eligibility is known from what it won */
+  set_asides: z.array(z.enum(SET_ASIDE_FAMILIES)).default([]),
+  /** keep only companies that won at least one set-aside (= small businesses; drops the primes that win everything) */
+  small_business_only: z.boolean().default(true),
+  lookback_days: z.number().int().min(90).max(3650).default(1095),
+  /** awards a company needs in the window to be on the roster (repeat winners know how to capture) */
+  min_awards: z.number().int().min(1).default(2),
+  min_amount: z.number().min(0).default(100_000),
+  /** pages of 100 awards per NAICS code x set-aside family */
+  max_pages: z.number().int().min(1).max(10).default(2),
+  refresh_days: z.number().int().min(1).default(30),
+  /** company-name lookups per run (inside sources.niche.daily_budget for Exa; free resolvers first) */
+  per_run: z.number().int().min(0).max(200).default(20),
+});
+
+const SearchRosterSchema = z.object({
+  /** company_search: companies a company search finds for these queries (Exa, category company); each result carries
+   *  its own website, so resolving it costs no further search. The description must match `must` (what they sell). */
+  kind: z.literal("company_search"),
+  label: z.string().min(1),
+  segment: z.string().min(1),
+  /** where members' HQ may be (region names: India, United States of America) */
+  regions: z.array(z.string()).min(1),
+  queries: z.array(z.string().min(5)).min(1),
+  /** the company's own description must match this (keeps a directory or a buyer out of a supplier roster) */
+  must: pattern.optional(),
+  exclude: pattern.optional(),
+  results_per_query: z.number().int().min(1).max(25).default(10),
+  /** each query is searched again after this many days */
+  refresh_days: z.number().int().min(1).default(90),
+  per_run: z.number().int().min(0).max(200).default(30),
+});
+
+const ImportRosterSchema = z.object({
+  /** import: your own list (`pnpm opps import <roster> <file.csv>`, local only): name, website, region, description */
+  kind: z.literal("import"),
+  label: z.string().min(1),
+  segment: z.string().min(1),
+  regions: z.array(z.string()).min(1),
+  refresh_days: z.number().int().min(1).default(365),
+  per_run: z.number().int().min(0).max(200).default(30),
+});
+
+export const RosterSchema = z.discriminatedUnion("kind", [UsaRosterSchema, SearchRosterSchema, ImportRosterSchema]);
+
+const OppBase = {
+  label: z.string().min(1),
+  /** the roster whose members can benefit */
+  roster: z.string().min(1),
+  /** buyers.yaml titles to reach at a beneficiary, first = preferred */
+  buyers: z.array(z.string()).default([]),
+  /** one line on why the event matters to a beneficiary (shown on the lead, given to the draft writer) */
+  angle: z.string().default(""),
+  /** what could follow, said with care (the brief's "What could follow"); empty = a sentence for the kind */
+  follow: z.string().default(""),
+  /** events are re-read every N days and live while seen in the last 3 refreshes */
+  refresh_days: z.number().int().min(1).default(7),
+};
+
+const UsaOppSchema = z.object({
+  /** usaspending_expiring: federal contracts ending in [min_days, max_days] = a recompete for other contractors */
+  kind: z.literal("usaspending_expiring"),
+  ...OppBase,
+  /** empty = the roster's codes */
+  naics: z.array(naicsCode).default([]),
+  /** set-aside families queried on their own; a set-aside event only matches members that won that family before */
+  set_asides: z.array(z.enum(SET_ASIDE_FAMILIES)).default([]),
+  min_days: z.number().int().min(0).default(90),
+  max_days: z.number().int().min(1).default(365),
+  min_amount: z.number().min(0).default(1_000_000),
+  /** pages of 100 per NAICS code x set-aside family. USASpending can't filter on the end date, so contracts are read
+   *  latest end date first until they fall before the window (541512 with no set-aside needs ~35 pages) */
+  max_pages: z.number().int().min(1).max(60).default(40),
+  /** a match needs a contract won with the same agency (capture teams pursue agencies they know) */
+  require_agency: z.boolean().default(true),
+  /** orders under a vehicle (IDIQ task orders, GSA schedule orders) are recompeted among that vehicle's holders only:
+   *  off by default (a company off the vehicle can't bid) */
+  include_orders: z.boolean().default(false),
+  /** days to the end date when capture work pays most (timing is full inside, less outside) */
+  sweet_spot_days: z.tuple([z.number().int(), z.number().int()]).default([180, 365]),
+});
+
+/** shared by the general event kinds (news, signals): who may benefit and how to tell a good fit */
+const GeneralOpp = {
+  ...OppBase,
+  /** events older than this don't count */
+  max_age_days: z.number().int().min(1).max(365).default(30),
+  /** where beneficiaries may be; empty = the event's own region (a US drug approval can be an opening for an Indian
+   *  API maker: [India]) */
+  beneficiary_regions: z.array(z.string()).default([]),
+  /** words in a member's description that make it a closer fit for these events (what they sell) */
+  keywords: z.array(z.string().min(2)).default([]),
+  /** events to reuse from another opportunity (same news, another roster: no second search) */
+  events_from: z.string().optional(),
+};
+
+const NewsOppSchema = z.object({
+  /** news: headlines found by these queries (Serper news), the company before the verb is who the event is about
+   *  (never resolved: it is not the prospect) */
+  kind: z.literal("news"),
+  ...GeneralOpp,
+  queries: z.array(z.string().min(3)).default([]),
+  /** the verb phrase after the company name, as a regex ("sets up|expands|to invest") */
+  verbs: z.string().default("announces|plans|launches|opens|expands"),
+  /** the headline must match this too */
+  must: pattern.optional(),
+  exclude: pattern.optional(),
+  /** the event's region and the news country code */
+  region: z.string().default("India"),
+  country: z.string().default("in"),
+  /** 1-5: how strong one such event is */
+  strength: z.number().int().min(1).max(5).default(3),
+});
+
+const SignalsOppSchema = z.object({
+  /** signals: signals the sources already collect (funding, approvals, permits, importers...); the account that has the
+   *  signal is who the event is about, never the prospect */
+  kind: z.literal("signals"),
+  ...GeneralOpp,
+  types: z.array(z.string()).min(1),
+  /** only signals at accounts in these industries / regions (empty = any) */
+  entity_segments: z.array(z.string()).default([]),
+  entity_regions: z.array(z.string()).default([]),
+});
+
+export const OpportunitySchema = z.discriminatedUnion("kind", [UsaOppSchema, NewsOppSchema, SignalsOppSchema]);
+
+export const OpportunitiesSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** events collected in the last N days count toward a beneficiary */
+  window_days: z.number().int().min(1).default(60),
+  max_leads: z.number().int().min(0).max(50).default(10),
+  /** display score floor (0-100), 0 = off */
+  min_score: z.number().int().min(0).max(100).default(0),
+  /** candidates searched for contacts = max_leads x this */
+  pool_multiplier: z.number().int().min(1).max(5).default(2),
+  /** a delivered beneficiary comes back before this only with an event first seen after the delivery */
+  redeliver_after_days: z.number().int().min(1).default(30),
+  /** people searches per run for beneficiaries nobody is known at */
+  max_people_searches: z.number().int().min(0).default(20),
+  /** leads one opportunity may take in a day (federal contracts carry dollar amounts and would fill every slot);
+   *  the pool is filled round-robin across opportunities, strongest first in each */
+  max_per_opportunity: z.number().int().min(1).max(50).default(2),
+  /** Serper news searches a day for news events (usage_daily "serper_opps"; queries rotate across days) */
+  news_per_day: z.number().int().min(0).max(100).default(10),
+  /** Exa company searches a day for company_search rosters (usage_daily "exa_roster"; queries rotate) */
+  search_per_day: z.number().int().min(0).max(100).default(8),
+  rosters: z.record(z.string(), RosterSchema).default({}),
+  opportunities: z.record(z.string(), OpportunitySchema).default({}),
+});
+export type Opportunities = z.infer<typeof OpportunitiesSchema>;
+export type Roster = z.infer<typeof RosterSchema>;
+export type OpportunityDef = z.infer<typeof OpportunitySchema>;
+
 /** Code critic (plan 8f): drops leads that should never reach you. Every field optional so older packs still load. */
 export const CriticSchema = z.object({
   /** a company selling what you sell (agency, outsourced SDRs, staffing): matched on name, domain and homepage title */
@@ -854,7 +1030,33 @@ export const PackSchema = z.object({
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
   capabilities: CapabilitiesSchema.default({ capabilities: [] }),
   modules: ModulesSchema.default({ modules: [] }),
+  opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, rosters: {}, opportunities: {} }),
 }).superRefine((p, ctx) => {
+  {
+    const o = p.opportunities, titles = new Set(p.icp.personas.map((x) => x.title));
+    const admittedSegs = new Set(p.icp.hard_filters.industries_any.map((x) => p.icp.segment_map[x]).filter(Boolean));
+    for (const [id, r] of Object.entries(o.rosters)) {
+      if (!admittedSegs.has(r.segment)) ctx.addIssue({ code: "custom", path: ["opportunities", "rosters", id, "segment"], message: `segment "${r.segment}" is not an industry the ICP admits` });
+    }
+    for (const [id, op] of Object.entries(o.opportunities)) {
+      const r = o.rosters[op.roster];
+      const path = ["opportunities", "opportunities", id];
+      if (!r) ctx.addIssue({ code: "custom", path: [...path, "roster"], message: `unknown roster "${op.roster}" (rosters: ${Object.keys(o.rosters).join(", ") || "none"})` });
+      if (op.kind === "usaspending_expiring") {
+        if (r && r.kind !== "usaspending_awardees") ctx.addIssue({ code: "custom", path: [...path, "roster"], message: "a usaspending_expiring opportunity needs a usaspending_awardees roster" });
+        if (r?.kind === "usaspending_awardees") for (const f of op.set_asides) if (!r.set_asides.includes(f)) ctx.addIssue({ code: "custom", path: [...path, "set_asides"], message: `set-aside "${f}" events can never match: roster "${op.roster}" doesn't query that family, so no member is known to be eligible` });
+        if (op.min_days >= op.max_days) ctx.addIssue({ code: "custom", path: [...path, "min_days"], message: "min_days must be below max_days" });
+      } else {
+        if (r?.kind === "usaspending_awardees") ctx.addIssue({ code: "custom", path: [...path, "roster"], message: "news / signals events match company_search or import rosters (federal awardees only match federal contracts)" });
+        if (op.events_from) {
+          const src = o.opportunities[op.events_from];
+          if (!src || src.kind === "usaspending_expiring" || src.events_from) ctx.addIssue({ code: "custom", path: [...path, "events_from"], message: `events_from must name a news / signals opportunity that collects its own events` });
+        } else if (op.kind === "news" && !op.queries.length) ctx.addIssue({ code: "custom", path: [...path, "queries"], message: "a news opportunity needs queries (or events_from)" });
+        if (op.kind === "signals") for (const t of op.types) if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: [...path, "types"], message: `unknown signal type "${t}"` });
+      }
+      for (const t of op.buyers) if (!titles.has(t)) ctx.addIssue({ code: "custom", path: ["opportunities", "opportunities", id, "buyers"], message: `unknown buyer "${t}"` });
+    }
+  }
   p.modules.modules.forEach((m, i) => {
     for (const seg of m.industries) if (!p.icp.industries[seg]) ctx.addIssue({ code: "custom", path: ["modules", i, "industries"], message: `unknown industry "${seg}"` });
     const ids = m.changes.map((c) => c.id);
@@ -1003,4 +1205,4 @@ export function leadCap(pack: Pick<Pack, "delivery">): number {
   if (g.length) return g.reduce((n, x) => n + x.max_leads, 0);
   return pack.delivery.digest.max_leads === 0 ? Infinity : pack.delivery.digest.max_leads;
 }
-export const PACK_FILES = ["pack", "icp", "industries", "capabilities", "modules", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;
+export const PACK_FILES = ["pack", "icp", "industries", "capabilities", "modules", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy", "opportunities"] as const;

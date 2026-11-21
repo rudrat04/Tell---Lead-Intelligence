@@ -53,12 +53,12 @@ export function parseExaCompanies(j: unknown): CompanyHit[] {
 }
 
 /** Exa company search for a domain (~1 search credit). The caller must check the result's website is that domain. */
-export async function exaCompanySearch(domain: string, apiKey = process.env.EXA_API_KEY): Promise<CompanyHit[]> {
+export async function exaCompanySearch(domain: string, apiKey = process.env.EXA_API_KEY, numResults = 3): Promise<CompanyHit[]> {
   if (!apiKey) throw new Error("EXA_API_KEY is not set");
   const res = await fetch("https://api.exa.ai/search", {
     method: "POST",
     headers: { "x-api-key": apiKey, "content-type": "application/json" },
-    body: JSON.stringify({ query: domain, category: "company", type: "auto", numResults: 3 }),
+    body: JSON.stringify({ query: domain, category: "company", type: "auto", numResults }),
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`Exa company search ${res.status}`);

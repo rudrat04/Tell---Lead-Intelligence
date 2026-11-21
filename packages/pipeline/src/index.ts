@@ -31,3 +31,4 @@ export * from "./judge.js";
 export * from "./buyer-signals.js";
 export * from "./market-lookups.js";
 export * from "./email-apis.js";
+export * from "./opportunities.js";

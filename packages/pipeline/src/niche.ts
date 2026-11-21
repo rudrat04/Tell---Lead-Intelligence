@@ -165,7 +165,8 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
       if (seed && !seed.fitPass && !seed.reason?.startsWith("deferred") && seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < RETRY_DAYS * DAY) continue;
       // the free ways (Wikidata, Maps, web) already failed for this name this week: only Exa is left to try
       const freeTried = seed?.reason === `deferred:${FREE_RESOLVERS}` && !!seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < FREE_RETRY_DAYS * DAY;
-      if (freeTried && searches >= cap) { res.capped++; await enqueue(seedSource, k, recs); continue; }
+      // (a record that brings its own website, e.g. SAM's by UEI, is always worth one try: no search needed)
+      if (freeTried && searches >= cap && !r0.website) { res.capped++; await enqueue(seedSource, k, recs); continue; }
       res.looked++;
       const v = await resolve(r0, searches < cap, freeTried).catch(() => ({ reason: "error" } as Verdict));
       // nothing could look it up today (Exa's cap spent, the free ways found nothing): keep it for the next budget, and
