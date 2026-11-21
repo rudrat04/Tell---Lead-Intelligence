@@ -89,3 +89,15 @@ export async function fetchCompletedTrials(since: Date, max = 300): Promise<Comp
   }
   return out.slice(0, max);
 }
+
+/** Industry-sponsored trials matching keywords (a condition, a molecule, a device type), completed or started since
+ *  `since`, newest first. */
+export async function searchTrials(keywords: string[], since: Date, max = 40): Promise<CompletedTrial[]> {
+  if (!keywords.length) return [];
+  const words = keywords.slice(0, 4).map((k) => `"${k.replace(/"/g, "")}"`).join(" OR ");
+  const term = `(${words}) AND AREA[LeadSponsorClass]INDUSTRY AND AREA[LastUpdatePostDate]RANGE[${since.toISOString().slice(0, 10)},MAX]`;
+  const q = new URLSearchParams({ "query.term": term, "filter.overallStatus": "COMPLETED|RECRUITING|ACTIVE_NOT_RECRUITING", fields: "NCTId,BriefTitle,LeadSponsorName,CompletionDate,InterventionType,InterventionName,LocationCountry,Phase", pageSize: String(Math.min(max, 100)), sort: "LastUpdatePostDate:desc" });
+  const res = await fetch(`https://clinicaltrials.gov/api/v2/studies?${q}`, { headers: { "user-agent": userAgent(), accept: "application/json" }, signal: AbortSignal.timeout(45_000) });
+  if (!res.ok) throw new Error(`clinicaltrials ${res.status}`);
+  return parseTrials(await res.json()).slice(0, max);
+}

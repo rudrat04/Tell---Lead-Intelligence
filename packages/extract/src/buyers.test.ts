@@ -5,7 +5,7 @@ import { analyzeLead, validateAnalysis, analystUserPrompt, type AnalystInput } f
 
 const base = await loadFixturePack();
 const ind = (label: string) => ({ label, aliases: [], description: `${label} companies`, buyers: [], list: "manual" as const, excluded: false });
-const change = (id: string, whose: "customers" | "competitors" | "channel" | "market", industries: string[] = []) => ({ id, title: `${id} title`, whose, signals: ["funding_raise"], industries, why: "why it matters here", action: "what to do about it" });
+const change = (id: string, whose: "customers" | "competitors" | "channel" | "market", industries: string[] = []) => ({ id, title: `${id} title`, whose, signals: ["funding_raise"], industries, live: "db" as const, why: "why it matters here", action: "what to do about it" });
 const pack: Pack = { ...base, icp: { ...base.icp, industries: { pharma: ind("Pharma"), food: ind("Food"), consumer: { ...ind("Consumer"), excluded: true } } },
   modules: { modules: [{ id: "pharma_market", title: "Pharma market watch", industries: ["pharma"], offer: "a weekly watch on your market", changes: [change("biotechs_funded", "customers"), change("rival_approvals", "competitors"), change("supply_gaps", "market", ["pharma"])] }] } };
 

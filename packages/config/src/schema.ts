@@ -120,6 +120,12 @@ export const ModuleChangeSchema = z.object({
   signals: z.array(z.string()).min(1),
   /** where those companies are; customers: empty = the industries the research says pay them; channel / market need it */
   industries: z.array(z.string()).default([]),
+  /** where its examples come from: `db` (signals already collected; default), or a live lookup made for this lead with
+   *  its product words and places: contracts_ending / awards (USASpending), fda_shortages / fda_approvals / fda_recalls
+   *  (openFDA), trials (ClinicalTrials.gov), news (Serper news, capped by sources.niche.market_news_per_day) */
+  live: z.enum(["db", "contracts_ending", "awards", "fda_shortages", "fda_approvals", "fda_recalls", "trials", "news"]).default("db"),
+  /** news lookups: the query, with {keywords} (their product words, OR-ed) and {place} (their first place) */
+  news: z.string().optional(),
   /** an example's quote must match this (e.g. "hospital|clinic|lab|beds": a new home-care NPI is not a hospital opening) */
   must: z.string().optional(),
   /** why it matters to them, plain */
@@ -502,6 +508,8 @@ export const SourcesSchema = z.object({
       segments: z.record(z.string(), z.string()).default({ DRUG: "pharma", BIOLOGICAL: "pharma", DEVICE: "medtech", DIAGNOSTIC_TEST: "medtech" }),
       max_trials: z.number().int().min(10).max(1000).default(300),
     }).optional(),
+    /** news searches per day for market plays (live: news changes in modules.yaml; usage_daily "serper_market") */
+    market_news_per_day: z.number().int().min(0).max(500).default(20),
     /** how names become websites besides Exa and Maps: Wikidata (free, established companies) and Google web results
      *  via Serper (SERPER_API_KEY, paid per search: `web_per_day` 0 = off) */
     resolvers: z.object({
@@ -622,7 +630,7 @@ export const SourcesSchema = z.object({
       region: z.string().default("United States of America"),
     })).default([]),
   }).default({
-    per_run: 25, per_run_by_source: {}, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4, imports: [], keyword_awards: [], resolvers: { wikidata: true, web_per_day: 0 },
+    per_run: 25, per_run_by_source: {}, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4, market_news_per_day: 20, imports: [], keyword_awards: [], resolvers: { wikidata: true, web_per_day: 0 },
     fda_shortage: { enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 },
     usaspending: { enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" },
     cms_new_providers: { enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" },

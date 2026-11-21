@@ -183,14 +183,14 @@ export function parseAwards(results: unknown[], naics: string, from: Date, to: D
  * date, so awards with any action in the last two years are read newest end date first, page by page, until end dates fall
  * before the window.
  */
-export async function fetchExpiringAwards(opts: { naics: string; setAsides: string[]; from: Date; to: Date; minAmount: number; maxPages: number; now?: Date }): Promise<ExpiringAward[]> {
+export async function fetchExpiringAwards(opts: { naics: string | null; keywords?: string[]; setAsides: string[]; from: Date; to: Date; minAmount: number; maxPages: number; now?: Date }): Promise<ExpiringAward[]> {
   const now = opts.now ?? new Date();
   const start = new Date(now.getTime() - 2 * 365 * 86_400_000).toISOString().slice(0, 10);
   const out: ExpiringAward[] = [];
   for (let page = 1; page <= opts.maxPages; page++) {
     const body = {
       filters: {
-        award_type_codes: ["A", "B", "C", "D"], naics_codes: [opts.naics],
+        award_type_codes: ["A", "B", "C", "D"], ...(opts.naics ? { naics_codes: [opts.naics] } : {}), ...(opts.keywords?.length ? { keywords: opts.keywords } : {}),
         ...(opts.setAsides.length ? { set_aside_type_codes: opts.setAsides } : {}),
         time_period: [{ start_date: start, end_date: now.toISOString().slice(0, 10) }],
       },
@@ -200,7 +200,7 @@ export async function fetchExpiringAwards(opts: { naics: string; setAsides: stri
     const j = (await json("https://api.usaspending.gov/api/v2/search/spending_by_award/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })) as
       { results?: Record<string, unknown>[]; page_metadata?: { hasNext?: boolean } } | null;
     const rows = j?.results ?? [];
-    out.push(...parseAwards(rows, opts.naics, opts.from, opts.to, opts.minAmount));
+    out.push(...parseAwards(rows, opts.naics ?? "", opts.from, opts.to, opts.minAmount));
     const last = rows.at(-1)?.["End Date"];
     if (!j?.page_metadata?.hasNext || (typeof last === "string" && new Date(`${last}T00:00:00Z`) < opts.from)) break;
     await sleep(500);
