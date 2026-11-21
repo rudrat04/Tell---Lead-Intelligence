@@ -121,3 +121,38 @@ export function toCsv(rows: ListRow[]): string {
   const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   return [cols.join(","), ...rows.map((r) => cols.map((c) => esc(r[c])).join(","))].join("\n") + "\n";
 }
+
+/**
+ * A small proof sample for the opening email (the analyst's evidence): the real total and 2-3 rows from the list the
+ * lead's free step names, as one quote. The full list stays with you (it's what you show on the call). Null when the
+ * lead's evidence lacks the list's inputs or the source returns nothing.
+ */
+export async function proofSample(pack: Pack, kind: ListKind, quotes: string[], n = 3): Promise<{ quote: string; url: string } | null> {
+  const i = listInputs(quotes);
+  const top = <T>(xs: T[]) => xs.slice(0, n);
+  switch (kind) {
+    case "federal_buyers": {
+      const t = i.drug ?? i.device; if (!t) return null;
+      let rows = await federalBuyers(t); const short = t.split(/\s+/)[0]!;
+      if (rows.length < 10 && short.length >= 5 && short !== t) { const w = await federalBuyers(short); if (w.length > rows.length) rows = w; }
+      if (!rows.length) return null;
+      return { quote: `Public contract data (USASpending, last 3 years): ${rows.length} buyer and supplier pairs for ${t}. For example: ${top(rows).map((r) => `${r.buyer} buying through ${r.supplier} (${r.contracts} contracts, latest ${r.latest})`).join("; ")}.`, url: "https://www.usaspending.gov/search" };
+    }
+    case "anda_holders": {
+      if (!i.drug) return null; const rows = await andaHolders(i.drug); if (!rows.length) return null;
+      return { quote: `FDA records: ${rows.length} companies hold ANDAs for ${i.drug}. For example: ${top(rows).map((r) => `${r.company} (${r.andas} ANDAs, ${r.markets_it === "yes" ? "markets it" : "not marketed"})`).join("; ")}.`, url: "https://www.accessdata.fda.gov/scripts/cder/daf/" };
+    }
+    case "hospitals": {
+      if (!i.state) return null; const rows = await hospitals(i.state, i.city); if (!rows.length) return null;
+      return { quote: `CMS records: ${rows.length} hospitals listed in ${i.state}. For example: ${top(rows).map((r) => `${r.hospital} (${r.city}, ${r.type})`).join("; ")}.`, url: "https://data.cms.gov/provider-data/" };
+    }
+    case "permits": {
+      if (!i.city) return null; const rows = await permits(pack, i.city); if (!rows.length) return null;
+      return { quote: `City permit records, last 30 days in ${i.city}: ${rows.length} large permitted projects. For example: ${top(rows).map((r) => String(r.project)).join(" ")}`, url: "https://www.usaspending.gov/" };
+    }
+    case "recompetes": {
+      if (!i.naics) return null; const rows = await recompetes(pack, i.naics); if (!rows.length) return null;
+      return { quote: `USASpending: at least ${rows.length} contracts in NAICS ${i.naics} end in the next 12 months. For example: ${top(rows).map((r) => `${r.incumbent}, ${r.agency}, ${r.value}, ends ${r.ends}`).join("; ")}.`, url: "https://www.usaspending.gov/search" };
+    }
+  }
+}

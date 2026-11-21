@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Pack } from "@tell/config";
-import { WriterClient, WRITER_MODEL, writerEffort, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
+import { WriterClient, HaikuClient, WRITER_MODEL, writerEffort, analyzeLead, analystSystemPrompt, type Analysis, type AnalystInput, type LlmClient } from "@tell/extract";
 import type { Contact } from "@tell/people";
 import type { RankInput } from "@tell/intel";
 import { getDb, analyses, and, inArray } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
+import { proofSample } from "./sample-list.js";
 import type { ScoredAccount } from "./score.js";
 
 /** Evidence items the analyst sees per lead (strongest first). */
@@ -23,7 +24,7 @@ function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefin
   return {
     key, refs,
     input: {
-      company: a.name ?? a.domain, domain: a.domain,
+      company: a.name ?? a.domain, domain: a.domain, segment: a.segment,
       facts: [a.sizeBand && `${a.sizeBand} people`, a.segment?.toUpperCase(), a.region].filter(Boolean).join(", "),
       contactRole: contact?.person.role ?? contact?.persona ?? null,
       // a play without its own offer uses its industry's (industries.yaml), unless that industry gets the GTM review
@@ -80,12 +81,27 @@ export async function analyzeLeads(
     if (remaining <= 0) return { ...res, skipped: "daily writer cap reached" };
     llm = writer = new WriterClient({ capUsd: remaining, effort: writerEffort() });
   }
+  // the reply check runs on Haiku (fractions of a cent per draft), within the Haiku daily cap
+  let critic: HaikuClient | null = null;
+  if (!opts.llm && process.env.ANTHROPIC_API_KEY) {
+    const hcap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1), left = hcap - (await (usage ?? neonUsage()).spentToday("haiku"));
+    if (left > 0) critic = new HaikuClient({ capUsd: Math.min(left, 0.2) });
+  }
   try {
     for (const p of todo) {
+      // proof: a small real sample from the public list the play's free step names (2-3 rows + the true total)
+      const free = p.l.score.plays.find((x) => x.free)?.free;
+      const kind = free ? pack.capabilities.capabilities.find((c) => c.id === free)?.list : undefined;
+      if (kind) {
+        try {
+          const sample = await proofSample(pack, kind, p.input.evidence.map((e) => e.quote));
+          if (sample) p.input.evidence.push({ type: "public_record_sample", ageDays: 0, current: true, quote: sample.quote, url: sample.url });
+        } catch { /* the email goes without a sample */ }
+      }
       let a: Analysis | null = null;
       // TELL_DEBUG_DRAFTS=1 (local only: it prints lead details) shows why drafts were rejected
       const debug = process.env.TELL_DEBUG_DRAFTS && !process.env.CI ? (r: string) => console.error(`[draft rejected] ${p.input.company}: ${r}`) : undefined;
-      try { a = await analyzeLead(llm, pack, p.input, debug); } catch (e) { debug?.(`error: ${(e as Error).message}`); }
+      try { a = await analyzeLead(llm, pack, p.input, debug, critic ?? undefined); } catch (e) { debug?.(`error: ${(e as Error).message}`); }
       if (!a) { res.failed++; continue; }
       out.set(p.l.account.id, a);
       res.fresh++;
@@ -99,6 +115,7 @@ export async function analyzeLeads(
     }
   } finally {
     if (writer) { res.spentUsd = writer.spent; await usage?.addSpend(WRITER_USAGE, writer.spent, cap); }
+    if (critic && critic.spent > 0) await usage?.addSpend("haiku", critic.spent, Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
   }
   return res;
 }

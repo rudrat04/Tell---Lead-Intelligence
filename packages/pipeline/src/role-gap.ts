@@ -20,7 +20,10 @@ export async function checkRoleGaps(
   accountIds: string[], pack: Pack, opts: { search?: PeopleSearch | null; max?: number; now?: Date } = {},
 ): Promise<{ checked: number; gaps: number; changed: string[]; skipped?: string }> {
   const groups = pack.roles.gaps;
-  if (!Object.keys(groups).length || !pack.signals.signals.role_gap) return { checked: 0, gaps: 0, changed: [], skipped: "off (no roles.gaps / role_gap)" };
+  // owner check (Nov 2026): with roles.gaps set but no role_gap signal in the pack, the search only looks for people who
+  // already run the system; holders are saved (a core-role holder counts against the lead), absence says nothing
+  if (!Object.keys(groups).length) return { checked: 0, gaps: 0, changed: [], skipped: "off (no roles.gaps)" };
+  const emitGaps = !!pack.signals.signals.role_gap;
   const search = opts.search === undefined ? (process.env.EXA_API_KEY ? exaPeopleSearch() : null) : opts.search;
   if (!search || !accountIds.length) return { checked: 0, gaps: 0, changed: [], skipped: search ? "no accounts" : "no EXA_API_KEY" };
   const db = getDb();
@@ -36,7 +39,7 @@ export async function checkRoleGaps(
   const anyRole = [rolePattern(allTitles)];
   // the main titles of every group first (an Exa query reads the start best)
   const query = interleave(Object.values(groups)).slice(0, 12).join(", ");
-  const spec = pack.signals.signals.role_gap!;
+  const spec = pack.signals.signals.role_gap;
   const changed: string[] = [];
   let gaps = 0, checked = 0;
   for (const id of due) {
@@ -58,7 +61,8 @@ export async function checkRoleGaps(
       }))).onConflictDoUpdate({ target: [people.accountId, people.fullName, people.source], set: { role: sql`excluded.role`, fetchedAt: sql`excluded.fetched_at` } });
     }
     const url = `https://${a.domain}/#role_gap`;
-    if (v.missing.length) {
+    if (!emitGaps || !spec) { /* owner check only */ }
+    else if (v.missing.length) {
       gaps++;
       // a state: first detection keeps observed_at, every detection moves last_seen_at (current while seen)
       await db.insert(signals).values({ accountId: id, class: spec.class, type: "role_gap", strength: spec.strength, evidenceQuote: gapQuote(v).slice(0, 500),

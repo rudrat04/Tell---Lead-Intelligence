@@ -48,7 +48,7 @@ ${caps}
 Score each scale 0-5 with these anchors, and cite the evidence indexes behind every score above 2:
 - specific: 1 = a vague pattern (one generic role open) · 3 = a clear situation (sales hires with nobody running the system) · 5 = a concrete record naming them (their contract ends June 2027; their approved ANDA for a shortage drug)
 - urgent: 1 = no clock · 3 = it matters this quarter (fresh hire, recent raise) · 5 = a dated window closing soon (shortage now, contract ending, launch next month)
-- prize: 0 = no amount anywhere · 3 = an amount in the evidence (a $2M contract, a Rs 120 crore order) · 5 = a large amount for a company this size. Never guess amounts.
+- prize (how much is at stake): 0 = nothing about scale · 2 = a push of several people at once (two or more sales / marketing roles open) · 3 = a stated amount or size in the evidence (a $2M contract, a Rs 120 crore order, a Rs 40 crore raise, 4 sales roles open, 25 trucks, a 120-person team) · 5 = large for a company this size. Never guess amounts or sizes.
 - deliverable: 1 = only a generic pitch · 3 = a useful free review of their setup · 5 = a free list built from the same public records, with its inputs (the drug, NAICS code, city or state) in the evidence
 
 Qualify when the evidence shows something worth acting on now (roughly specific 3+ and urgent 2+), and the need isn't already handled (owner in place, role just filled). Say problems as likely consequences ("usually means..."), never as facts. Never add facts, numbers, names or events that aren't in the evidence.
@@ -72,6 +72,9 @@ ${ev.map((e, i) => `[${i}] ${e.type.replace(/_/g, " ")}, ${e.current ? "current"
 
 const nums = (t: string) => [...t.toLowerCase().matchAll(/\d+(?:[.,]\d+)*/g)].map((m) => m[0]);
 const AMOUNT = /(\$|₹|rs\.?\s?|inr\s?|usd\s?)\s?[\d.,]+|\b[\d.,]+\s?(crore|cr|lakh|million|billion|mn|bn)\b|\$[\d.]+[kmb]\b/i;
+/** a stated size: "4 sales roles", "120 people", "25 power units", "3 buses", "two plants" */
+const SCALE = /\b(\d+|two|three|four|five|six|seven|eight|nine|ten)\s?(\+\s?)?(open\s)?(sales\s|marketing\s|new\s)?(roles?|positions?|openings?|people|employees|staff|sellers|reps|hires|power units|trucks|buses|locations|offices|branches|plants|factories|facilities|permits|stores|clinics|beds|units)\b/i;
+const HIRING = /role_open|first_role|contract_role|role_reposted|new_role/;
 
 /**
  * Check the judge's answer (pure; exported for tests). `listReady(list, quotes)` says whether a list generator has its
@@ -87,8 +90,13 @@ export function validateJudged(raw: string, ev: JudgeEvidence[], pack: Pack, lis
   const rubric: Rubric = { ...r.scores };
   // every score above 2 must stand on cited evidence; uncited high scores are cut to 2
   for (const k of ["specific", "urgent", "prize", "deliverable"] as const) if (rubric[k] > 2 && !valid(r.cites[k]).length) rubric[k] = 2;
-  // prize needs an amount in the quotes it cites
-  if (rubric.prize > 0 && !valid(r.cites.prize).some((i) => AMOUNT.test(ev[i]!.quote))) rubric.prize = Math.min(rubric.prize, valid(r.cites.prize).length ? 1 : 0);
+  // prize stands on an amount or a stated size in the quotes it cites; two or more cited hiring signals (a push of
+  // several people) count up to 2; anything else is at most 1
+  const pc = valid(r.cites.prize).map((i) => ev[i]!);
+  if (rubric.prize > 0 && !pc.some((e) => AMOUNT.test(e.quote) || SCALE.test(e.quote))) {
+    const push = pc.filter((e) => HIRING.test(e.type)).length >= 2;
+    rubric.prize = Math.min(rubric.prize, push ? 2 : pc.length ? 1 : 0);
+  }
   if (!r.qualifies) return { qualifies: false, reason: (r.reason ?? "no clear opportunity in the evidence").slice(0, 200), rubric };
   if (!r.title || !r.need || !r.angle || !r.offer) return { qualifies: false, reason: "judge play incomplete", rubric };
   const cites = valid(r.citations ?? []);

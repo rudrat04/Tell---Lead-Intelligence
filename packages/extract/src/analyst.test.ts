@@ -50,6 +50,11 @@ describe("analyst: invented numbers", () => {
     expect(validateAnalysis(JSON.stringify({ ...good, opener: "saw the AE role at an 11-50 person team." }), input)).not.toBeNull();
     expect(validateAnalysis(JSON.stringify({ ...good, opener: "your AE role has been open 52 days." }), input)).not.toBeNull();
   });
+  it("a code with letters before the digits (K260631) is the evidence's own number", () => {
+    const dev = { ...input, evidence: [{ type: "device_cleared", ageDays: 0, current: false, quote: "Acmemed received FDA 510(k) clearance K260631 for infusion sets.", url: "https://example.invalid/4" }] };
+    expect(validateAnalysis(JSON.stringify({ ...good, citations: [0], opener: "your clearance K260631 for infusion sets is through.", hypothesis: "K260631 clears their infusion sets, so the launch needs buyers." }), dev)).not.toBeNull();
+    expect(validateAnalysis(JSON.stringify({ ...good, citations: [0], opener: "your clearance K260632 is through.", hypothesis: "A new clearance needs buyers." }), dev)).toBeNull();
+  });
   it("money with a unit suffix ($3.2M, ₹40Cr) matches the same figure in the evidence; a different figure doesn't", () => {
     const money = { ...input, evidence: [{ type: "contract_expiring", ageDays: 0, current: true, quote: "Northwind's $3.2M contract ends June 2027.", url: "https://example.invalid/3" }] };
     const ok = { ...good, citations: [0], opener: "noticed your $3.2M contract wraps up in June 2027." };

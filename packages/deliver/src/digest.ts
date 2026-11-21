@@ -95,8 +95,11 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   // adds evidence (and can complete a play); a holder of a core role counts against the lead. Re-score when any changed.
   let gapNote = "need check: off";
   try {
-    const g = await checkRoleGaps([...new Set([...[...score.ranking.leads, ...score.ranking.watchlist].map((l) => l.account.id), ...score.gapCandidates])], pack);
-    gapNote = g.skipped ? `need check: ${g.skipped}` : `need check: ${g.checked} checked, ${g.gaps} with empty seats`;
+    // owner check: only accounts hiring sellers or marketers (where "who runs the system?" decides the lead)
+    const hiring = new Set(["adjacent_role_open", "first_role", "core_role_open", "core_role_open_45d", "contract_role", "role_reposted"]);
+    const pool = [...score.ranking.leads, ...score.ranking.watchlist].filter((l) => l.score.evidence.some((e) => hiring.has(e.type))).map((l) => l.account.id);
+    const g = await checkRoleGaps([...new Set([...pool, ...score.gapCandidates])], pack);
+    gapNote = g.skipped ? `owner check: ${g.skipped}` : pack.signals.signals.role_gap ? `need check: ${g.checked} checked, ${g.gaps} with empty seats` : `owner check: ${g.checked} checked`;
     if (g.changed.length) score = await scoreRun(false);
   } catch { gapNote = "need check failed"; }
   // no pack play fits: build one from the evidence (plays.build); a qualifying play makes the lead, "no need" drops it
