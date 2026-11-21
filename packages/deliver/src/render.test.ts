@@ -90,7 +90,7 @@ describe("sheet row", () => {
     expect(row.Timing).toBe(""); // only with the pack calendar
     expect(row["Enrich email"]).toBe(""); // only with a find-email link
     expect(row.Score).toMatch(/^\d+$/);
-    expect(row["ICP fit"]).toMatch(/^\d+$/);
+    expect(row["ICP fit" as never]).toBeUndefined(); // one score only (the judged one in judged mode)
     expect(row.LinkedIn).toBe("https://linkedin.com/in/riya");
     expect(row.Email).toBeUndefined(); // no address known: empty, not a guess
     const timed = leadSheetRow(result(1).ranking.leads[0]!, contact, "2026-11-13", undefined, "", undefined, pack.icp.calendar, "https://w.test/e?d=x&s=y");

@@ -1,6 +1,6 @@
 import type { Contact } from "@tell/people";
 import type { ScoreRunResult } from "@tell/pipeline";
-import { describe, scoreLine, emailText, type LeadNote } from "./render.js";
+import { describe, emailText, emailDraft, type LeadNote } from "./render.js";
 import { sendWindow, sendWindowText } from "@tell/intel";
 import type { Pack } from "@tell/config";
 
@@ -31,29 +31,48 @@ export function chunks(text: string, max = 4000): string[] {
   return out;
 }
 
-/** One lead as a Telegram message (pure; exported for tests). */
-export function leadMessage(l: Lead, c: Contact | null | undefined, n: LeadNote | undefined, deliveryId: string | null, date: string, pack: Pick<Pack, "icp">, test = false): TgMessage {
-  const a = l.account, s = l.score;
+/** The score in one short line: the judge's ratings in judged mode, else the number (pure; exported for tests). */
+export function tgScore(s: Lead["score"]): string {
+  const j = s.judged;
+  const n = Math.round(Math.max(0, Math.min(1, s.priority)) * 100);
+  return j ? `Score ${n} · specific ${j.rubric.specific}/5 · urgent ${j.rubric.urgent}/5 · prize ${j.rubric.prize}/5 · deliverable ${j.rubric.deliverable}/5` : `Score ${n}`;
+}
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+
+/** One lead as a Telegram message, in the order you vet it (pure; exported for tests): who they are, who to write to,
+ *  the play and angle, the signals that found them, the signals that would help them, the email draft. */
+export function leadMessage(l: Lead, c: Contact | null | undefined, n: LeadNote | undefined, deliveryId: string | null, date: string, pack: Pick<Pack, "icp"> & Partial<Pick<Pack, "copy" | "delivery">>, test = false): TgMessage {
+  const a = l.account, s = l.score, play = s.plays[0];
+  const facts = [a.segment && cap(a.segment), a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).join(" · ");
+  const draft = n?.email ? emailDraft(c, n, pack.delivery?.email.signature ?? "", pack.copy?.greeting ?? "Hi {first},") : "";
   const lines = [
-    `<b>${link(`https://${a.domain}`, a.name ?? a.domain)}</b>${a.region ? ` · ${tgEsc(a.region)}` : ""}${a.segment ? ` · ${tgEsc(a.segment)}` : ""}`,
-    tgEsc(scoreLine(s)),
+    `🏢 <b>${link(`https://${a.domain}`, a.name ?? a.domain)}</b>`,
+    ...(facts ? [tgEsc(facts)] : []),
+    tgEsc(tgScore(s)),
     ...(a.description ? [`<i>${tgEsc(a.description)}</i>`] : []),
     "",
-    ...(s.plays[0] ? [`<b>Play:</b> ${tgEsc(s.plays[0].title)}`] : []),
-    ...(l.backReason ? [`<b>Back:</b> ${tgEsc(l.backReason)}`] : []),
-    ...s.drivers.filter((x) => x.type !== "role_gap").slice(0, 3).map((x) => `• ${link(x.url, describe(x))}`),
-    ...(n?.angle ? [`<b>Angle:</b> ${tgEsc(n.angle)}`] : []),
+    `👤 <b>Reach out to:</b> ${c ? `${tgEsc(c.person.name)}${c.person.role ? `, ${tgEsc(c.person.role)}` : ""}` : "nobody found yet"}`,
+    ...(c?.persona ? [`Buyer type: ${tgEsc(c.persona)}`] : []),
+    ...(c && emailText(c.person) ? [`✉️ ${tgEsc(emailText(c.person)!)}`] : c?.generic ? [`✉️ ${tgEsc(c.generic)} (shared inbox)`] : []),
+    ...(c?.person.linkedin ? [link(c.person.linkedin, "LinkedIn profile")] : []),
     "",
-    c ? `<b>Contact:</b> ${tgEsc(c.person.name)}${c.person.role ? `, ${tgEsc(c.person.role)}` : ""}` : "<b>Contact:</b> none found yet",
-    ...(c && emailText(c.person) ? [`✉️ ${tgEsc(emailText(c.person)!)}`] : []),
-    ...(c?.person.linkedin ? [link(c.person.linkedin, "LinkedIn")] : []),
-    ...(pack.icp.calendar ? [`⏱ ${tgEsc(sendWindowText(sendWindow(s.evidence, new Date(`${date}T00:00:00Z`), pack.icp.calendar)))}`] : []),
+    ...(play ? [`🎯 <b>Play: ${tgEsc(play.title)}</b>`, tgEsc(play.angle)] : []),
+    ...(n?.hypothesis ? [`<b>Why now:</b> ${tgEsc(n.hypothesis)}`] : []),
+    ...(n?.angle ? [`<b>Lead with:</b> ${tgEsc(n.angle)}`] : []),
+    ...(l.backReason ? [`<b>Back on your list:</b> ${tgEsc(l.backReason)}`] : []),
+    "",
+    "📡 <b>Why we picked them</b>",
+    ...s.drivers.filter((x) => x.type !== "role_gap").slice(0, 4).map((x) => `• ${link(x.url, describe(x))}`),
+    ...(n?.market?.length ? ["", "💡 <b>Signals that would help them</b>", ...n.market.map((m) => `• <b>${tgEsc(m.title)}</b>${m.example ? `: ${m.url ? link(m.url, m.example) : tgEsc(m.example)}` : ""}`)] : []),
+    // the draft starts with its own "Subject:" line: shown once, in bold
+    ...(draft ? ["", `✍️ <b>Email draft</b>`, `<b>Subject:</b> ${tgEsc(n!.email!.subject)}`, tgEsc(draft.replace(/^Subject: [^\n]*\n/, ""))] : []),
+    ...(pack.icp.calendar ? ["", `⏱ ${tgEsc(sendWindowText(sendWindow(s.evidence, new Date(`${date}T00:00:00Z`), pack.icp.calendar)))}`] : []),
   ];
-  const text = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  const text = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!deliveryId || test) return { text };
-  const row2 = [{ text: "📨 Draft", data: `dr:${deliveryId}` }, ...(n?.brief ? [{ text: "📄 Brief", data: `br:${deliveryId}` }] : [])];
-  const needsEmail = !c?.person.email || !["observed", "verified"].includes(c.person.email.status);
-  return { text, buttons: [[{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }], [...(needsEmail && c ? [{ text: "🔎 Find email", data: `e:${deliveryId}` }] : []), ...row2]] };
+  const needsEmail = !!c && (!c.person.email || !["observed", "verified"].includes(c.person.email.status));
+  return { text, buttons: [[{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }],
+    [...(needsEmail ? [{ text: "🔎 Find email", data: `e:${deliveryId}` }] : []), ...(n?.brief ? [{ text: "📄 Brief", data: `br:${deliveryId}` }] : [])]] };
 }
 
 /** The opening message: counts per list, touch-backs, health (pure; exported for tests). */

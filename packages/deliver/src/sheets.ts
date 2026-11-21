@@ -9,12 +9,12 @@ import { googleAccessToken } from "./gmail.js";
 const API = "https://sheets.googleapis.com/v4/spreadsheets";
 
 /**
- * Lead columns, in vetting order: is it worth it (score, ICP fit, timing, company facts, why), who (person, how to
+ * Lead columns, in vetting order: is it worth it (score, timing, company facts, why), who (person, how to
  * reach), your verdict, then the long drafts. The last one (ID) is hidden; every read and write finds columns by
  * header name and rows by ID, never by position, so you can move columns around.
  */
 export const LEAD_COLUMNS = [
-  "Date", "Company", "What they do", "Website", "Score", "ICP fit", "Timing", "Size", "Segment", "Region", "Why now", "Signals", "Plays",
+  "Date", "Company", "What they do", "Website", "Score", "Timing", "Size", "Segment", "Region", "Why now", "Signals", "Plays",
   "Person", "Role", "LinkedIn", "Email", "Verified", "Risky", "Catch-all", "Enrich email",
   "Label", "Reason", "Outcome", "Notes",
   "Opener", "Angle", "Email draft", "LinkedIn message", "Brief", "Follow-up", "ID",
@@ -199,7 +199,7 @@ export async function fillColumnById(spreadsheetId: string, column: string, valu
 
 /** Column widths in pixels (others 140); short yes/no and score columns stay narrow, reading columns wide. */
 const COLUMN_WIDTH: Record<string, number> = {
-  Date: 90, Company: 150, Website: 160, Score: 60, "ICP fit": 60, Timing: 220, Size: 70, Segment: 75, Region: 80,
+  Date: 90, Company: 150, Website: 160, Score: 60, Timing: 220, Size: 70, Segment: 75, Region: 80,
   "Why now": 340, Signals: 240, Plays: 180, Person: 140, Role: 200, LinkedIn: 180, Email: 210, Verified: 70, Risky: 60,
   "Catch-all": 75, "Enrich email": 150, Label: 75, Reason: 110, Outcome: 100, Notes: 200, Opener: 300, Angle: 260,
   "Email draft": 340, "LinkedIn message": 300, "Follow-up": 320,

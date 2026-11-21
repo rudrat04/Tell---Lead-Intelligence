@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import type { ScoreRunResult } from "@tell/pipeline";
 import type { AccountScore, Evidence } from "@tell/intel";
-import { tgEsc, chunks, leadMessage, summaryMessage, sendTelegram } from "./telegram.js";
+import { tgEsc, chunks, leadMessage, summaryMessage, sendTelegram, tgScore } from "./telegram.js";
 
 const pack = await loadFixturePack();
 const ev: Evidence = { type: "core_role_open_45d", class: "implicit", ageDays: 0, current: true, openDays: 60, quote: "GTM <Engineer>", url: "https://jobs.example/1", ref: { kind: "job", id: "j1" } };
@@ -17,16 +17,26 @@ describe("telegram delivery", () => {
     expect(parts.every((p) => p.length <= 1000)).toBe(true);
     expect(parts.join("\n").split("\n")).toHaveLength(300);
   });
-  it("a lead message: escaped facts, contact, and the buttons (no Find email once verified)", () => {
-    const c = { person: { name: "Asha Rao", role: "Head of Sales", email: { address: "asha@northwind.test", status: "likely" as const, note: "" } }, persona: null, note: "" };
-    const m = leadMessage(lead as any, c as any, { hypothesis: "", angle: "Bridge", opener: "", counterEvidence: null, confidence: 0.5, brief: "the brief" }, D, "2026-11-21", pack);
-    expect(m.text).toContain("<b><a href=\"https://northwind.test\">Northwind &amp; Co</a></b>");
-    expect(m.text).toContain("<i>makes &lt;billing&gt; software</i>");
-    expect(m.text).toContain("Asha Rao, Head of Sales");
-    expect(m.buttons!.flat().map((b) => b.data)).toEqual([`g:${D}`, `b:${D}`, `e:${D}`, `dr:${D}`, `br:${D}`]);
+  it("a lead message: company facts, who to reach, play, why we picked them, signals for them, the draft; buttons", () => {
+    const c = { person: { name: "Asha Rao", role: "Head of Sales", email: { address: "asha@northwind.test", status: "likely" as const, note: "" } }, persona: "Head of Sales", note: "" };
+    const note = { hypothesis: "New plant, nobody selling the extra output yet.", angle: "Buyers for the new capacity", opener: "", counterEvidence: null, confidence: 0.5, brief: "the brief",
+      email: { subject: "nashik plant", body: "saw the new plant.\n\nwho handles new buyers?" }, market: [{ title: "Your buyers are building new capacity", example: "Contoso Foods opens a plant in Pune", url: "https://news.example/2" }] };
+    const m = leadMessage(lead as any, c as any, note, D, "2026-11-21", { ...pack, copy: { ...pack.copy, greeting: "Hi {first}," } } as any);
+    expect(m.text).toContain("🏢 <b><a href=\"https://northwind.test\">Northwind &amp; Co</a></b>\nSoftware · India · 11-50 people\nScore 45");
+    expect(m.text).toContain("👤 <b>Reach out to:</b> Asha Rao, Head of Sales\nBuyer type: Head of Sales");
+    expect(m.text).toContain("🎯 <b>Play: Struggling to hire</b>");
+    expect(m.text).toContain("<b>Why now:</b> New plant, nobody selling the extra output yet.");
+    expect(m.text).toContain("📡 <b>Why we picked them</b>");
+    expect(m.text).toContain("💡 <b>Signals that would help them</b>\n• <b>Your buyers are building new capacity</b>: <a href=\"https://news.example/2\">Contoso Foods opens a plant in Pune</a>");
+    expect(m.text).toContain("<b>Subject:</b> nashik plant\n\nHi Asha,");
+    expect(m.buttons!.flat().map((b) => b.data)).toEqual([`g:${D}`, `b:${D}`, `e:${D}`, `br:${D}`]);
     const verified = leadMessage(lead as any, { ...c, person: { ...c.person, email: { ...c.person.email, status: "verified" as const } } } as any, undefined, D, "2026-11-21", pack);
-    expect(verified.buttons!.flat().map((b) => b.data)).toEqual([`g:${D}`, `b:${D}`, `dr:${D}`]);
+    expect(verified.buttons!.flat().map((b) => b.data)).toEqual([`g:${D}`, `b:${D}`]);
     expect(leadMessage(lead as any, c as any, undefined, D, "2026-11-21", pack, true).buttons).toBeUndefined();
+  });
+  it("judged leads show the judge's ratings, not the old parts", () => {
+    const judged = { ...lead, score: { ...score, priority: 0.72, judged: { rubric: { specific: 4, urgent: 3, prize: 2, deliverable: 4 }, learnedRate: null, learnedN: 0 } } };
+    expect(tgScore(judged.score as any)).toBe("Score 72 · specific 4/5 · urgent 3/5 · prize 2/5 · deliverable 4/5");
   });
   it("summary counts leads per list", () => {
     const r = { ranking: { leads: [lead, { ...lead, group: "Niche" }], watchlist: [], held: { incomplete: 0, recentlyDelivered: 0 } } } as unknown as ScoreRunResult;

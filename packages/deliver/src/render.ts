@@ -65,7 +65,8 @@ export function describe(e: Evidence): string {
     case "jd_mentions": return `Job ad says: ${e.quote}`;
     case "role_gap": return `${e.quote} (people search: check their team page before you write)`;
     case "champion_moved": case "freeze_to_contract": case "email_auth_gap": case "attribution_gap": case "site_health_poor": case "content_motion": return e.quote;
-    default: return `${e.type}: ${t}`;
+    // public records, news and market signals are written as whole sentences ("Contoso won a $2.3M contract...")
+    default: return e.quote;
   }
 }
 
@@ -102,7 +103,7 @@ export function opener(c: Contact | null | undefined, company: string, e: Eviden
 }
 
 /** Analyst output for a lead (cited, validated in code); absent when Haiku was unavailable or failed validation. */
-export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number; email?: { subject: string; body: string } | null; linkedin?: string | null; /** the intelligence brief the email offers */ brief?: string }
+export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number; email?: { subject: string; body: string } | null; linkedin?: string | null; /** the intelligence brief the email offers */ brief?: string; /** changes in their market, one example each */ market?: { title: string; example: string; url: string }[] }
 
 /** The pack's greeting with the contact's first name ("hey {first}," -> "hey Asha,"); without a contact the name goes. */
 export function greeting(template: string, c: Contact | null | undefined): string {
@@ -374,7 +375,6 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     "What they do": a.description ?? "",
     Website: `https://${a.domain}`,
     Score: String(displayScore(s)), // 0-100 = need + fit + timing + buyer points (scoreLine in "Why now")
-    "ICP fit": String(Math.round(s.fit * 100)), // 0-100: size and segment against your ICP
     Timing: calendar ? sendWindowText(sendWindow(s.evidence, dayDate(date), calendar)) : "",
     Size: a.sizeBand ?? "",
     Segment: a.segment ?? "",

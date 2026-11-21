@@ -15,7 +15,11 @@ export const ANALYST_MAX_EVIDENCE = 6;
 /** usage_daily service for the writer's spend */
 export const WRITER_USAGE = "sonnet";
 
-export interface LeadAnalysis extends Analysis { cachedFrom?: Date | null; /** the intelligence brief (Sheet "Brief"), when a market play was built */ brief?: string }
+/** The market play as short lines: each change with its first example (pure). */
+const marketLines = (mp: MarketPlay | undefined) => (mp?.changes ?? []).map((c) => ({ title: c.title, example: c.examples[0] ? (c.examples[0].quote.toLowerCase().startsWith(c.examples[0].company.toLowerCase()) ? c.examples[0].quote : `${c.examples[0].company}: ${c.examples[0].quote}`) : "", url: c.examples[0]?.url ?? "" }));
+
+export interface LeadAnalysis extends Analysis { cachedFrom?: Date | null; /** the intelligence brief (Sheet "Brief"), when a market play was built */ brief?: string;
+  /** the changes in their market the brief shows, one example each (Telegram "Signals that would help them") */ market?: { title: string; example: string; url: string }[] }
 
 function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefined, version: string, pack: Pack): { input: AnalystInput; key: string; refs: { kind: string; id: string; url: string }[] } {
   const a = l.account, s = l.score;
@@ -94,7 +98,7 @@ export async function analyzeLeads(
         hypothesis: hit.hypothesis, angle: hit.angle, opener: hit.opener, counterEvidence: hit.counterEvidence, confidence: hit.confidence ?? 0,
         email: hit.emailSubject && hit.emailBody ? { subject: hit.emailSubject, body: hit.emailBody } : null, linkedin: hit.linkedinMessage ?? null,
         citations: urls.map((u) => p.refs.findIndex((r) => r.url === u)).filter((i) => i >= 0), cachedFrom: hit.createdAt,
-        ...(briefs.has(p.l.account.id) ? { brief: briefs.get(p.l.account.id)! } : {}),
+        ...(briefs.has(p.l.account.id) ? { brief: briefs.get(p.l.account.id)!, market: marketLines(plays.get(p.l.account.id)) } : {}),
       });
       res.cached++;
     } else todo.push(p);
@@ -141,7 +145,7 @@ export async function analyzeLeads(
       const debug = process.env.TELL_DEBUG_DRAFTS && !process.env.CI ? (r: string) => console.error(`[draft rejected] ${p.input.company}: ${r}`) : undefined;
       try { a = await analyzeLead(llm, pack, p.input, debug, critic ?? undefined); } catch (e) { debug?.(`error: ${(e as Error).message}`); }
       if (!a) { res.failed++; continue; }
-      out.set(p.l.account.id, { ...a, ...(briefs.has(p.l.account.id) ? { brief: briefs.get(p.l.account.id)! } : {}) });
+      out.set(p.l.account.id, { ...a, ...(briefs.has(p.l.account.id) ? { brief: briefs.get(p.l.account.id)!, market: marketLines(plays.get(p.l.account.id)) } : {}) });
       res.fresh++;
       if (write) {
         await db.insert(analyses).values({

@@ -30,7 +30,7 @@ function oldEnrichAnswer(cell: string): LeadRow | null {
  * longer matches the ICP (critic icp/enterprise/vendor, or stored facts outside the pack) or scores under
  * delivery.digest.min_score today. Rows where you recorded an Outcome always stay. Your labels are synced to the
  * database first, the old tab is kept as a backup tab, columns you added yourself move to the end, and Score /
- * ICP fit / Timing are refreshed. Returns counts only.
+ * Timing is refreshed. Returns counts only.
  */
 export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; now?: Date; backup?: boolean } = {}): Promise<SheetRebuildResult> {
   const id = pack.delivery.sheet.spreadsheet_id;
@@ -76,7 +76,6 @@ export async function rebuildLeadsSheet(pack: Pack, opts: { dryRun?: boolean; no
     if (drop) res.keptForOutcome++;
     if (x) {
       row.Score = String(displayScore(x.score));
-      row["ICP fit"] = String(Math.round(x.score.fit * 100));
       row.Timing = sendWindowText(sendWindow(x.score.evidence, now, pack.icp.calendar));
       row.Size = x.account.sizeBand ?? ""; // stored facts, filled from the Exa company index when no source gave them
       row.Segment = x.account.segment ?? "";
