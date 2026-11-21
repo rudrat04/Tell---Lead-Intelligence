@@ -318,19 +318,19 @@ export function parseNewAwards(results: unknown[], naics: string, minAmount = 0)
   });
 }
 
-/** Contracts signed in [since, now] in one NAICS code (largest first). */
-export async function fetchNewAwards(opts: { naics: string; setAsides: string[]; since: Date; now?: Date; minAmount: number; maxPages: number }): Promise<NewAward[]> {
+/** Contracts signed in [since, now] in one NAICS code, or matching keywords in any code (largest first). */
+export async function fetchNewAwards(opts: { naics: string | null; keywords?: string[]; setAsides: string[]; since: Date; now?: Date; minAmount: number; maxPages: number }): Promise<NewAward[]> {
   const now = opts.now ?? new Date();
   const out: NewAward[] = [];
   for (let page = 1; page <= opts.maxPages; page++) {
     const body = {
-      filters: { award_type_codes: ["A", "B", "C", "D"], naics_codes: [opts.naics], ...(opts.setAsides.length ? { set_aside_type_codes: opts.setAsides } : {}),
+      filters: { award_type_codes: ["A", "B", "C", "D"], ...(opts.naics ? { naics_codes: [opts.naics] } : {}), ...(opts.keywords?.length ? { keywords: opts.keywords } : {}), ...(opts.setAsides.length ? { set_aside_type_codes: opts.setAsides } : {}),
         time_period: [{ start_date: opts.since.toISOString().slice(0, 10), end_date: now.toISOString().slice(0, 10), date_type: "date_signed" }] },
       fields: ["Award ID", "Recipient Name", "Award Amount", "Start Date", "End Date", "Awarding Agency", "Description"],
       sort: "Award Amount", order: "desc", limit: 100, page,
     };
     const j = (await json("https://api.usaspending.gov/api/v2/search/spending_by_award/", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })) as { results?: unknown[]; page_metadata?: { hasNext?: boolean } } | null;
-    const rows = parseNewAwards(j?.results ?? [], opts.naics, opts.minAmount);
+    const rows = parseNewAwards(j?.results ?? [], opts.naics ?? "", opts.minAmount);
     out.push(...rows);
     if (!j?.page_metadata?.hasNext || rows.length < (j?.results?.length ?? 0)) break; // sorted by amount: the rest are under the minimum
     await sleep(500);

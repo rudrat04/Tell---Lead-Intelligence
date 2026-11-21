@@ -442,6 +442,38 @@ export const SourcesSchema = z.object({
     })).default([]),
     /** Serper news searches per day for news_events (usage_daily "serper_news_events"; queries rotate) */
     news_per_day: z.number().int().min(0).max(50).default(4),
+    /** USASpending contracts whose description matches these keywords (SBIR / STTR Phase II awards: deep-tech small
+     *  businesses that must commercialize; Salesforce / HubSpot / CRM implementation contracts: the prime needs build
+     *  capacity). One block per signal type; `exclude` drops descriptions such as license resales. */
+    keyword_awards: z.array(z.object({
+      id: z.string().regex(/^[a-z0-9_]+$/),
+      enabled: z.boolean().default(true),
+      keywords: z.array(z.string().min(3)).min(1),
+      /** the description must match this (e.g. "phase ii"), when set */
+      must: z.string().optional(),
+      exclude: z.string().optional(),
+      signal_type: z.string(),
+      segment: z.string(),
+      region: z.string().default("United States of America"),
+      max_age_days: z.number().int().min(1).max(120).default(45),
+      min_amount: z.number().min(0).default(100_000),
+      max_pages: z.number().int().min(1).max(5).default(1),
+    })).default([]),
+    /** ClinicalTrials.gov: industry-sponsored interventional trials completed recently; the sponsor's segment comes from
+     *  the intervention type (DRUG -> pharma, DEVICE -> medtech) */
+    clinical_trials: z.object({
+      enabled: z.boolean().default(false),
+      max_age_days: z.number().int().min(7).max(180).default(45),
+      regions: z.array(z.string()).default(["India", "United States of America"]),
+      segments: z.record(z.string(), z.string()).default({ DRUG: "pharma", BIOLOGICAL: "pharma", DEVICE: "medtech", DIAGNOSTIC_TEST: "medtech" }),
+      max_trials: z.number().int().min(10).max(1000).default(300),
+    }).optional(),
+    /** how names become websites besides Exa and Maps: Wikidata (free, established companies) and Google web results
+     *  via Serper (SERPER_API_KEY, paid per search: `web_per_day` 0 = off) */
+    resolvers: z.object({
+      wikidata: z.boolean().default(true),
+      web_per_day: z.number().int().min(0).max(5000).default(0),
+    }).default({ wikidata: true, web_per_day: 0 }),
     /** signal types you bring in yourself (`pnpm niche import <csv>`, `pnpm niche dmf <csv>`: tenders, RERA, customs,
      *  DMFs): pack:map shows them as fed by your imports instead of warning that nothing writes them */
     imports: z.array(z.string()).default([]),
@@ -499,7 +531,11 @@ export const SourcesSchema = z.object({
     /** USASpending: contracts signed in the last `max_age_days`, per NAICS group (the winner becomes an account) */
     usaspending_awards: z.object({
       enabled: z.boolean().default(false),
-      groups: z.array(z.object({ naics: z.array(z.string().regex(/^(\d{2}|\d{4}|\d{6})$/, "USASpending takes 2, 4 or 6-digit NAICS codes")).min(1), segment: z.string() })).default([]),
+      groups: z.array(z.object({ naics: z.array(z.string().regex(/^(\d{2}|\d{4}|\d{6})$/, "USASpending takes 2, 4 or 6-digit NAICS codes")).min(1), segment: z.string(),
+        /** this group's set-asides ([] = any contract); unset = the source's */
+        set_asides: z.array(z.string()).optional(),
+        /** awards above this go to large primes, not the small companies you sell to (unset = no ceiling) */
+        max_amount: z.number().min(0).optional() })).default([]),
       set_asides: z.array(z.string()).default([]),
       max_age_days: z.number().int().min(1).max(120).default(30),
       min_amount: z.number().min(0).default(500_000),
@@ -552,7 +588,7 @@ export const SourcesSchema = z.object({
       region: z.string().default("United States of America"),
     })).default([]),
   }).default({
-    per_run: 25, per_run_by_source: {}, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4, imports: [],
+    per_run: 25, per_run_by_source: {}, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4, imports: [], keyword_awards: [], resolvers: { wikidata: true, web_per_day: 0 },
     fda_shortage: { enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 },
     usaspending: { enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" },
     cms_new_providers: { enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" },
@@ -596,6 +632,16 @@ export const ToolsSchema = z.object({
     /** matched against TXT records (SPF includes, domain verification tokens) */
     dns: z.array(pattern).default([]),
   })).default({}),
+  /** tools that were shut down or are being retired: a site still running one gets `tool_sunset` (a migration they
+   *  must do, or a tag measuring nothing). Only shutdowns you can cite: `url` is the vendor's announcement. */
+  sunsets: z.array(z.object({
+    tool: z.string(),
+    /** when it stopped (or stops) working, as the vendor says it: "1 July 2023" */
+    ended: z.string().min(4),
+    url: z.string().url(),
+    /** what it means for them, in a few words ("collects no data since then") */
+    note: z.string().min(5),
+  })).default([]),
 });
 
 /** Freelance / contract gigs that match the offer (a separate digest section; not account intent). */
@@ -745,7 +791,7 @@ export const PackSchema = z.object({
   sources: SourcesSchema,
   domains: DomainsSchema,
   delivery: DeliverySchema,
-  tools: ToolsSchema.default({ sprawl_min: 4, sprawl_exclude_categories: [], overlap_categories: [], outbound_categories: ["outbound"], analytics_categories: ["analytics"], tools: {} }),
+  tools: ToolsSchema.default({ sprawl_min: 4, sprawl_exclude_categories: [], overlap_categories: [], outbound_categories: ["outbound"], analytics_categories: ["analytics"], tools: {}, sunsets: [] }),
   copy: CopySchema.default(COPY_DEFAULT),
   critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60, enterprise: { url_patterns: [], title_patterns: [] } }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
@@ -849,6 +895,13 @@ export const PackSchema = z.object({
   if (n.anda_approvals?.enabled) checkSeg(n.anda_approvals.segment, ["sources", "niche", "anda_approvals", "segment"]);
   if (n.usaspending_awards?.enabled) n.usaspending_awards.groups.forEach((g, i) => checkSeg(g.segment, ["sources", "niche", "usaspending_awards", "groups", i, "segment"]));
   if (n.form_d?.enabled) for (const [ind, seg] of Object.entries(n.form_d.industries)) checkSeg(seg, ["sources", "niche", "form_d", "industries", ind]);
+  p.tools.sunsets.forEach((x, i) => { if (!p.tools.tools[x.tool]) ctx.addIssue({ code: "custom", path: ["tools", "sunsets", i, "tool"], message: `unknown tool "${x.tool}" (tools.yaml tools)` }); });
+  n.keyword_awards.forEach((k, i) => {
+    if (!k.enabled) return;
+    if (!p.signals.signals[k.signal_type]) ctx.addIssue({ code: "custom", path: ["sources", "niche", "keyword_awards", i, "signal_type"], message: `unknown signal type "${k.signal_type}"` });
+    if (k.segment !== "auto") checkSeg(k.segment, ["sources", "niche", "keyword_awards", i, "segment"]);
+  });
+  if (n.clinical_trials?.enabled) for (const [t, seg] of Object.entries(n.clinical_trials.segments)) checkSeg(seg, ["sources", "niche", "clinical_trials", "segments", t]);
   n.imports.forEach((t, i) => { if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["sources", "niche", "imports", i], message: `unknown signal type "${t}"` }); });
   n.socrata.forEach((x, i) => {
     if (!x.enabled) return;

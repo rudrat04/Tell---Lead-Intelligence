@@ -30,4 +30,8 @@ describe("Gate 4 verifier prompt", () => {
     expect(p).toMatch(/freelancer, contractor, consultant or agency[^.]*OWN company is a GENUINE need/);
     expect(p).toMatch(/"recruiter" means hiring on behalf of another company/);
   });
+  it("yes / no answers count as true / false", async () => {
+    const r = await verifyPost(reply({ genuine_need: "Yes", disqualifier: "none", reason: "hiring a freelancer for their own CRM" }), "post", positive, "a B2B team");
+    expect(r.decision).toBe("confirm");
+  });
 });

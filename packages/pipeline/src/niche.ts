@@ -3,7 +3,7 @@ import {
   fetchShortages, fetchAndaHolders, holderCounts, fetchExpiringAwards, fetchNewProviders, exaCompanySearch, companyKey, isSourceEnabled,
   fetchClearances, fetchAndaApprovals, fetchNewAwards, socrataRows, fillTemplate, fetchFormDFilings, fetchFormDDetail,
   type Shortage, type AndaHolder, type ExpiringAward, type NewProvider, type CompanyHit, type DeviceClearance, type AndaApproval, type NewAward, type FormDDetail, type FormDFiling,
-  googlePlaces, serperPlaces, fetchNppesWeekly, requestSamExtract, downloadSamExtract, fetchRecalls, serperNews, companyFromHeadline,
+  googlePlaces, serperPlaces, wikidataCompanies, serperOrganic, fetchCompletedTrials, type CompletedTrial, fetchNppesWeekly, requestSamExtract, downloadSamExtract, fetchRecalls, serperNews, companyFromHeadline,
   type PlaceHit, type NewNpi, type SamEntity, type Recall, type NewsItem,
 } from "@tell/watchers";
 import { passesHardFilters, regionInScope } from "@tell/intel";
@@ -11,7 +11,8 @@ import { registrableDomain, nameMatchesDomain, checkHomepage, domainLists, type 
 import { getDb, accounts, signals, companySeeds, people, nicheQueue, usageDaily, and, eq, sql, desc } from "@tell/db";
 import { applyPackIdentity } from "./scheduled.js";
 import { neonUsage, type UsageStore } from "./usage.js";
-import { bandForHeadcount } from "./company-facts.js";
+import { bandForHeadcount, segmentPrompt, parseSegment, profileLine } from "./company-facts.js";
+import { HaikuClient } from "@tell/extract";
 
 /**
  * Niche public-record discovery (pack sources.niche, `pnpm niche`). Each source yields records that name a company and
@@ -23,6 +24,9 @@ import { bandForHeadcount } from "./company-facts.js";
 const DAY = 86_400_000;
 /** a name that didn't resolve is tried again after this long (Exa indexes new sites; records repeat daily) */
 const RETRY_DAYS = 60;
+/** a name the free ways (Wikidata, Maps, web) couldn't place waits this long before they're tried again; Exa may
+ *  still try it any day it has budget */
+const FREE_RETRY_DAYS = 7;
 
 /** One record to turn into account + signal. */
 export interface NicheRecord {
@@ -31,6 +35,7 @@ export interface NicheRecord {
   name: string;
   /** what to search for (name plus context: city, industry) */
   query: string;
+  /** the industry; "auto" = classified from the company's own description once found (SME IPO filers, SBIR winners) */
   segment: string;
   /** regions the company's HQ may be in */
   regions: string[];
@@ -89,7 +94,23 @@ export function matchCompany(name: string, hits: CompanyHit[], lists: DomainList
   return new Set(ok.map((x) => x.domain)).size === 1 ? ok[0]! : null;
 }
 
-interface Deps { pack: Pack; companies?: (q: string) => Promise<CompanyHit[]>; usage?: UsageStore; now?: Date; homepage?: typeof checkHomepage }
+interface Deps {
+  pack: Pack; companies?: (q: string) => Promise<CompanyHit[]>; usage?: UsageStore; now?: Date; homepage?: typeof checkHomepage;
+  /** free / web candidates (tests pass fakes; null = off) */
+  wiki?: ((name: string) => Promise<CompanyHit[]>) | null; web?: ((q: string, region: string) => Promise<CompanyHit[]>) | null;
+  /** industry for segment "auto" records, from the company's description */
+  classify?: ((name: string, domain: string, description: string) => Promise<string | null>) | null;
+}
+
+/** Records in turns by industry (pure; exported for tests): one source that writes for many industries (contract awards,
+ *  SAM, NPPES, Form D) would otherwise spend its whole lookup cap on whichever industry sorts first. */
+export function interleaveBySegment<T extends { segment: string }>(xs: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const x of xs) groups.set(x.segment, [...(groups.get(x.segment) ?? []), x]);
+  const qs = [...groups.values()], out: T[] = [];
+  for (let i = 0; out.length < xs.length; i++) for (const q of qs) if (q[i]) out.push(q[i]!);
+  return out;
+}
 
 /**
  * Records -> accounts + signals. Company names are looked up once (company_seeds, source `niche:<source>`); a resolved
@@ -108,12 +129,19 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
   const perRun = pack.sources.niche.per_run_by_source[records[0]?.source ?? ""] ?? pack.sources.niche.per_run;
   const cap = Math.max(0, Math.min(perRun, budget - (await usage.spentToday("exa_niche"))));
   const maps = await mapsClient(pack, usage, now);
+  const rcfg = pack.sources.niche.resolvers;
+  // injected company search (tests) = no live resolvers unless injected too
+  const live = !deps.companies;
+  const wiki = deps.wiki !== undefined ? deps.wiki : live && rcfg.wikidata ? wikidataCompanies : null;
+  const serperKey = process.env.SERPER_API_KEY;
+  const web = deps.web !== undefined ? deps.web : live && rcfg.web_per_day > 0 && serperKey ? ((q: string, region: string) => serperOrganic(serperKey, q, region === "India" ? "in" : "us")) : null;
+  let classify = deps.classify;
   let searches = 0;
   res.records += records.length;
 
   // one lookup per company name; every record of that name follows the verdict
   const byName = new Map<string, NicheRecord[]>();
-  for (const r of records) { const k = companyKey(r.name); if (k) byName.set(k, [...(byName.get(k) ?? []), r]); }
+  for (const r of interleaveBySegment(records)) { const k = companyKey(r.name); if (k) byName.set(k, [...(byName.get(k) ?? []), r]); }
   res.companies += byName.size;
   const seedSource = `niche:${records[0]?.source ?? "x"}`;
 
@@ -126,11 +154,20 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
       accountId = a?.id ?? null;
     }
     if (!accountId) {
-      if (seed && !seed.fitPass && seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < RETRY_DAYS * DAY) continue;
-      if (searches >= cap) { res.capped++; await enqueue(seedSource, k, recs); continue; }
-      searches++;
+      if (seed && !seed.fitPass && seed.reason !== "deferred" && seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < RETRY_DAYS * DAY) continue;
+      // the free ways (Wikidata, Maps, web) already failed for this name this week: only Exa is left to try
+      const freeTried = seed?.reason === "deferred" && !!seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < FREE_RETRY_DAYS * DAY;
+      if (freeTried && searches >= cap) { res.capped++; await enqueue(seedSource, k, recs); continue; }
       res.looked++;
-      const v = await resolve(r0).catch(() => ({ reason: "error" } as Verdict));
+      const v = await resolve(r0, searches < cap, freeTried).catch(() => ({ reason: "error" } as Verdict));
+      // nothing could look it up today (Exa's cap spent, the free ways found nothing): keep it for the next budget, and
+      // remember the free ways failed so tomorrow's runs don't spend Maps on it again
+      if (v.reason === "deferred") {
+        res.looked--; res.capped++; await enqueue(seedSource, k, recs);
+        await db.insert(companySeeds).values({ source: seedSource, sourceId: k, fitPass: false, reason: "deferred", siteCheckedAt: now, updatedAt: now })
+          .onConflictDoUpdate({ target: [companySeeds.source, companySeeds.sourceId], set: { fitPass: false, reason: "deferred", siteCheckedAt: now, updatedAt: now } });
+        continue;
+      }
       if (v.reason === "no-match") res.noMatch++;
       else if (v.reason === "error") res.errors++;
       else if (v.reason === "not-region") res.notRegion++;
@@ -164,37 +201,58 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
 
   type Verdict = { reason: string; domain?: string; isNew?: boolean; accountId?: string };
 
-  async function resolve(r: NicheRecord): Promise<Verdict> {
-    // 1. the record's own website; 2. the company index; 3. Maps (website only)
+  async function resolve(r: NicheRecord, exaOk: boolean, freeTried = false): Promise<Verdict> {
+    // 1. the record's own website; 2. Wikidata (free); 3. Maps first for small local businesses; 4. the company index
+    // (Exa, capped); 5. Maps; 6. Google web results (Serper, own daily budget). Each only proposes: matchCompany decides.
     let m: { hit: CompanyHit; domain: string } | null = null;
     const own = r.website ? registrableDomain(/^https?:/i.test(r.website) ? r.website : `https://${r.website}`) : null;
     if (own && !lists.neverCompany.has(own) && !lists.freeMail.has(own) && nameMatchesDomain(r.name, own)) {
       m = { hit: { name: r.name, url: `https://${own}`, employees: null, description: "", country: r.knownRegion ?? null }, domain: own };
     }
     const viaMaps = async () => {
-      if (!maps || !r.mapsQuery) return null;
-      const hit = await maps.lookup(r.mapsQuery, r.knownRegion ?? r.regions[0] ?? "");
+      // every record can try Maps: its own Maps query, else the company name in its region
+      if (!maps) return null;
+      const hit = await maps.lookup(r.mapsQuery ?? r.name, r.knownRegion ?? r.regions[0] ?? "");
       return hit ? matchCompany(r.name, [{ name: hit.name, url: hit.website!, employees: null, description: hit.name, country: r.knownRegion ?? null }], lists) : null;
     };
-    if (!m && r.mapsFirst) m = await viaMaps();
+    if (!m && wiki && !r.mapsFirst && !freeTried) m = matchCompany(r.name, await wiki(r.name).catch(() => []), lists, r.mustMention);
+    if (!m && r.mapsFirst && !freeTried) m = await viaMaps();
     // the company index costs a search (usage_daily "exa_niche", within the daily budget)
-    if (!m) { await usage.addSpend("exa_niche", 1, budget); m = matchCompany(r.name, await exa(r.query), lists, r.mustMention); }
-    if (!m && !r.mapsFirst) m = await viaMaps();
-    if (!m) return { reason: "no-match" };
-    const region = regionName(m.hit.country) ?? r.knownRegion ?? null;
-    if (!region || !r.regions.includes(region) || !regionInScope(region, pack.icp, r.segment)) return { reason: "not-region", domain: m.domain };
+    let exaTried = false;
+    if (!m && exaOk) { exaTried = true; searches++; await usage.addSpend("exa_niche", 1, budget); m = matchCompany(r.name, await exa(r.query), lists, r.mustMention); }
+    if (!m && !r.mapsFirst && !freeTried) m = await viaMaps();
+    if (!m && web && !freeTried && (await usage.spentToday("serper_resolve")) < rcfg.web_per_day) {
+      await usage.addSpend("serper_resolve", 1, rcfg.web_per_day);
+      m = matchCompany(r.name, await web(r.query, r.knownRegion ?? r.regions[0] ?? ""), lists, r.mustMention);
+    }
+    // not found without Exa (its cap was spent): deferred to a day with budget, not marked as a miss
+    if (!m) return { reason: exaTried ? "no-match" : "deferred" };
+    // segment "auto": the industry from the company's own description (Haiku, within its daily cap)
+    let segment = r.segment;
+    if (segment === "auto") {
+      if (classify === undefined) classify = live ? await makeClassifier(pack, usage) : null;
+      segment = (classify && m.hit.description ? await classify(m.hit.name, m.domain, m.hit.description).catch(() => null) : null) ?? "";
+      if (!segment) return { reason: "filtered: industry unknown", domain: m.domain };
+    }
+    // a record allowed in one region only (a US federal contract) is in that region when nothing says otherwise
+    const region = regionName(m.hit.country) ?? r.knownRegion ?? (r.regions.length === 1 ? r.regions[0]! : null);
+    if (!region || !r.regions.includes(region) || !regionInScope(region, pack.icp, segment)) return { reason: "not-region", domain: m.domain };
     const home = await homepage(m.domain);
     if (!home.ok) return { reason: "bad-site", domain: m.domain };
     const domain = home.finalDomain ?? m.domain;
     if (domain !== m.domain && !nameMatchesDomain(r.name, domain)) return { reason: "bad-site", domain };
-    const fit = passesHardFilters({ domain, teamSize: m.hit.employees, industries: [], status: null }, pack.icp, r.segment);
+    const fit = passesHardFilters({ domain, teamSize: m.hit.employees, industries: [], status: null }, pack.icp, segment);
     if (!fit.pass) return { reason: `filtered: ${fit.reason}`, domain };
     const sizeBand = m.hit.employees ? bandForHeadcount(m.hit.employees, pack.icp) : null;
     const before = await db.select({ id: accounts.id }).from(accounts).where(eq(accounts.domain, domain)).limit(1);
-    const [acc] = await db.insert(accounts).values({ domain, name: r.name, region, sizeBand, segment: r.segment })
+    const description = m.hit.description ? profileLine(m.hit.description) : null;
+    // an account already known keeps its industry (a SaaS company winning a federal contract stays SaaS): signals its
+    // industry doesn't count are ignored there, never relabelled into another industry
+    const [acc] = await db.insert(accounts).values({ domain, name: r.name, region, sizeBand, segment, description })
       .onConflictDoUpdate({ target: accounts.domain, set: {
         name: sql`coalesce(${accounts.name}, excluded.name)`, region: sql`coalesce(${accounts.region}, excluded.region)`,
-        sizeBand: sql`coalesce(${accounts.sizeBand}, excluded.size_band)`, segment: sql`excluded.segment`,
+        sizeBand: sql`coalesce(${accounts.sizeBand}, excluded.size_band)`, segment: sql`coalesce(${accounts.segment}, excluded.segment)`,
+        description: sql`coalesce(${accounts.description}, excluded.description)`,
       } })
       .returning({ id: accounts.id });
     return { reason: "resolved", domain, isNew: before.length === 0, accountId: acc!.id };
@@ -413,6 +471,77 @@ export function newAwardRecords(aw: NewAward[], segment: string, region: string,
   });
 }
 
+/** Contracts found by keyword (SBIR Phase II, CRM implementation) -> records, the largest per recipient first (pure;
+ *  exported for tests). `must` / `exclude` test the award description (a license resale is no build work). */
+export function keywordAwardRecords(aw: NewAward[], cfg: Niche["keyword_awards"][number], now: Date): NicheRecord[] {
+  const must = cfg.must ? new RegExp(cfg.must, "i") : null, exclude = cfg.exclude ? new RegExp(cfg.exclude, "i") : null;
+  const best = new Map<string, NewAward>();
+  for (const a of aw) {
+    if ((must && !must.test(a.description)) || (exclude && exclude.test(a.description))) continue;
+    const k = companyKey(a.recipient); const p = best.get(k); if (!p || a.amount > p.amount) best.set(k, a);
+  }
+  return [...best.values()].sort((x, y) => y.amount - x.amount).map((a) => {
+    const name = titleName(a.recipient);
+    return {
+      source: `awards_${cfg.id}`, name, query: `${name} company`, segment: cfg.segment, regions: [cfg.region], knownRegion: cfg.region, mapsQuery: name,
+      signal: {
+        type: cfg.signal_type,
+        quote: `${name} won a ${fmtUsd(a.amount)} federal contract from the ${a.agency}${a.description ? ` for ${shortDesc(a.description)}` : ""}${a.startDate ? `, starting ${monthYear(a.startDate)}` : ""} (award ${a.awardId}).`,
+        url: a.url, observedAt: a.startDate && a.startDate < now ? a.startDate : now,
+      },
+    };
+  });
+}
+
+/** Completed industry trials -> records, one per sponsor (its latest trial), segment from the intervention type (pure;
+ *  exported for tests). Trials testing nothing the pack maps (behavioral, procedure) are skipped. */
+export function trialRecords(ts: CompletedTrial[], cfg: NonNullable<Niche["clinical_trials"]>): NicheRecord[] {
+  const best = new Map<string, { t: CompletedTrial; segment: string }>();
+  for (const t of ts) {
+    const seg = t.interventions.map((i) => cfg.segments[i.type]).find(Boolean);
+    if (!seg) continue;
+    const k = companyKey(t.sponsor);
+    if (!best.has(k) || best.get(k)!.t.completedAt < t.completedAt) best.set(k, { t, segment: seg });
+  }
+  return [...best.values()].map(({ t, segment }) => {
+    const what = t.interventions.filter((i) => cfg.segments[i.type] === segment && i.name && !/placebo/i.test(i.name)).map((i) => i.name).slice(0, 2).join(" and ");
+    return {
+      source: "clinical_trials", name: t.sponsor, query: `${t.sponsor} ${segment === "medtech" ? "medical device" : "pharmaceutical"} company`, segment, regions: cfg.regions,
+      mustMention: segment === "medtech" ? MEDTECH : PHARMA,
+      signal: {
+        type: "trial_completed",
+        quote: `${t.sponsor} completed a clinical trial${what ? ` of ${what}` : ""} on ${isoDay(t.completedAt)}: "${t.title.slice(0, 140)}" (${t.nctId}${t.phase && t.phase !== "NA" ? `, ${t.phase.replace(/PHASE/g, "phase ").toLowerCase()}` : ""}).`,
+        url: t.url, observedAt: t.completedAt,
+      },
+    };
+  });
+}
+
+export async function runKeywordAwards(deps: Deps & { fetch?: (keywords: string[], since: Date, pages: number, min: number) => Promise<NewAward[]> }): Promise<NicheResult[]> {
+  const out: NicheResult[] = [];
+  const now = deps.now ?? new Date();
+  for (const cfg of deps.pack.sources.niche.keyword_awards) {
+    const src = `awards_${cfg.id}`;
+    const g = guard(src, "usaspending", cfg.enabled, deps); if (g) { out.push(g); continue; }
+    const res = empty(src);
+    try {
+      const since = new Date(now.getTime() - cfg.max_age_days * DAY);
+      const aw = await (deps.fetch ?? ((k, s, p, m) => fetchNewAwards({ naics: null, keywords: k, setAsides: [], since: s, now, minAmount: m, maxPages: p })))(cfg.keywords, since, cfg.max_pages, cfg.min_amount);
+      out.push(await persistNicheRecords(keywordAwardRecords(aw, cfg, now), deps, res));
+    } catch { res.errors++; out.push(res); }
+  }
+  return out;
+}
+
+export async function runClinicalTrials(deps: Deps & { fetch?: (since: Date, max: number) => Promise<CompletedTrial[]> }): Promise<NicheResult> {
+  const cfg = deps.pack.sources.niche.clinical_trials;
+  const g = guard("clinical_trials", "clinicaltrials", cfg?.enabled, deps); if (g) return g;
+  const now = deps.now ?? new Date();
+  const res = empty("clinical_trials");
+  const ts = await (deps.fetch ?? fetchCompletedTrials)(new Date(now.getTime() - cfg!.max_age_days * DAY), cfg!.max_trials);
+  return persistNicheRecords(trialRecords(ts, cfg!), deps, res);
+}
+
 /** Form D issuer region: a US state code, or K7 (India); null = elsewhere. Exported for tests. */
 export const formDRegion = (s: string) => (/^[A-Z]{2}$/.test(s) ? "United States of America" : s === "K7" ? "India" : null); // EDGAR: US states are 2 letters, other countries letter+digit
 
@@ -497,8 +626,10 @@ export async function runNewAwards(deps: Deps & { fetch?: (naics: string, since:
   const res = empty("usaspending_awards");
   const records: NicheRecord[] = [];
   for (const grp of cfg!.groups) for (const naics of grp.naics) {
-    try { records.push(...newAwardRecords(await (deps.fetch ?? ((n, s) => fetchNewAwards({ naics: n, setAsides: cfg!.set_asides, since: s, now, minAmount: cfg!.min_amount, maxPages: cfg!.max_pages })))(naics, since), grp.segment, cfg!.region, now)); }
-    catch { res.errors++; }
+    try {
+      const aw = await (deps.fetch ?? ((n, s) => fetchNewAwards({ naics: n, setAsides: grp.set_asides ?? cfg!.set_asides, since: s, now, minAmount: cfg!.min_amount, maxPages: cfg!.max_pages })))(naics, since);
+      records.push(...newAwardRecords(grp.max_amount != null ? aw.filter((a) => a.amount <= grp.max_amount!) : aw, grp.segment, cfg!.region, now));
+    } catch { res.errors++; }
   }
   // biggest awards first across groups: the search cap goes to the winners with the most at stake
   records.sort((a, b) => (Number(b.signal.quote.match(/\$([\d.]+)M/)?.[1] ?? 0)) - (Number(a.signal.quote.match(/\$([\d.]+)M/)?.[1] ?? 0)));
@@ -565,11 +696,31 @@ export async function drainNicheQueue(deps: Deps & { limit?: number }): Promise<
   const now = deps.now ?? new Date();
   queuePack = deps.pack;
   const old = await db.delete(nicheQueue).where(sql`${nicheQueue.queuedAt} < ${new Date(now.getTime() - 60 * DAY)}`).returning({ k: nicheQueue.key });
-  const rows = await db.select().from(nicheQueue).orderBy(desc(nicheQueue.priority), nicheQueue.queuedAt).limit(deps.limit ?? deps.pack.sources.niche.per_run);
+  // each industry gets its turn: the most valuable names per industry, round-robin (one industry's backlog never
+  // starves the others)
+  const limit = deps.limit ?? deps.pack.sources.niche.per_run;
+  const top = await db.select().from(nicheQueue).orderBy(desc(nicheQueue.priority), nicheQueue.queuedAt).limit(limit * 20);
+  const rows = interleaveBySegment(top.map((r) => ({ r, segment: (fromJson(r.records)[0]?.segment ?? "") }))).slice(0, limit).map((x) => x.r);
   const res = { ...empty("queue"), queued: 0, dropped: old.length };
   for (const row of rows) await persistNicheRecords(fromJson(row.records), deps, res);
   res.queued = Number((await db.execute(sql`select count(*)::int as n from ${nicheQueue}`)).rows[0]?.n ?? 0);
   return res;
+}
+
+/** Haiku segment classifier for "auto" records, within the shared Haiku daily cap; null without a key or budget. */
+async function makeClassifier(pack: Pack, usage: UsageStore): Promise<((name: string, domain: string, description: string) => Promise<string | null>) | null> {
+  if (!process.env.ANTHROPIC_API_KEY || !Object.keys(pack.icp.segment_descriptions).length) return null;
+  const cap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1);
+  const left = cap - (await usage.spentToday("haiku"));
+  if (left <= 0) return null;
+  const llm = new HaikuClient({ capUsd: Math.min(left, 0.2) });
+  const system = segmentPrompt(pack);
+  return async (name, domain, description) => {
+    const before = llm.spent;
+    const seg = parseSegment(await llm.complete({ system, user: `Company: ${name}\nWebsite: ${domain}\nDescription: ${description}` }), pack);
+    if (llm.spent > before) await usage.addSpend("haiku", llm.spent - before, cap);
+    return seg && !pack.icp.industries[seg]?.excluded ? seg : null;
+  };
 }
 
 /** Google Places (GOOGLE_MAPS_API_KEY, monthly cap) or Serper places (SERPER_API_KEY, daily cap): a website for a name. */
@@ -662,7 +813,7 @@ export function newsRecords(items: NewsItem[], cfg: NewsCfg, now: Date): NicheRe
     if (!name || seen.has(companyKey(name))) return [];
     seen.add(companyKey(name));
     return [{
-      source: `news_${cfg.id}`, name, query: `${name} ${cfg.segment.replace(/_/g, " ")} company ${cfg.region}`, segment: cfg.segment, regions: [cfg.region], knownRegion: cfg.region,
+      source: `news_${cfg.id}`, name, query: cfg.segment === "auto" ? `${name} company ${cfg.region}` : `${name} ${cfg.segment.replace(/_/g, " ")} company ${cfg.region}`, segment: cfg.segment, regions: [cfg.region], knownRegion: cfg.region,
       ...(cfg.must_mention ? { mustMention: new RegExp(cfg.must_mention, "i") } : {}),
       signal: { type: cfg.signal_type, quote: `${i.title}${i.outlet ? ` (${i.outlet})` : ""}`, url: i.url, observedAt: i.postedAt && i.postedAt <= now ? i.postedAt : now },
     }];

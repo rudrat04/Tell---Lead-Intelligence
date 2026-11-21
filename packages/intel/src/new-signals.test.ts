@@ -118,3 +118,15 @@ describe("site diff: content channels and analytics", () => {
     expect(diffDnsTools("acme.test", [], ["ga4"], rules, now)).toEqual([]);
   });
 });
+
+describe("tool sunsets", () => {
+  it("a site still loading a shut-down tool gets one state per tool, citing the announcement", async () => {
+    const { toolSunsets } = await import("./watch.js");
+    const sunsets = [{ tool: "universal_analytics", ended: "1 July 2023", url: "https://support.google.com/analytics/answer/11583528", note: "it records nothing" }];
+    const ev = toolSunsets("northwind.test", ["hubspot", "universal_analytics"], sunsets, { universal_analytics: { label: "Universal Analytics" } }, new Date(Date.UTC(2026, 10, 21)));
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.quote).toBe("northwind.test still loads Universal Analytics, which stopped working on 1 July 2023: it records nothing (https://support.google.com/analytics/answer/11583528).");
+    expect(ev[0]!.url).toBe("https://northwind.test/#sunset-universal_analytics");
+    expect(toolSunsets("northwind.test", ["hubspot"], sunsets, {}, new Date())).toEqual([]);
+  });
+});

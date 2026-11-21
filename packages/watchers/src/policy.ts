@@ -86,6 +86,14 @@ export const SOURCE_POLICY: Record<string, SourcePolicy> = {
   // India tender / project portals checked Nov 2026 and NOT fetched: GeM (bidplus) needs a CSRF token per session;
   // CPPP search sits behind a captcha; PARIVESH and state RERA portals are JS apps with captchas; NSE blocks clients
   // without a browser session. Paid aggregators (Tender247, TenderTiger, BidAssist) or manual exports via niche import.
+  // ClinicalTrials.gov API v2 (Nov 21 2026): NLM's public API for programmatic use, no key; sponsor names only.
+  clinicaltrials: { enabled: true, allowedMappings: ["explicit"], note: "clinicaltrials.gov/api/v2 public API" },
+  // Wikidata (Nov 21 2026): CC0 data, public API with a descriptive user agent; an item's official website only suggests
+  // a candidate, matched and checked on the company's own homepage like any other.
+  wikidata: { enabled: true, allowedMappings: ["explicit"], note: "wbsearchentities + wbgetentities, official website (P856)" },
+  // SBIR.gov's own API answers 403 to programmatic clients (checked Nov 21 2026): not used. SBIR/STTR Phase II awards
+  // come from USASpending (public), whose award descriptions name the phase.
+  sbir_gov: { enabled: false, allowedMappings: [], note: "API returns 403 to programmatic clients" },
   gem: { enabled: false, allowedMappings: [], note: "CSRF-protected API: not bypassed" },
   cppp: { enabled: false, allowedMappings: [], note: "captcha on search" },
   parivesh: { enabled: false, allowedMappings: [], note: "JS app + captcha" },

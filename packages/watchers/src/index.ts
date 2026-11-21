@@ -26,3 +26,4 @@ export * from "./funding-news.js";
 export * from "./gov.js";
 export * from "./gov2.js";
 export * from "./zip.js";
+export * from "./resolvers.js";

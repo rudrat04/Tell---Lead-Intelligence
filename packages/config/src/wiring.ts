@@ -10,7 +10,7 @@ import { regionGroupFor, CODE_SIGNAL_TYPES, type Pack } from "./schema.js";
  *  funding news, your network). Every other type comes from a niche source or `pnpm niche import`. */
 export const GENERAL_SIGNAL_TYPES = new Set<string>([...CODE_SIGNAL_TYPES, "role_reposted", "jd_mentions", "tool_overlap", "leaky_capture",
   "has_gtm_agency", "new_gtm_leader", "ops_person_left", "marketing_subdomain", "outbound_domain", "freeze_to_contract", "champion_moved",
-  "email_auth_gap", "attribution_gap", "site_health_poor", "content_motion", "ops_owner_known", "ops_team_2plus", "role_gap"]);
+  "email_auth_gap", "attribution_gap", "site_health_poor", "content_motion", "ops_owner_known", "ops_team_2plus", "role_gap", "tool_sunset"]);
 
 /** A niche source writing one signal type for one industry. */
 export interface Feed { source: string; segment: string; type: string }
@@ -32,6 +32,8 @@ export function nicheFeeds(pack: Pick<Pack, "sources">): Feed[] {
   if (n.usaspending_awards?.enabled) for (const g of n.usaspending_awards.groups) add("usaspending_awards", g.segment, "contract_won");
   if (n.form_d?.enabled) for (const seg of Object.values(n.form_d.industries)) add("form_d", seg, "form_d_raise");
   for (const x of n.socrata) if (x.enabled) add(`socrata:${x.id}`, x.segment, x.signal_type);
+  for (const k of n.keyword_awards) if (k.enabled) add(`awards:${k.id}`, k.segment, k.signal_type);
+  if (n.clinical_trials?.enabled) for (const seg of Object.values(n.clinical_trials.segments)) add("clinical_trials", seg, "trial_completed");
   // dedupe (several taxonomies / NAICS prefixes map to one industry)
   const seen = new Set<string>();
   return out.filter((f) => { const k = `${f.source}|${f.segment}|${f.type}`; if (seen.has(k)) return false; seen.add(k); return true; });
@@ -85,7 +87,8 @@ export function industryMap(pack: Pack): IndustryWiring[] {
     const warnings: string[] = [];
     const counts = ind.signals ?? null;
     const counted = (t: string) => !counts || counts.includes(t);
-    const myFeeds = feeds.filter((f) => f.segment === seg);
+    // a feed with segment "auto" (industry classified from the company's description) can land in any industry
+    const myFeeds = feeds.filter((f) => f.segment === seg || (f.segment === "auto" && counted(f.type)));
     const feeding = myFeeds.filter((f) => counted(f.type));
     for (const f of myFeeds) if (!counted(f.type)) warnings.push(`${f.source} writes ${f.type} for it, which it doesn't count: lookups spent for nothing`);
     const general = (counts ?? []).filter((t) => GENERAL_SIGNAL_TYPES.has(t));

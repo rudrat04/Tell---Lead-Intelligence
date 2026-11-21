@@ -25,7 +25,7 @@ export function toolsFromTxt(txt: string[], rules: ToolRules): string[] {
 export interface SiteState { salesLed: boolean; selfServe: boolean; pricing: boolean; tools: string[]; ctas?: string[]; leakyForms?: string[]; partnerBadge?: boolean; agencyCredit?: string | null; contentLinks?: string[] }
 
 export interface WatchEvent {
-  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "tool_overlap" | "leaky_capture" | "has_gtm_agency" | "funding_raise" | "product_launch"
+  type: "cta_sales_led" | "pricing_page_added" | "gtm_tool_added" | "stack_sprawl" | "tool_overlap" | "leaky_capture" | "has_gtm_agency" | "funding_raise" | "product_launch" | "tool_sunset"
     | "email_auth_gap" | "attribution_gap" | "site_health_poor" | "content_motion";
   quote: string;
   url: string;
@@ -182,4 +182,15 @@ export function siteHealthPoor(domain: string, runs: SpeedRun[], noAnalytics: bo
   if (!cur || !prev || cur.score >= maxScore || prev.score >= maxScore) return null;
   const lcp = cur.lcpMs ? `, main content shows after ${(cur.lcpMs / 1000).toFixed(1)}s on mobile` : "";
   return { type: "site_health_poor", quote: `Mobile PageSpeed ${Math.round(cur.score)}/100${lcp}${noAnalytics ? "; no analytics tag on the homepage" : ""}`, url: `https://${domain}/#speed`, observedAt: now };
+}
+
+/** A tool that stopped (or stops) working, still on their site or DNS (tools.yaml `sunsets`): a state, one per tool
+ *  (pure; exported for tests). Universal Analytics still loading = a site measuring nothing since July 2023. */
+export function toolSunsets(domain: string, tools: string[], sunsets: { tool: string; ended: string; url: string; note: string }[], labels: Record<string, { label: string }>, now: Date): WatchEvent[] {
+  const have = new Set(tools);
+  return sunsets.filter((x) => have.has(x.tool)).map((x) => ({
+    type: "tool_sunset" as const,
+    quote: `${domain} still loads ${labels[x.tool]?.label ?? x.tool}, which stopped working on ${x.ended}: ${x.note} (${x.url}).`,
+    url: `https://${domain}/#sunset-${x.tool}`, observedAt: now,
+  }));
 }

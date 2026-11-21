@@ -1,7 +1,7 @@
 import type { Pack } from "@tell/config";
 import { fetchYcCompanyProfile, fetchHomepage, fetchTxtRecords, extractSiteFacts, extractForms, fetchSitePage } from "@tell/watchers";
 import {
-  compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, leakyCapture, agencyCredited, eventsFromYcProfile, emailAuthGap, attributionGap,
+  compileTools, toolsFromTxt, diffSite, diffDnsTools, stackSprawl, toolOverlap, toolSunsets, leakyCapture, agencyCredited, eventsFromYcProfile, emailAuthGap, attributionGap,
   toolsInCategories, OUTBOUND_TITLE, STATE_SIGNAL_TYPES, type SiteState, type WatchEvent,
 } from "@tell/intel";
 import { getDb, accounts, jobBoards, jobs, snapshots, signals, and, eq, inArray, isNull, sql } from "@tell/db";
@@ -182,6 +182,7 @@ export async function runAccountWatch(opts: { pack: Pack; limit?: number; now?: 
         if (sprawl) events.push(sprawl);
         const overlap = toolOverlap(a.domain, [...siteTools, ...dnsTools], rules, now);
         if (overlap) events.push(overlap);
+        events.push(...toolSunsets(a.domain, [...siteTools, ...dnsTools], pack.tools.sunsets, pack.tools.tools, now));
         if (site) {
           const leak = leakyCapture(a.domain, site.leakyForms ?? [], [...siteTools, ...dnsTools], rules, now);
           if (leak) events.push(leak);

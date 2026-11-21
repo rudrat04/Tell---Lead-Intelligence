@@ -16,7 +16,8 @@ const normDisq = (v: unknown) => {
 };
 
 export const VerdictSchema = z.object({
-  genuine_need: z.preprocess((v) => (v === "true" ? true : v === "false" ? false : v), z.boolean()),
+  // "yes" / "no" and their capitalised forms are answers too; anything else stays a schema mismatch (uncertain)
+  genuine_need: z.preprocess((v) => { const t = typeof v === "string" ? v.trim().toLowerCase() : v; return t === "true" || t === "yes" ? true : t === "false" || t === "no" ? false : v; }, z.boolean()),
   disqualifier: z.preprocess(normDisq, z.enum(DISQUALIFIERS)),
   // a long reason is still a reason: cut it instead of throwing the verdict away
   reason: z.preprocess((v) => (typeof v === "string" ? v.slice(0, 300) : ""), z.string()),

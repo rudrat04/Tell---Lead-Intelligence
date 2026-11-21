@@ -10,7 +10,7 @@ export function regionInScopeSql(pack: Pack, regionColumn: SQL | unknown): SQL {
 
 /** What the site / DNS / infra watch writes: GTM states and events, meaningless for a drug maker or a contractor. */
 export const WATCH_SIGNAL_TYPES = ["attribution_gap", "content_motion", "cta_sales_led", "email_auth_gap", "funding_raise", "gtm_tool_added", "has_gtm_agency",
-  "leaky_capture", "pricing_page_added", "product_launch", "site_health_poor", "stack_sprawl", "tool_overlap", "marketing_subdomain", "outbound_domain"];
+  "leaky_capture", "pricing_page_added", "product_launch", "site_health_poor", "stack_sprawl", "tool_overlap", "marketing_subdomain", "outbound_domain", "tool_sunset"];
 
 /** Accounts in an industry that counts at least one of `types` (industries.yaml `signals`), or whose industry is
  *  unknown / unscoped: watchers skip the rest instead of fetching pages whose findings scoring would drop. */

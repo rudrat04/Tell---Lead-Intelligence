@@ -25,7 +25,7 @@ export const FAST_LANE_MAX_AGE_DAYS = 14;
  * keeps seeing it (signals.last_seen_at). Seen within STATE_SEEN_DAYS (a weekly watch plus one missed run) = current, and
  * its age stops at STATE_MAX_AGE_DAYS. Once it stops being seen it ages from the last time it was.
  */
-export const STATE_SIGNAL_TYPES = new Set(["tool_overlap", "stack_sprawl", "leaky_capture", "has_gtm_agency", "email_auth_gap", "attribution_gap", "site_health_poor", "role_gap"]);
+export const STATE_SIGNAL_TYPES = new Set(["tool_overlap", "stack_sprawl", "leaky_capture", "has_gtm_agency", "email_auth_gap", "attribution_gap", "site_health_poor", "role_gap", "tool_sunset"]);
 export const STATE_SEEN_DAYS = 15;
 export const STATE_MAX_AGE_DAYS = 30;
 
