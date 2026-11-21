@@ -22,15 +22,22 @@ export function parseExaPerson(r: ExaResult): PeopleHit | null {
   return { name: (person.name ?? r.title ?? "").trim() || null, url: r.url, roles };
 }
 
+/** Exa refuses a key with these when its credits are spent, it is rate limited or revoked */
+const EXA_REFUSED = new Set([401, 402, 403, 429]);
+/**
+ * One Exa search request. When the key is refused and EXA_API_KEY_2 is set, the very same request is sent once with the
+ * second key, so the answer (and everything parsed from it) is what the first key would have returned. Exported for tests.
+ */
+export async function exaRequest(body: Record<string, unknown>, apiKey: string, fetcher: typeof fetch = fetch, second = process.env.EXA_API_KEY_2): Promise<Response> {
+  const go = (k: string) => fetcher("https://api.exa.ai/search", { method: "POST", headers: { "x-api-key": k, "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  const res = await go(apiKey);
+  return !res.ok && EXA_REFUSED.has(res.status) && second && second !== apiKey ? go(second) : res;
+}
+
 export const exaPeopleSearch = (apiKey = process.env.EXA_API_KEY): PeopleSearch => ({
   async search(query, num = 5) {
     if (!apiKey) throw new Error("EXA_API_KEY is not set");
-    const res = await fetch("https://api.exa.ai/search", {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "content-type": "application/json" },
-      body: JSON.stringify({ query, category: "people", type: "auto", numResults: num }),
-      signal: AbortSignal.timeout(30_000),
-    });
+    const res = await exaRequest({ query, category: "people", type: "auto", numResults: num }, apiKey);
     if (!res.ok) throw new Error(`Exa search ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const j = (await res.json()) as { results?: ExaResult[] };
     return (j.results ?? []).map(parseExaPerson).filter((x): x is PeopleHit => !!x);
@@ -55,12 +62,7 @@ export function parseExaCompanies(j: unknown): CompanyHit[] {
 /** Exa company search for a domain (~1 search credit). The caller must check the result's website is that domain. */
 export async function exaCompanySearch(domain: string, apiKey = process.env.EXA_API_KEY, numResults = 3): Promise<CompanyHit[]> {
   if (!apiKey) throw new Error("EXA_API_KEY is not set");
-  const res = await fetch("https://api.exa.ai/search", {
-    method: "POST",
-    headers: { "x-api-key": apiKey, "content-type": "application/json" },
-    body: JSON.stringify({ query: domain, category: "company", type: "auto", numResults }),
-    signal: AbortSignal.timeout(30_000),
-  });
+  const res = await exaRequest({ query: domain, category: "company", type: "auto", numResults }, apiKey);
   if (!res.ok) throw new Error(`Exa company search ${res.status}`);
   return parseExaCompanies(await res.json());
 }

@@ -1,9 +1,11 @@
 /**
- * Funding news: "X raises $Y" headlines from a news search API (Serper news, Google News results). Only the headline,
- * link, date and outlet are read; articles are never fetched. (Google News RSS is not used: its robots.txt disallows
- * every path but the home page, and blocks AI crawlers by name.) The company name comes from the headline; its
- * website is proven separately (company search: name and domain must both match) before it becomes an account.
+ * Funding news: "X raises $Y" headlines from a news search API (Serper news, Google News results; Tavily news when a
+ * Serper call fails). Only the headline, link, date and outlet are read; articles are never fetched. (Google News RSS is
+ * not used: its robots.txt disallows every path but the home page, and blocks AI crawlers by name.) The company name
+ * comes from the headline; its website is proven separately (company search: name and domain must both match) before it
+ * becomes an account.
  */
+import { tavilySearch, tavilyToNews } from "./tavily.js";
 
 export interface NewsItem { title: string; url: string; postedAt: Date | null; outlet?: string }
 
@@ -90,10 +92,15 @@ export function serperNews(opts: { apiKey: string; country: string; timeRange: "
       headers: { "x-api-key": opts.apiKey, "content-type": "application/json" },
       body: JSON.stringify({ q, num: 10, gl: opts.country, hl: "en", tbs: `qdr:${opts.timeRange}` }),
       signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) throw new Error(`serper news -> ${res.status}`);
-    const j = (await res.json()) as { news?: { title?: string; link?: string; date?: string; source?: string }[] };
+    }).catch((e: unknown) => e as Error);
     const now = opts.now?.() ?? new Date();
+    if (res instanceof Error || !res.ok) {
+      // Serper out of credits / refused: Tavily's news search, as Serper news items
+      const fb = await tavilySearch({ query: q, topic: "news", timeRange: opts.timeRange, gl: opts.country });
+      if (fb) return tavilyToNews(fb, now);
+      throw res instanceof Error ? res : new Error(`serper news -> ${res.status}`);
+    }
+    const j = (await res.json()) as { news?: { title?: string; link?: string; date?: string; source?: string }[] };
     return (j.news ?? []).flatMap((n) => (n.title && n.link ? [{ title: n.title, url: n.link, postedAt: newsDate(n.date, now), outlet: n.source }] : []));
   };
 }

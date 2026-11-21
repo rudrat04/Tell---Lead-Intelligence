@@ -55,7 +55,9 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          EXA_API_KEY_2: ${{ secrets.EXA_API_KEY_2 }}
       # niche public records (pack sources.niche): FDA shortages, ANDA approvals, 510(k) clearances, federal contracts
       # (ending and newly won), Medicare certifications, SEC Form D by industry, city permits and FMCSA carriers (Socrata).
       # Only Form D needs SEC_USER_AGENT; OPENFDA_API_KEY and SOCRATA_APP_TOKEN just raise rate limits.
@@ -68,7 +70,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          EXA_API_KEY_2: ${{ secrets.EXA_API_KEY_2 }}
           BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
+          BRANDFETCH_BRAND_API: ${{ secrets.BRANDFETCH_BRAND_API }}
           DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
           OPENFDA_API_KEY: ${{ secrets.OPENFDA_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
@@ -76,6 +80,7 @@ jobs:
           SOCRATA_APP_SECRET: ${{ secrets.SOCRATA_APP_SECRET }}
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
       # JSearch (Google for Jobs: LinkedIn/Naukri/Indeed listings) before the diff, so boards it finds get today's baseline
       - name: JSearch roles
@@ -112,6 +117,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
 
       # Your labels from the Sheet (and any rows a failed append left behind) before today's scoring
@@ -157,6 +163,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # live "news" examples for a play's changes (market-lookups, pack sources.niche.market_news_per_day)
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '0.08' }}
           ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}
@@ -166,9 +173,12 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          EXA_API_KEY_2: ${{ secrets.EXA_API_KEY_2 }}
           DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
           QUICKEMAILVERIFICATION_API_KEY: ${{ secrets.QUICKEMAILVERIFICATION_API_KEY }}
           HUNTER_API_KEY: ${{ secrets.HUNTER_API_KEY }}
+          INBOXTRUE_API_KEY: ${{ secrets.INBOXTRUE_API_KEY }}
+          APOLLO_API_KEY: ${{ secrets.APOLLO_API_KEY }}
           PROSPEO_API_KEY: ${{ secrets.PROSPEO_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # one-tap Good/Bad links (Worker URL + signing secret); without them the digest has no buttons
@@ -195,9 +205,12 @@ jobs:
           AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          EXA_API_KEY_2: ${{ secrets.EXA_API_KEY_2 }}
           BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
+          BRANDFETCH_BRAND_API: ${{ secrets.BRANDFETCH_BRAND_API }}
           DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}

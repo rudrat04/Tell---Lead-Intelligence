@@ -226,3 +226,17 @@ describe("freelist inputs come from the lead's own quotes", () => {
     expect(toCsv([{ a: "x, y", b: 2 }])).toBe('a,b\n"x, y",2\n');
   });
 });
+
+import { confirmByBrand } from "./niche.js";
+describe("Brand API confirms a Brandfetch match whose region is unknown", () => {
+  const m = { hit: { name: "Contoso Pharma", url: "https://contosopharma.com", employees: null, description: "", country: null }, domain: "contosopharma.com" };
+  it("same domain + same name + a country = confirmed, with the country", () => {
+    expect(confirmByBrand("Contoso Pharma Ltd", m, { domain: "contosopharma.com", name: "Contoso Pharma", country: "India" }, lists)).toEqual({ ...m, hit: { ...m.hit, country: "India" } });
+  });
+  it("anything less leaves it unconfirmed (dropped, as before)", () => {
+    expect(confirmByBrand("Contoso Pharma Ltd", m, null, lists)).toBeNull();
+    expect(confirmByBrand("Contoso Pharma Ltd", m, { domain: "contosopharma.com", name: "Contoso Pharma", country: null }, lists)).toBeNull();
+    expect(confirmByBrand("Contoso Pharma Ltd", m, { domain: "contoso.com", name: "Contoso Pharma", country: "India" }, lists)).toBeNull();
+    expect(confirmByBrand("Contoso Pharma Ltd", m, { domain: "contosopharma.com", name: "Fabrikam Health", country: "India" }, lists)).toBeNull();
+  });
+});

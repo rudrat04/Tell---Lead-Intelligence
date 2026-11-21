@@ -9,6 +9,7 @@
  */
 import { userAgent } from "./identity.js";
 import type { CompanyHit } from "./people-search.js";
+import { tavilySearch, tavilyToCompanyHits } from "./tavily.js";
 
 const COUNTRY: Record<string, string> = { Q668: "India", Q30: "United States of America", Q145: "United Kingdom", Q16: "Canada", Q408: "Australia", Q334: "Singapore", Q878: "United Arab Emirates" };
 
@@ -43,8 +44,14 @@ export const titleName = (t: string) => t.split(/\s[|–—:·-]\s|\s\|\s?/)[0]!
 
 /** Google web results via Serper as company candidates (one credit). */
 export async function serperOrganic(apiKey: string, query: string, gl: string): Promise<CompanyHit[]> {
-  const res = await fetch("https://google.serper.dev/search", { method: "POST", headers: { "x-api-key": apiKey, "content-type": "application/json" }, body: JSON.stringify({ q: query, gl, num: 10 }), signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`serper ${res.status}`);
+  const res = await fetch("https://google.serper.dev/search", { method: "POST", headers: { "x-api-key": apiKey, "content-type": "application/json" }, body: JSON.stringify({ q: query, gl, num: 10 }), signal: AbortSignal.timeout(30_000) })
+    .catch((e: unknown) => e as Error);
+  if (res instanceof Error || !res.ok) {
+    // Serper out of credits / refused: Tavily's web results, as the same company candidates (matchCompany still decides)
+    const fb = await tavilySearch({ query, topic: "general", gl });
+    if (fb) return tavilyToCompanyHits(fb, titleName);
+    throw res instanceof Error ? res : new Error(`serper ${res.status}`);
+  }
   const j = (await res.json()) as { organic?: { title?: string; link?: string; snippet?: string }[] };
   return (j.organic ?? []).slice(0, 6).flatMap((o) => (o.link && o.title ? [{ name: titleName(o.title), url: o.link, employees: null, description: o.snippet ?? "", country: null }] : []));
 }
@@ -112,6 +119,25 @@ export async function brandfetchSearch(name: string, clientId = process.env.BRAN
   if (!res.ok) throw new Error(`brandfetch ${res.status}`);
   const j = (await res.json()) as { name?: string; domain?: string }[];
   return (Array.isArray(j) ? j : []).flatMap((b) => (b.domain && b.name ? [{ name: b.name, url: `https://${b.domain}`, employees: null, description: "", country: /\.in$/i.test(b.domain) ? "India" : null }] : []));
+}
+
+/** What Brandfetch's Brand API knows about a domain (only the facts used to confirm it). */
+export interface BrandFacts { domain: string; name: string | null; country: string | null }
+/** Brand API response -> facts (pure; exported for tests). */
+export function parseBrand(j: unknown): BrandFacts | null {
+  const b = j as { domain?: string; name?: string | null; company?: { location?: { country?: string | null } | null } | null } | null;
+  return b?.domain ? { domain: b.domain.toLowerCase().replace(/^www\./, ""), name: b.name ?? null, country: b.company?.location?.country ?? null } : null;
+}
+/**
+ * Brandfetch Brand API by domain (BRANDFETCH_BRAND_API, a server key; the free plan is 100 fetches in total, not per
+ * month). `cachedOnly`: Brandfetch never crawls, and a domain it doesn't already know answers 204, which costs nothing.
+ * `charged` = whether this call used a fetch (200 / 404 count; 204 and errors don't).
+ */
+export async function brandfetchBrand(domain: string, key = process.env.BRANDFETCH_BRAND_API, fetcher: typeof fetch = fetch): Promise<{ facts: BrandFacts | null; charged: boolean }> {
+  if (!key) return { facts: null, charged: false };
+  const res = await fetcher(`https://api.brandfetch.io/v2/brands/domain/${encodeURIComponent(domain)}?cachedOnly=true`, { headers: { authorization: `Bearer ${key}`, accept: "application/json" }, signal: AbortSignal.timeout(20_000) });
+  if (res.status === 200) return { facts: parseBrand(await res.json()), charged: true };
+  return { facts: null, charged: res.status === 404 };
 }
 
 /** Diffbot Knowledge Graph organisations (pure parse; exported for tests). */

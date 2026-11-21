@@ -74,6 +74,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          EXA_API_KEY_2: ${{ secrets.EXA_API_KEY_2 }}
       # Weekly: past clients (pnpm network clients) who started a new job in the last 90 days (counts only)
       - name: Champion watch
         if: always()
@@ -82,6 +83,7 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          EXA_API_KEY_2: ${{ secrets.EXA_API_KEY_2 }}
       # Weekly self-tuning proposals from your labels (never applied automatically; counts only in this log)
       - name: Tuning proposals
         if: always()

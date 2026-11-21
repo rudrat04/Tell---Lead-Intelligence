@@ -43,6 +43,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           TICK_MAX_PER_SOURCE: ${{ inputs.max_per_source }}
       # niche records over the per-run lookup cap wait in niche_queue; each tick looks up the most valuable few,
@@ -56,9 +57,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HAIKU_DAILY_CAP_USD: ${{ vars.HAIKU_DAILY_CAP_USD || '0.06' }}
           EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          EXA_API_KEY_2: ${{ secrets.EXA_API_KEY_2 }}
           BRANDFETCH_SEARCH_API: ${{ secrets.BRANDFETCH_SEARCH_API }}
+          BRANDFETCH_BRAND_API: ${{ secrets.BRANDFETCH_BRAND_API }}
           DIFFBOT_TOKEN: ${{ secrets.DIFFBOT_TOKEN }}
           SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
       # same-day alert for the strongest fresh signals with a named contact (pack delivery.alerts); counts only
       - name: Lead alerts

@@ -4,7 +4,7 @@ import {
   fetchClearances, fetchAndaApprovals, fetchNewAwards, socrataRows, fillTemplate, fetchFormDFilings, fetchFormDDetail,
   type Shortage, type AndaHolder, type ExpiringAward, type NewProvider, type CompanyHit, type DeviceClearance, type AndaApproval, type NewAward, type FormDDetail, type FormDFiling,
   googlePlaces, serperPlaces, wikidataCompanies, serperOrganic, brandfetchSearch, diffbotOrganizations, fetchCompletedTrials, type CompletedTrial, fetchNppesWeekly, requestSamExtract, downloadSamExtract, fetchRecalls, serperNews, companyFromHeadline,
-  type PlaceHit, type NewNpi, type SamEntity, type Recall, type NewsItem,
+  type PlaceHit, type NewNpi, type SamEntity, type Recall, type NewsItem, brandfetchBrand, type BrandFacts,
 } from "@tell/watchers";
 import { passesHardFilters, regionInScope } from "@tell/intel";
 import { registrableDomain, nameMatchesDomain, checkHomepage, domainLists, type DomainLists } from "@tell/people";
@@ -96,12 +96,29 @@ export function matchCompany(name: string, hits: CompanyHit[], lists: DomainList
   return new Set(ok.map((x) => x.domain)).size === 1 ? ok[0]! : null;
 }
 
+/**
+ * A Brandfetch name-search match whose region is unknown, confirmed by the Brand API (pure; exported for tests): the
+ * brand Brandfetch holds for that domain must be the same domain, carry the record's name (matchCompany's own rules)
+ * and say where the company is. Anything less = no confirmation, and the match is dropped as before.
+ */
+export function confirmByBrand(name: string, m: { hit: CompanyHit; domain: string }, f: BrandFacts | null, lists: DomainLists): { hit: CompanyHit; domain: string } | null {
+  if (!f || !f.country || !f.name || f.domain !== m.domain) return null;
+  return matchCompany(name, [{ name: f.name, url: `https://${f.domain}`, employees: null, description: "", country: f.country }], lists) ? { ...m, hit: { ...m.hit, country: f.country } } : null;
+}
+
+/** Brand API fetches used so far, all time (the free plan's 100 are a one-off allowance) */
+async function brandFetchesUsed(): Promise<number> {
+  return Number((await getDb().select({ n: sql<number>`coalesce(sum(${usageDaily.used}), 0)` }).from(usageDaily).where(eq(usageDaily.service, "brandfetch_brand")))[0]?.n ?? 0);
+}
+
 interface Deps {
   pack: Pack; companies?: (q: string) => Promise<CompanyHit[]>; usage?: UsageStore; now?: Date; homepage?: typeof checkHomepage;
   /** free / web candidates (tests pass fakes; null = off) */
   wiki?: ((name: string) => Promise<CompanyHit[]>) | null; web?: ((q: string, region: string) => Promise<CompanyHit[]>) | null;
   /** Brandfetch name search (free) and Diffbot organisations (capped: DIFFBOT_PER_DAY, usage_daily "diffbot") */
   brand?: ((name: string) => Promise<CompanyHit[]>) | null; diffbot?: ((name: string) => Promise<CompanyHit[]>) | null;
+  /** Brandfetch Brand API by domain (cached brands only, BRANDFETCH_BRAND_TOTAL fetches all time, usage_daily "brandfetch_brand") */
+  brandFacts?: ((domain: string) => Promise<BrandFacts | null>) | null;
   /** industry for segment "auto" records, from the company's description */
   classify?: ((name: string, domain: string, description: string) => Promise<string | null>) | null;
 }
@@ -139,6 +156,13 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
   const wiki = deps.wiki !== undefined ? deps.wiki : live && rcfg.wikidata ? wikidataCompanies : null;
   const brand = deps.brand !== undefined ? deps.brand : live && process.env.BRANDFETCH_SEARCH_API ? (n: string) => brandfetchSearch(n) : null;
   const diffbot = deps.diffbot !== undefined ? deps.diffbot : live && process.env.DIFFBOT_TOKEN ? (n: string) => diffbotOrganizations({ name: n }) : null;
+  const brandTotal = Number(process.env.BRANDFETCH_BRAND_TOTAL ?? 90);
+  const brandFacts = deps.brandFacts !== undefined ? deps.brandFacts : live && process.env.BRANDFETCH_BRAND_API ? async (d: string) => {
+    if ((await brandFetchesUsed()) >= brandTotal) return null;
+    const r = await brandfetchBrand(d);
+    if (r.charged) await usage.addSpend("brandfetch_brand", 1, brandTotal);
+    return r.facts;
+  } : null;
   // organisations a day for niche names (each is 25 Diffbot credits; company facts has its own DIFFBOT_FACTS_PER_DAY)
   const diffbotCap = Number(process.env.DIFFBOT_PER_DAY ?? 6);
   const serperKey = process.env.SERPER_API_KEY;
@@ -230,6 +254,8 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
     if (!m && brand && !freeTried) {
       const b = matchCompany(r.name, await brand(r.name).catch(() => []), lists);
       if (b && (b.hit.country || r.knownRegion || r.regions.length === 1)) m = b;
+      // region unknown: the Brand API can confirm the domain and say where the company is (otherwise dropped, as before)
+      else if (b && brandFacts) m = confirmByBrand(r.name, b, await brandFacts(b.domain).catch(() => null), lists);
     }
     // Diffbot proves website, country and size together (25 credits each: a few a day)
     if (!m && diffbot && !freeTried && (await usage.spentToday("diffbot")) < diffbotCap) {

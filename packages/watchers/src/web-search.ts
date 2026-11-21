@@ -1,4 +1,5 @@
 import { RawItemSchema, type RawItem, type Watcher } from "./types.js";
+import { tavilySearch, tavilyToSearchHits } from "./tavily.js";
 
 /**
  * Web search as a source: public posts asking for help (LinkedIn, X, forums) found through a search API, so no
@@ -119,8 +120,13 @@ export function serperSearch(opts: { apiKey: string; timeRange: string; country:
       // free Serper accounts reject more than 10 results per search
       body: JSON.stringify({ q, num: 10, gl: country, hl: "en", tbs: `qdr:${opts.timeRange}` }),
       signal: AbortSignal.timeout(30_000),
-    });
-    if (!res.ok) throw new Error(`serper -> ${res.status}`);
+    }).catch((e: unknown) => e as Error);
+    if (res instanceof Error || !res.ok) {
+      // Serper out of credits / refused: the same search on Tavily, in Serper's shape
+      const fb = await tavilySearch({ query: q, topic: "general", timeRange: opts.timeRange, gl: country });
+      if (fb) return tavilyToSearchHits(fb);
+      throw res instanceof Error ? res : new Error(`serper -> ${res.status}`);
+    }
     const j = (await res.json()) as { organic?: SearchHit[] };
     return j.organic ?? [];
   };
