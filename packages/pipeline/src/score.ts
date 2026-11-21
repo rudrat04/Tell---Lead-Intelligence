@@ -59,7 +59,9 @@ export function configVersion(pack: Pack): string {
 /** Daily scoring run (plan 8d). Writes scores + plays and returns the ranking for the digest. */
 /** poolScale: with region groups, each group's size is multiplied by this (the digest's pool_multiplier); maxLeads is
  *  the size of a single list when there are no groups. */
-export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: number; poolScale?: number; write?: boolean; minScore?: number }): Promise<ScoreRunResult> {
+/** requireJudged (judged mode, set by the digest once the judge has worked today): accounts not judged yet can't be
+ *  leads, so legacy and judged scores never compete in one list; they're judged on a later run. */
+export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: number; poolScale?: number; write?: boolean; minScore?: number; requireJudged?: boolean }): Promise<ScoreRunResult> {
   const { pack } = opts;
   const now = opts.now ?? new Date();
   const db = getDb();
@@ -183,8 +185,9 @@ export async function runScoring(opts: { pack: Pack; now?: Date; maxLeads?: numb
   const floorOf = (r: { account: ScoredAccount }) => opts.minScore ?? minScoreFor(pack, r.account.region, r.account.segment);
   const criticPassed = results.filter((r) => verdicts.get(r.account.id)?.pass !== false);
   // score threshold: below it never reaches the email or Sheet (the next lead above it takes the slot)
-  const passed = criticPassed.filter((r) => !r.score.eligible || displayScore(r.score) >= floorOf(r));
-  const belowMinScore = criticPassed.length - passed.length;
+  const overFloor = criticPassed.filter((r) => !r.score.eligible || displayScore(r.score) >= floorOf(r));
+  const belowMinScore = criticPassed.length - overFloor.length;
+  const passed = overFloor.filter((r) => !(opts.requireJudged && r.score.needsJudge));
   // below the floor only because size or segment is unknown: worth a company-facts lookup (the digest fills them and
   // re-scores). Without this, facts were looked up only for accounts already over the floor, so unknown facts kept
   // an account under it forever. Closest to the floor first, so the per-run lookup budget goes where it can matter.

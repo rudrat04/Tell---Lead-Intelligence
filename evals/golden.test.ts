@@ -6,7 +6,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
-import { validateAnalysis, type AnalystInput } from "@tell/extract";
+import { validateAnalysis, validateJudged, type AnalystInput } from "@tell/extract";
+import { listReady } from "@tell/pipeline";
 import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic, buildEvidence, scoreAccount, type JobRow, type SignalRow } from "@tell/intel";
 
 const load = <T>(f: string): T[] =>
@@ -21,6 +22,27 @@ function report(name: string, results: { ok: boolean; label: string }[]) {
 }
 
 describe("golden sets", () => {
+  it("opportunity judge: ratings stand on cited evidence, offers come from the catalog, no invented numbers", () => {
+    type Row = { note: string; evidence: string[]; reply: unknown; weak?: boolean; expect: { qualifies: boolean } & Partial<Record<"specific" | "urgent" | "prize" | "deliverable", number>> };
+    // a synthetic catalog (the fixture pack has none): two free steps and two paid ones
+    const caps = { capabilities: [
+      { id: "list_recompetes", name: "Recompete watchlist", deliver: "contracts ending in the next 12 months", free: true, list: "recompetes" as const, good_for: "" },
+      { id: "gtm_review", name: "Short GTM review", deliver: "a short written review of their setup", free: true, good_for: "" },
+      { id: "teaming_outreach", name: "Teaming outreach", deliver: "outreach to primes", free: false, good_for: "" },
+      { id: "gtm_system_build", name: "GTM system build", deliver: "CRM and routing set up", free: false, good_for: "" },
+    ] };
+    const judgePack = { ...pack, capabilities: caps };
+    const rows = load<Row>("judge.jsonl");
+    const failures = report("judge", rows.map((r) => {
+      const ev = r.evidence.map((q, i) => ({ type: `t${i}`, quote: q, ageDays: 1, current: false, strength: r.weak ? 3 : 4 }));
+      const out = validateJudged(JSON.stringify(r.reply), ev, judgePack, listReady);
+      const scores = out.qualifies ? out.judged.rubric : out.rubric;
+      const bad = [out.qualifies !== r.expect.qualifies && `qualifies ${out.qualifies}`,
+        ...(["specific", "urgent", "prize", "deliverable"] as const).filter((k) => r.expect[k] != null && scores?.[k] !== r.expect[k]).map((k) => `${k} ${scores?.[k]} (want ${r.expect[k]})`)].filter(Boolean);
+      return { ok: !bad.length, label: `${r.note}: ${bad.join(", ")}${out.qualifies ? "" : ` [${out.reason}]`}` };
+    }));
+    expect(failures).toEqual([]);
+  });
   it("niche drafts: facts only, no overclaims, end on the offer question", () => {
     const rows = load<{ note: string; expect: "pass" | "reject"; evidence: string[]; subject: string; body: string }>("niche-drafts.jsonl");
     const failures = report("niche-drafts", rows.map((r) => {

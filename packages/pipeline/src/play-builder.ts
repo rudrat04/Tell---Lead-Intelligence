@@ -34,6 +34,7 @@ export async function buildMissingPlays(candidates: ScoreRunResult["playCandidat
       let r;
       const ind = c.account.segment ? pack.icp.industries[c.account.segment] : undefined;
       const industry = ind ? { label: ind.label, opportunity: ind.hint ?? ind.opportunity, offer: ind.offer, buyers: ind.buyers } : undefined;
+      if (res.failed >= 3 && res.built === 0) break; // the API is refusing: don't spend the run failing
       try { r = await buildPlay(llm, pack, c.account.name ?? c.account.domain, facts, ev, industry); } catch { res.failed++; continue; }
       res.built++;
       const play: StoredPlay | null = r.qualifies

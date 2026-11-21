@@ -1,4 +1,4 @@
-import type { Pack } from "@tell/config";
+import { regionGroupFor, type Pack } from "@tell/config";
 import { HaikuClient, judgeOpportunity, type LlmClient, type JudgeEvidence, type JudgeContext } from "@tell/extract";
 import { getDb, builtPlays, deliveries, labels, accounts, sql } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
@@ -62,8 +62,16 @@ export async function judgeAccounts(candidates: ScoreRunResult["judgeCandidates"
   }
   const db = getDb();
   const library = await libraryExamples(pack).catch(() => new Map<string, JudgeContext["examples"]>());
+  // each digest list gets its turn (round-robin), so fresh niche records don't use the whole budget before the India list
+  const byGroup = new Map<string, typeof candidates>();
+  for (const c of candidates) { const g = regionGroupFor(pack, c.account.region, c.account.segment)?.name ?? ""; byGroup.set(g, [...(byGroup.get(g) ?? []), c]); }
+  const queues = [...byGroup.values()], fair: typeof candidates = [];
+  for (let i = 0; fair.length < candidates.length; i++) for (const q of queues) if (q[i]) fair.push(q[i]!);
+  let failedInRow = 0;
   try {
-    for (const c of candidates.slice(0, pack.signals.score.judge.per_run)) {
+    for (const c of fair.slice(0, pack.signals.score.judge.per_run)) {
+      // the API refusing (no credit, outage): stop after three in a row instead of failing the whole budget
+      if (failedInRow >= 3) break;
       const drivers = c.score.drivers.slice(0, JUDGE_MAX_EVIDENCE);
       const ev: JudgeEvidence[] = drivers.map((e) => ({ type: e.type, quote: e.quote, ageDays: e.ageDays, current: e.current, strength: pack.signals.signals[e.type]?.strength ?? 3 }));
       const ind = c.account.segment ? pack.icp.industries[c.account.segment] : undefined;
@@ -74,7 +82,8 @@ export async function judgeAccounts(candidates: ScoreRunResult["judgeCandidates"
       };
       const facts = [c.account.sizeBand && `${c.account.sizeBand} people`, c.account.segment, c.account.region].filter(Boolean).join(", ");
       let r;
-      try { r = await judgeOpportunity(llm, pack, c.account.name ?? c.account.domain, facts, ev, ctx, listReady); } catch { res.failed++; continue; }
+      try { r = await judgeOpportunity(llm, pack, c.account.name ?? c.account.domain, facts, ev, ctx, listReady); } catch { res.failed++; failedInRow++; continue; }
+      failedInRow = 0;
       res.judged++;
       const play: StoredPlay | null = r.qualifies
         ? { title: r.judged.title, need: r.judged.need, angle: r.judged.angle, offer: r.judged.offer, personas: r.judged.personas, cited: r.judged.citations.map((i) => ({ type: drivers[i]!.type, url: drivers[i]!.url })), rubric: r.judged.rubric, free: r.judged.free, paid: r.judged.paid }

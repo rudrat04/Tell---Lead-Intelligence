@@ -75,7 +75,10 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   if (opts.test && (!to || !from)) return { status: "skipped", reason: "delivery.digest.to / from not set in the pack", leads: 0, watchlist: 0, personLeads: 0 };
   const max = leadCap(pack); // Infinity when max_leads is 0: every lead over min_score
   // score a pool of pool_multiplier x the leads, find who to contact there, drop leads with nobody to contact, re-rank by reach
-  const scoreRun = (write: boolean) => runScoring({ pack, write, maxLeads: max * pack.delivery.digest.pool_multiplier, poolScale: pack.delivery.digest.pool_multiplier });
+  // judged mode: once the judge has worked this run, only judged accounts compete (requireJudged); if it couldn't run
+  // at all (no credit, outage), every account keeps its legacy score so the digest never goes out empty
+  let requireJudged = false;
+  const scoreRun = (write: boolean) => runScoring({ pack, write, maxLeads: max * pack.delivery.digest.pool_multiplier, poolScale: pack.delivery.digest.pool_multiplier, requireJudged });
   // first pass without writes (scores are written once, by the final pass)
   let score = await scoreRun(false);
   // company size + segment for pool accounts no source gave them for (Exa company index); re-score when any changed,
@@ -103,7 +106,10 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     try {
       const j = await judgeAccounts(score.judgeCandidates, pack);
       playNote = j.skipped ? `judged: ${j.skipped}` : `judged ${j.judged}: ${j.qualified} opportunities, ${j.rejected} no${j.failed ? `, ${j.failed} failed` : ""}${score.learnedLabels != null ? `; learned from ${score.learnedLabels} labelled leads` : ""}`;
-      if (j.judged) score = await scoreRun(false);
+      // the judge works today (it answered, or there was nothing new to judge): judged accounts only
+      requireJudged = j.judged > 0 || (!j.failed && j.skipped === "nothing to judge");
+      if (!requireJudged) playNote += " (legacy scores used)";
+      if (j.judged || requireJudged) score = await scoreRun(false);
     } catch { playNote = "judge failed (legacy scores used)"; }
   } else if (pack.plays.build?.enabled) {
     try {
