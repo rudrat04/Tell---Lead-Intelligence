@@ -101,3 +101,37 @@ export async function searchTrials(keywords: string[], since: Date, max = 40): P
   if (!res.ok) throw new Error(`clinicaltrials ${res.status}`);
   return parseTrials(await res.json()).slice(0, max);
 }
+
+// ------------------------------------------------------------------------------------------------ Brandfetch, Diffbot
+
+/** Brandfetch Brand Search (BRANDFETCH_SEARCH_API = the client id; free, 500k/month, 200 per 5 minutes per IP):
+ *  name -> brands with their domain. No country: the domain's own TLD is the only region hint. */
+export async function brandfetchSearch(name: string, clientId = process.env.BRANDFETCH_SEARCH_API): Promise<CompanyHit[]> {
+  if (!clientId) return [];
+  const res = await fetch(`https://api.brandfetch.io/v2/search/${encodeURIComponent(name)}?c=${encodeURIComponent(clientId)}`, { headers: { accept: "application/json", "user-agent": userAgent() }, signal: AbortSignal.timeout(20_000) });
+  if (!res.ok) throw new Error(`brandfetch ${res.status}`);
+  const j = (await res.json()) as { name?: string; domain?: string }[];
+  return (Array.isArray(j) ? j : []).flatMap((b) => (b.domain && b.name ? [{ name: b.name, url: `https://${b.domain}`, employees: null, description: "", country: /\.in$/i.test(b.domain) ? "India" : null }] : []));
+}
+
+/** Diffbot Knowledge Graph organisations (pure parse; exported for tests). */
+export function parseDiffbotOrgs(j: unknown): CompanyHit[] {
+  const data = (j as { data?: { entity?: Record<string, any> }[] } | null)?.data ?? [];
+  return data.flatMap((d) => {
+    const e = d.entity ?? {};
+    const home = typeof e.homepageUri === "string" ? e.homepageUri : null;
+    if (!e.name || !home) return [];
+    return [{ name: String(e.name), url: /^https?:/i.test(home) ? home : `https://${home}`, employees: typeof e.nbEmployees === "number" ? e.nbEmployees : null,
+      description: String(e.description ?? "").replace(/\s+/g, " ").slice(0, 600), country: e.location?.country?.name ?? null }];
+  });
+}
+
+/** Diffbot Knowledge Graph search (DIFFBOT_TOKEN; 25 credits per organisation returned, 10,000 free a month).
+ *  `by`: a name search, or the company's own domain (company facts). */
+export async function diffbotOrganizations(q: { name?: string; domain?: string }, size = 2, token = process.env.DIFFBOT_TOKEN): Promise<CompanyHit[]> {
+  if (!token || (!q.name && !q.domain)) return [];
+  const dql = q.domain ? `type:Organization homepageUri:"${q.domain.replace(/"/g, "")}"` : `type:Organization name:"${q.name!.replace(/"/g, "")}"`;
+  const res = await fetch(`https://kg.diffbot.com/kg/v3/dql?token=${encodeURIComponent(token)}&size=${size}&query=${encodeURIComponent(dql)}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) throw new Error(`diffbot ${res.status}`);
+  return parseDiffbotOrgs(await res.json());
+}

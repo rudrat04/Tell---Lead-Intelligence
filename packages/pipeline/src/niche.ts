@@ -3,7 +3,7 @@ import {
   fetchShortages, fetchAndaHolders, holderCounts, fetchExpiringAwards, fetchNewProviders, exaCompanySearch, companyKey, isSourceEnabled,
   fetchClearances, fetchAndaApprovals, fetchNewAwards, socrataRows, fillTemplate, fetchFormDFilings, fetchFormDDetail,
   type Shortage, type AndaHolder, type ExpiringAward, type NewProvider, type CompanyHit, type DeviceClearance, type AndaApproval, type NewAward, type FormDDetail, type FormDFiling,
-  googlePlaces, serperPlaces, wikidataCompanies, serperOrganic, fetchCompletedTrials, type CompletedTrial, fetchNppesWeekly, requestSamExtract, downloadSamExtract, fetchRecalls, serperNews, companyFromHeadline,
+  googlePlaces, serperPlaces, wikidataCompanies, serperOrganic, brandfetchSearch, diffbotOrganizations, fetchCompletedTrials, type CompletedTrial, fetchNppesWeekly, requestSamExtract, downloadSamExtract, fetchRecalls, serperNews, companyFromHeadline,
   type PlaceHit, type NewNpi, type SamEntity, type Recall, type NewsItem,
 } from "@tell/watchers";
 import { passesHardFilters, regionInScope } from "@tell/intel";
@@ -27,6 +27,8 @@ const RETRY_DAYS = 60;
 /** a name the free ways (Wikidata, Maps, web) couldn't place waits this long before they're tried again; Exa may
  *  still try it any day it has budget */
 const FREE_RETRY_DAYS = 7;
+/** bumped when a free resolver is added (v2: Brandfetch + Diffbot): names that failed before it get a new try */
+const FREE_RESOLVERS = "v2";
 
 /** One record to turn into account + signal. */
 export interface NicheRecord {
@@ -98,6 +100,8 @@ interface Deps {
   pack: Pack; companies?: (q: string) => Promise<CompanyHit[]>; usage?: UsageStore; now?: Date; homepage?: typeof checkHomepage;
   /** free / web candidates (tests pass fakes; null = off) */
   wiki?: ((name: string) => Promise<CompanyHit[]>) | null; web?: ((q: string, region: string) => Promise<CompanyHit[]>) | null;
+  /** Brandfetch name search (free) and Diffbot organisations (capped: DIFFBOT_PER_DAY, usage_daily "diffbot") */
+  brand?: ((name: string) => Promise<CompanyHit[]>) | null; diffbot?: ((name: string) => Promise<CompanyHit[]>) | null;
   /** industry for segment "auto" records, from the company's description */
   classify?: ((name: string, domain: string, description: string) => Promise<string | null>) | null;
 }
@@ -133,6 +137,10 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
   // injected company search (tests) = no live resolvers unless injected too
   const live = !deps.companies;
   const wiki = deps.wiki !== undefined ? deps.wiki : live && rcfg.wikidata ? wikidataCompanies : null;
+  const brand = deps.brand !== undefined ? deps.brand : live && process.env.BRANDFETCH_SEARCH_API ? (n: string) => brandfetchSearch(n) : null;
+  const diffbot = deps.diffbot !== undefined ? deps.diffbot : live && process.env.DIFFBOT_TOKEN ? (n: string) => diffbotOrganizations({ name: n }) : null;
+  // organisations a day for niche names (each is 25 Diffbot credits; company facts has its own DIFFBOT_FACTS_PER_DAY)
+  const diffbotCap = Number(process.env.DIFFBOT_PER_DAY ?? 6);
   const serperKey = process.env.SERPER_API_KEY;
   const web = deps.web !== undefined ? deps.web : live && rcfg.web_per_day > 0 && serperKey ? ((q: string, region: string) => serperOrganic(serperKey, q, region === "India" ? "in" : "us")) : null;
   let classify = deps.classify;
@@ -154,9 +162,9 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
       accountId = a?.id ?? null;
     }
     if (!accountId) {
-      if (seed && !seed.fitPass && seed.reason !== "deferred" && seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < RETRY_DAYS * DAY) continue;
+      if (seed && !seed.fitPass && !seed.reason?.startsWith("deferred") && seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < RETRY_DAYS * DAY) continue;
       // the free ways (Wikidata, Maps, web) already failed for this name this week: only Exa is left to try
-      const freeTried = seed?.reason === "deferred" && !!seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < FREE_RETRY_DAYS * DAY;
+      const freeTried = seed?.reason === `deferred:${FREE_RESOLVERS}` && !!seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < FREE_RETRY_DAYS * DAY;
       if (freeTried && searches >= cap) { res.capped++; await enqueue(seedSource, k, recs); continue; }
       res.looked++;
       const v = await resolve(r0, searches < cap, freeTried).catch(() => ({ reason: "error" } as Verdict));
@@ -164,8 +172,8 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
       // remember the free ways failed so tomorrow's runs don't spend Maps on it again
       if (v.reason === "deferred") {
         res.looked--; res.capped++; await enqueue(seedSource, k, recs);
-        await db.insert(companySeeds).values({ source: seedSource, sourceId: k, fitPass: false, reason: "deferred", siteCheckedAt: now, updatedAt: now })
-          .onConflictDoUpdate({ target: [companySeeds.source, companySeeds.sourceId], set: { fitPass: false, reason: "deferred", siteCheckedAt: now, updatedAt: now } });
+        await db.insert(companySeeds).values({ source: seedSource, sourceId: k, fitPass: false, reason: `deferred:${FREE_RESOLVERS}`, siteCheckedAt: now, updatedAt: now })
+          .onConflictDoUpdate({ target: [companySeeds.source, companySeeds.sourceId], set: { fitPass: false, reason: `deferred:${FREE_RESOLVERS}`, siteCheckedAt: now, updatedAt: now } });
         continue;
       }
       if (v.reason === "no-match") res.noMatch++;
@@ -216,6 +224,17 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
       return hit ? matchCompany(r.name, [{ name: hit.name, url: hit.website!, employees: null, description: hit.name, country: r.knownRegion ?? null }], lists) : null;
     };
     if (!m && wiki && !r.mapsFirst && !freeTried) m = matchCompany(r.name, await wiki(r.name).catch(() => []), lists, r.mustMention);
+    // Brandfetch (free) knows brands by name but not where they are: its match counts only when the region is known
+    // some other way (a .in domain, the record's own region, a source allowed in one region)
+    if (!m && brand && !freeTried) {
+      const b = matchCompany(r.name, await brand(r.name).catch(() => []), lists);
+      if (b && (b.hit.country || r.knownRegion || r.regions.length === 1)) m = b;
+    }
+    // Diffbot proves website, country and size together (25 credits each: a few a day)
+    if (!m && diffbot && !freeTried && (await usage.spentToday("diffbot")) < diffbotCap) {
+      await usage.addSpend("diffbot", 2, diffbotCap); // size=2: two organisations, 50 credits
+      m = matchCompany(r.name, await diffbot(r.name).catch(() => []), lists, r.mustMention);
+    }
     if (!m && r.mapsFirst && !freeTried) m = await viaMaps();
     // the company index costs a search (usage_daily "exa_niche", within the daily budget)
     let exaTried = false;

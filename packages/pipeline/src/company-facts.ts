@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { registrableDomain } from "@tell/people";
-import { exaCompanySearch, type CompanyHit } from "@tell/watchers";
+import { exaCompanySearch, diffbotOrganizations, type CompanyHit } from "@tell/watchers";
 import { HaikuClient, type LlmClient } from "@tell/extract";
 import { getDb, accounts, peopleSearches, and, eq, inArray, sql } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
@@ -73,7 +73,11 @@ export async function fillCompanyFacts(
   const res = { looked: 0, sized: 0, segmented: 0, described: 0, changed: [] as string[] };
   if (!accountIds.length) return res;
   const search = opts.search ?? (process.env.EXA_API_KEY ? (d: string) => exaCompanySearch(d) : null);
-  if (!search) return { ...res, skipped: "no EXA_API_KEY" };
+  // Diffbot by the company's own domain first (one organisation, 25 credits, within DIFFBOT_FACTS_PER_DAY, usage_daily "diffbot_facts"): size, country and
+  // description in one answer; Exa only when Diffbot has nothing
+  const byDomain = opts.search ? null : process.env.DIFFBOT_TOKEN ? (d: string) => diffbotOrganizations({ domain: d }, 1) : null;
+  const diffbotCap = Number(process.env.DIFFBOT_FACTS_PER_DAY ?? 6);
+  if (!search && !byDomain) return { ...res, skipped: "no EXA_API_KEY or DIFFBOT_TOKEN" };
   const write = opts.write !== false;
   const db = getDb();
   const rows = await db.select({ id: accounts.id, domain: accounts.domain, name: accounts.name, size: accounts.sizeBand, segment: accounts.segment, description: accounts.description }).from(accounts)
@@ -104,7 +108,11 @@ export async function fillCompanyFacts(
       res.looked++;
       let hit: CompanyHit | null = null;
       // name + domain finds the company's own record more often than the bare domain
-      try { hit = companyFor(a.domain, await search(a.name ? `${a.name} ${a.domain}` : a.domain), a.name); } catch { continue; /* Exa down: try next run */ }
+      if (byDomain && (await usage.spentToday("diffbot_facts")) < diffbotCap) {
+        await usage.addSpend("diffbot_facts", 1, diffbotCap);
+        hit = companyFor(a.domain, await byDomain(a.domain).catch(() => []), a.name);
+      }
+      if (!hit && search) { try { hit = companyFor(a.domain, await search(a.name ? `${a.name} ${a.domain}` : a.domain), a.name); } catch { continue; /* Exa down: try next run */ } }
       const set: { sizeBand?: string; segment?: string; description?: string } = {};
       if (hit?.description && !a.description) { set.description = profileLine(hit.description); res.described++; }
       if (hit?.employees && !a.size) { set.sizeBand = bandForHeadcount(hit.employees, pack.icp); res.sized++; }

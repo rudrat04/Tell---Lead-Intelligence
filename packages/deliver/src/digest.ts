@@ -1,6 +1,6 @@
 import { leadCap, type Pack } from "@tell/config";
 import {
-  runScoring, istDay, buildMissingPlays, judgeAccounts, nicheStats, contactsFor, attachEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  runScoring, istDay, buildMissingPlays, judgeAccounts, nicheStats, contactsFor, attachEmails, upgradeEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
@@ -136,6 +136,9 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   } catch { enrich.push("air-waterfall lookup failed"); }
   try { const e = await attachEmails(contacts, { write: !opts.dryRun }); enrich.push(`emails ${JSON.stringify(e.byStatus)} (${e.domains} domains checked)`); }
   catch { enrich.push("emails failed"); /* leads still go out with LinkedIn */ }
+  // today's leads only: verify guessed addresses, and find one where there is none (QuickEmailVerification, Hunter, Prospeo)
+  try { const u = await upgradeEmails(contacts, score.ranking.leads.map((l) => l.account.id), { write: !opts.dryRun }); enrich.push(u.skipped ? `email apis: ${u.skipped}` : `email apis: ${u.verified} verified, ${u.found} found, ${u.invalid} invalid`); }
+  catch { enrich.push("email apis failed"); }
   // Air Waterfall email enrichment runs only when you click "Find email" (digest button / Sheet column): pnpm enrich:requests
   // warm paths through your own network (pnpm network): shown on the lead, and a reach boost (icp.reach.warm_path)
   let champions: ChampionMove[] = [];
