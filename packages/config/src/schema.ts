@@ -442,6 +442,9 @@ export const SourcesSchema = z.object({
     })).default([]),
     /** Serper news searches per day for news_events (usage_daily "serper_news_events"; queries rotate) */
     news_per_day: z.number().int().min(0).max(50).default(4),
+    /** signal types you bring in yourself (`pnpm niche import <csv>`, `pnpm niche dmf <csv>`: tenders, RERA, customs,
+     *  DMFs): pack:map shows them as fed by your imports instead of warning that nothing writes them */
+    imports: z.array(z.string()).default([]),
     /** openFDA (no key needed; OPENFDA_API_KEY raises the daily limit): drugs on the FDA shortage list x the companies
      *  holding approved ANDAs for them. Holders HQ'd in `regions` become accounts (segment `segment`). */
     fda_shortage: z.object({
@@ -549,7 +552,7 @@ export const SourcesSchema = z.object({
       region: z.string().default("United States of America"),
     })).default([]),
   }).default({
-    per_run: 25, per_run_by_source: {}, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4,
+    per_run: 25, per_run_by_source: {}, daily_budget: 150, maps: { enabled: true, google_per_month: 600, serper_per_day: 5 }, news_events: [], news_per_day: 4, imports: [],
     fda_shortage: { enabled: false, regions: ["India"], segment: "pharma", skip_availability: ["Available"], max_substances: 150 },
     usaspending: { enabled: false, naics: [], set_asides: [], min_days: 60, max_days: 365, min_amount: 500_000, max_pages: 10, segment: "govcon", region: "United States of America" },
     cms_new_providers: { enabled: false, kinds: ["home_health", "hospice"], states: [], max_age_days: 365, segment: "home_health", region: "United States of America" },
@@ -846,6 +849,7 @@ export const PackSchema = z.object({
   if (n.anda_approvals?.enabled) checkSeg(n.anda_approvals.segment, ["sources", "niche", "anda_approvals", "segment"]);
   if (n.usaspending_awards?.enabled) n.usaspending_awards.groups.forEach((g, i) => checkSeg(g.segment, ["sources", "niche", "usaspending_awards", "groups", i, "segment"]));
   if (n.form_d?.enabled) for (const [ind, seg] of Object.entries(n.form_d.industries)) checkSeg(seg, ["sources", "niche", "form_d", "industries", ind]);
+  n.imports.forEach((t, i) => { if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["sources", "niche", "imports", i], message: `unknown signal type "${t}"` }); });
   n.socrata.forEach((x, i) => {
     if (!x.enabled) return;
     checkSeg(x.segment, ["sources", "niche", "socrata", i, "segment"]);

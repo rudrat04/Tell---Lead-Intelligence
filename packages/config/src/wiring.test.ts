@@ -57,6 +57,15 @@ describe("industry map (pack:map)", () => {
     expect(packWarnings(p).join("\n")).toMatch(/pharma: fda_shortage writes shortage_anda_dormant for it, which it doesn't count/);
     expect(packWarnings(p).join("\n")).toMatch(/pharma: no source writes anda_approved/);
   });
+  it("a type you import yourself (sources.niche.imports) is fed, not a warning", async () => {
+    const p = await pack((p) => {
+      p.icp.industries = { pharma: ind("Pharma", ["anda_approved"]) };
+      p.signals.signals.anda_approved = { class: "implicit", lr: 3, half_life_days: 60, strength: 4, fast_lane: false };
+      p.sources.niche.imports = ["anda_approved"];
+    });
+    expect(industryMap(p)[0]!.imported).toEqual(["anda_approved"]);
+    expect(packWarnings(p).join("\n")).not.toMatch(/no source writes/);
+  });
   it("capabilities go only to their industries; unscoped ones go everywhere", async () => {
     const cap = (id: string, industries: string[]) => ({ id, name: id, deliver: "a useful thing", free: true, good_for: "", industries });
     const p = { capabilities: { capabilities: [cap("permits", ["construction"]), cap("review", [])] } } as Pick<Pack, "capabilities">;

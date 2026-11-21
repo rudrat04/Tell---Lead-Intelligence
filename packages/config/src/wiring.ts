@@ -66,6 +66,8 @@ export interface IndustryWiring {
   feeds: Feed[];
   /** counted types written by general sources (job boards, watch, web search, funding...) */
   general: string[];
+  /** counted types you import yourself (sources.niche.imports) */
+  imported: string[];
   /** plays that can fire here: scoped to this industry, or unscoped with signals it counts */
   plays: { id: string; scoped: boolean; requires: string[]; offer: string | null; list: string | null }[];
   free: string[];
@@ -87,10 +89,11 @@ export function industryMap(pack: Pack): IndustryWiring[] {
     const feeding = myFeeds.filter((f) => counted(f.type));
     for (const f of myFeeds) if (!counted(f.type)) warnings.push(`${f.source} writes ${f.type} for it, which it doesn't count: lookups spent for nothing`);
     const general = (counts ?? []).filter((t) => GENERAL_SIGNAL_TYPES.has(t));
+    const imported = (counts ?? []).filter((t) => pack.sources.niche.imports.includes(t) && !GENERAL_SIGNAL_TYPES.has(t));
     if (counts) {
-      const fed = new Set([...feeding.map((f) => f.type), ...general]);
+      const fed = new Set([...feeding.map((f) => f.type), ...general, ...imported]);
       const unfed = counts.filter((t) => !fed.has(t));
-      if (unfed.length) warnings.push(`no source writes ${unfed.join(", ")} for it: only your own pnpm niche import`);
+      if (unfed.length) warnings.push(`no source writes ${unfed.join(", ")} for it (list them in sources.niche.imports if you import them yourself)`);
     } else if (inds.some(([, i]) => i.signals)) warnings.push("counts every signal type (set signals: the ones that show a need you can make an offer on)");
 
     const plays: IndustryWiring["plays"] = [];
@@ -123,7 +126,7 @@ export function industryMap(pack: Pack): IndustryWiring[] {
     if (dupHint) warnings.push(`same hint as "${dupHint[0]}", which sells a different list: the judge gets the wrong context`);
 
     out.push({ segment: seg, label: ind.label, regions, teamSize: ind.team_size ?? pack.icp.hard_filters.team_size, buyers: ind.buyers,
-      counts, feeds: feeding, general, plays, free, paid, digestList, warnings });
+      counts, feeds: feeding, general, imported, plays, free, paid, digestList, warnings });
   }
   return out;
 }
@@ -146,7 +149,7 @@ export function formatIndustryMap(pack: Pack): string {
     lines.push(`  counts   ${w.counts ? w.counts.join(", ") : "every signal type"}`);
     const bySource = new Map<string, string[]>();
     for (const f of w.feeds) bySource.set(f.source, [...(bySource.get(f.source) ?? []), f.type]);
-    lines.push(`  fed by   ${[...[...bySource].map(([s, t]) => `${s} (${t.join(", ")})`), ...(w.general.length ? [`general sources (${w.general.join(", ")})`] : [])].join("; ") || (w.counts ? "nothing" : "any source")}`);
+    lines.push(`  fed by   ${[...[...bySource].map(([s, t]) => `${s} (${t.join(", ")})`), ...(w.general.length ? [`general sources (${w.general.join(", ")})`] : []), ...(w.imported.length ? [`your imports (${w.imported.join(", ")})`] : [])].join("; ") || (w.counts ? "nothing" : "any source")}`);
     lines.push(`  plays    ${w.plays.length ? "" : "none"}`);
     for (const p of w.plays) lines.push(`    ${p.scoped ? "•" : "○"} ${p.id}: ${p.requires.join(" + ")}${p.list ? `  → list ${p.list}` : ""}${p.offer ? `  → ${p.offer.slice(0, 90)}${p.offer.length > 90 ? "…" : ""}` : ""}`);
     lines.push(`  offer    free: ${w.free.join(", ") || "none"}; paid: ${w.paid.join(", ") || "none"}`);
