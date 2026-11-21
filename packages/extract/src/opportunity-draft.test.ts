@@ -7,7 +7,7 @@ const input: OppDraftInput = {
   events: [{ quote: `Contoso Federal LLC's $8.0M Department of Veterans Affairs contract for "it modernization support" (NAICS 541512) ends 2027-06-30`, url: "https://x.test", reasons: ["won 3 contracts in NAICS 541512"], about: "Contoso Federal LLC" }],
   record: ["Won $4.0M from Department of Veterans Affairs in 2025"],
 };
-const good = { subject: "a va it contract is ending", body: "A VA contractor's $8.0M IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it; we build intelligence systems that surface these for teams like yours as they appear. Want to see what we found?" };
+const good = { subject: "a va it contract is ending", body: "A VA contractor's $8.0M IT modernization contract ends 2027-06-30. You've won 3 contracts in NAICS 541512 with the VA, so the recompete could suit you. We found it and a few others like it; we build a system that flags VA recompetes like this for your capture team. Want to see what we found?" };
 
 describe("opportunity draft checks", () => {
   it("a short, factual draft that ends on a question passes", async () => {
@@ -25,8 +25,15 @@ describe("opportunity draft checks", () => {
     const pack = await loadFixturePack();
     expect(draftProblems({ ...good, body: good.body.replace("A VA contractor's", "Contoso Federal's") }, input, pack)).toMatch(/names "Contoso Federal", the company behind the signal/);
     expect(draftProblems({ ...good, subject: "contoso's va contract" }, input, pack)).toMatch(/names "Contoso"/);
-    expect(draftProblems({ ...good, body: good.body.replace("; we build intelligence systems that surface these for teams like yours as they appear", "") }, input, pack)).toMatch(/doesn't say we build systems/);
+    expect(draftProblems({ ...good, body: good.body.replace("; we build a system that flags VA recompetes like this for your capture team", "") }, input, pack)).toMatch(/doesn't say we build systems/);
     expect(entityNames("Contoso Pharma Ltd.")).toEqual(["Contoso Pharma", "Contoso"]);
+    // nothing that finds the company in one search, and no stock lines
+    const news = { ...input, events: [{ quote: "Contoso Pharma to set up plant in Gujarat (Daily Business)", url: "u", reasons: ["offers granulation"], about: "Contoso Pharma" }] };
+    const ok = { subject: "a new plant in gujarat", body: "A drug maker is setting up a plant in Gujarat. That could mean granulators. We built a system that flags plants like this for your sales team. Want to see what we found?" };
+    expect(draftProblems(ok, news, pack)).toBe("");
+    expect(draftProblems({ ...ok, body: ok.body.replace("Gujarat.", "Gujarat, per Daily Business.") }, news, pack)).toMatch(/names the outlet "Daily Business"/);
+    expect(draftProblems({ ...ok, body: ok.body.replace("in Gujarat", "at 1200 W Fulton St") }, news, pack)).toMatch(/1200 W Fulton St/);
+    expect(draftProblems({ ...ok, body: ok.body.replace("That could mean", "The move is") }, news, pack)).toMatch(/stock phrase "The move is"/);
     expect(entityNames("Global Health Services LLC")).toEqual(["Global Health Services"]);
   });
   it("rewrites with the reasons, then gives up (no template)", async () => {
