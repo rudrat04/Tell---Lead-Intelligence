@@ -2,7 +2,7 @@ import type { Pack } from "@tell/config";
 import { WriterClient, writerEffort, analyzeLead, type AnalystInput } from "@tell/extract";
 import { getDb, deliveries, labels, accounts, signals, jobs, jobBoards, eq, and, sql } from "@tell/db";
 import { neonUsage } from "@tell/pipeline";
-import { ensureLeadHeaders, fillColumnById, storedRow } from "./sheets.js";
+import { ensureLeadHeaders, fillColumnById, storedRow, sheetsCall } from "./sheets.js";
 
 const DAY = 86_400_000;
 /** a follow-up goes 5 to 10 days after the first email */
@@ -30,6 +30,14 @@ export async function runFollowups(opts: { pack: Pack; dryRun?: boolean; now?: D
       and coalesce(d.sheet_row->>'Follow-up', '') = ''
       and coalesce(l.label, '') <> 'bad' and coalesce(l.outcome, '') not in ('replied', 'meeting', 'won')`)).rows as
     { id: string; account_id: string; delivered_at: string; sheet_row: unknown; name: string | null; domain: string; segment: string | null; size_band: string | null; region: string | null }[];
+  // only leads still in your Sheet (a rebuild removes rows off the ICP): a follow-up for a row you can't see is wasted
+  const sheetId = pack.delivery.sheet.spreadsheet_id;
+  if (sheetId) {
+    const j = await sheetsCall<{ values?: string[][] }>(`/${sheetId}/values/${encodeURIComponent("Leads!A:AZ")}`);
+    const [header, ...rows] = j.values ?? [];
+    const idCol = header?.findIndex((h) => h.trim() === "ID") ?? -1;
+    if (idCol >= 0) { const inSheet = new Set(rows.map((r) => (r[idCol] ?? "").trim())); due.splice(0, due.length, ...due.filter((d) => inSheet.has(d.id))); }
+  }
   res.due = due.length;
   if (!due.length) return res;
   if (!process.env.ANTHROPIC_API_KEY) return { ...res, skipped: "no ANTHROPIC_API_KEY" };
@@ -76,7 +84,6 @@ export async function runFollowups(opts: { pack: Pack; dryRun?: boolean; now?: D
     if (writer.spent > 0 && !opts.dryRun) await usage.addSpend("sonnet", writer.spent, cap);
   }
   res.written = written.size;
-  const sheetId = pack.delivery.sheet.spreadsheet_id;
   if (sheetId && written.size && !opts.dryRun) { await ensureLeadHeaders(sheetId); res.sheet = await fillColumnById(sheetId, "Follow-up", written); }
   return res;
 }

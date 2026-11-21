@@ -161,6 +161,13 @@ export async function ensureLeadHeaders(spreadsheetId: string): Promise<string[]
   const missing = LEAD_COLUMNS.filter((c) => !header.includes(c.toLowerCase()));
   if (!missing.length) return current;
   const start = header.length;
+  // a Sheet has a fixed grid (29 columns when it was made): widen it first, or writing a 30th header is refused
+  const meta = await sheetsCall<{ sheets: { properties: { sheetId: number; title: string; gridProperties: { columnCount: number } } }[] }>(`/${spreadsheetId}?fields=sheets.properties`);
+  const tab = meta.sheets.find((x) => x.properties.title === "Leads")?.properties;
+  const need = start + missing.length - (tab?.gridProperties.columnCount ?? 0);
+  if (tab && need > 0) {
+    await sheetsCall(`/${spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ appendDimension: { sheetId: tab.sheetId, dimension: "COLUMNS", length: need } }] }) });
+  }
   await sheetsCall(`/${spreadsheetId}/values/${encodeURIComponent(`Leads!${a1Col(start)}1:${a1Col(start + missing.length - 1)}1`)}?valueInputOption=RAW`, {
     method: "PUT", body: JSON.stringify({ values: [missing] }),
   });
