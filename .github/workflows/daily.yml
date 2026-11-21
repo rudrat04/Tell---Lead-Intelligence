@@ -175,6 +175,8 @@ jobs:
           # one-tap Good/Bad links (Worker URL + signing secret); without them the digest has no buttons
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # public GitHub org commits for email patterns (5000 req/h instead of 60)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

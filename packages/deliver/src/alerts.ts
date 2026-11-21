@@ -1,4 +1,5 @@
 import { industryCounts, type Pack } from "@tell/config";
+import { sendTelegram, telegramConfigured, tgEsc } from "./telegram.js";
 import { getDb, signals, accounts, people, companySeeds, deliveries, eq, and, sql, inArray, desc } from "@tell/db";
 import { neonUsage } from "@tell/pipeline";
 import type { Sender } from "./gmail.js";
@@ -27,7 +28,10 @@ export async function runAlerts(opts: { pack: Pack; sender: Sender | null; now?:
   const res: AlertResult = { candidates: 0, sent: 0, noContact: 0 };
   if (!cfg?.enabled || !cfg.types.length) return { ...res, skipped: "alerts off in the pack" };
   const { to, from, from_name } = opts.pack.delivery.digest;
-  if (!to || !from || (!opts.sender && !opts.dryRun)) return { ...res, skipped: "no digest sender / recipient" };
+  // alerts follow the digest's channels: email (Gmail sender) and / or Telegram (instant on the phone)
+  const byEmail = opts.pack.delivery.channels.includes("email") && !!to && !!from && !!opts.sender;
+  const byTg = opts.pack.delivery.channels.includes("telegram") && telegramConfigured();
+  if (!byEmail && !byTg && !opts.dryRun) return { ...res, skipped: "no delivery channel for alerts" };
   const db = getDb(), now = opts.now ?? new Date(), usage = neonUsage();
   const left = cfg.max_per_day - (await usage.spentToday("alerts"));
   if (left <= 0) return { ...res, skipped: "daily alert cap reached" };
@@ -57,7 +61,8 @@ export async function runAlerts(opts: { pack: Pack; sender: Sender | null; now?:
     const html = `<p><b>${esc(acc.name ?? acc.domain)}</b> (${esc(acc.domain)})</p><p>${esc(s.quote)}<br><a href="${esc(s.url)}">source record</a></p><p>Contact: ${esc(who)}${play ? `<br>Play: ${esc(play.title)}` : ""}</p><p>Free list: <code>pnpm freelist ${esc(acc.domain)}</code></p><p style="color:#888">The full lead (draft, Sheet row) comes in tomorrow's digest.</p>`;
     if (opts.dryRun) { res.sent++; continue; } // counted as "would send"
     await usage.addSpend("alerts", 1, cfg.max_per_day);
-    await opts.sender!.send({ from, fromName: from_name, to, subject, html, text });
+    if (byEmail) await opts.sender!.send({ from: from!, fromName: from_name, to: to!, subject, html, text });
+    if (byTg) await sendTelegram([{ text: `🚨 <b>${tgEsc(subject)}</b>\n\n${tgEsc(s.quote)}\n<a href="${tgEsc(s.url)}">source</a>\n\nContact: ${tgEsc(who)}${play ? `\nPlay: ${tgEsc(play.title)}` : ""}\n<i>The full lead comes in tomorrow's digest.</i>` }]).catch(() => 0);
     await db.insert(companySeeds).values({ source: "alert", sourceId: key, fitPass: true, reason: s.id, siteCheckedAt: now, updatedAt: now }).onConflictDoNothing();
     res.sent++;
   }

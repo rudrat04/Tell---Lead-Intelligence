@@ -709,6 +709,8 @@ export const GigsSchema = z.object({
 });
 
 export const DeliverySchema = z.object({
+  /** where the digest and same-day alerts go: email (Gmail), telegram (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID), or both */
+  channels: z.array(z.enum(["email", "telegram"])).min(1).default(["email"]),
   digest: z.object({
     to: z.string().email().optional(),
     /** the Gmail / Google Workspace address that sends (the authorised OAuth account) */

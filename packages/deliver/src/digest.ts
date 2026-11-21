@@ -4,7 +4,8 @@ import {
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
-import { renderDigest, leadSheetRow, gigSheetRow, type DigestHealth, type DigestEmail } from "./render.js";
+import { renderDigest, leadSheetRow, gigSheetRow, emailDraft, type DigestHealth, type DigestEmail } from "./render.js";
+import { sendTelegram, summaryMessage, leadMessage, storeTelegramTexts, telegramConfigured } from "./telegram.js";
 import { runFollowups, type TouchBack } from "./followups.js";
 import { appendPendingLeads } from "./sheet-sync.js";
 import { assignDeliveryIds, labelLinks, enrichLink } from "./label-links.js";
@@ -196,17 +197,33 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     const n = pack.delivery.sheet.spreadsheet_id ? await appendPendingLeads(pack) : 0;
     return { status: "recorded", reason: "sheet only: no email sent", email, score, sheet: `appended ${n} lead${n === 1 ? "" : "s"}`, ...counts };
   }
-  // no sender configured yet: scores are written, nothing is sent, the day stays open
-  if (!opts.sender) return { status: "skipped", reason: "Gmail not configured (run pnpm gmail:auth, then add the GitHub secrets)", email, score, ...counts };
+  const useEmail = pack.delivery.channels.includes("email"), useTg = pack.delivery.channels.includes("telegram") && telegramConfigured();
+  // no channel that can send yet: scores are written, nothing is sent, the day stays open
+  if (!(useEmail && opts.sender) && !useTg) return { status: "skipped", reason: "no delivery channel configured (Gmail: pnpm gmail:auth; Telegram: TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID)", email, score, ...counts };
+  const tgMessages = (test: boolean) => [
+    summaryMessage(score, day, { touchBacks: touched.length, health: email.text.split("\nHEALTH\n")[1]?.split("\n")[0]?.replace(/^- /, ""), test }),
+    ...score.ranking.leads.map((l) => leadMessage(l, contacts.get(l.account.id), notes?.get(l.account.id), ids.get(l.account.id) ?? null, day, pack, test)),
+  ];
 
   if (opts.test) {
-    await opts.sender.send({ from: from!, fromName: pack.delivery.digest.from_name, to: to!, subject: `[TEST] ${email.subject}`, html: email.html, text: email.text });
+    if (useEmail && opts.sender) await opts.sender.send({ from: from!, fromName: pack.delivery.digest.from_name, to: to!, subject: `[TEST] ${email.subject}`, html: email.html, text: email.text });
+    if (useTg) await sendTelegram(tgMessages(true)).catch(() => 0);
     return { status: "sent", reason: "test: nothing recorded", email, score, ...counts };
   }
 
   const started = new Date();
+  let tgNote = "";
   try {
-    await opts.sender.send({ from: from!, fromName: pack.delivery.digest.from_name, to: to!, subject: email.subject, html: email.html, text: email.text });
+    if (useEmail && opts.sender) await opts.sender.send({ from: from!, fromName: pack.delivery.digest.from_name, to: to!, subject: email.subject, html: email.html, text: email.text });
+    if (useTg) {
+      // the brief and the draft wait in the Worker for the Brief / Draft buttons; then the messages go out
+      await storeTelegramTexts(score.ranking.leads.flatMap((l) => {
+        const d = ids.get(l.account.id), n = notes?.get(l.account.id);
+        return d ? [{ d, brief: n?.brief, draft: n?.email ? `${n.email.subject}\n\n${emailDraft(contacts.get(l.account.id), n, pack.delivery.email.signature, pack.copy.greeting)}` : undefined }] : [];
+      })).catch(() => false);
+      try { tgNote = `telegram: ${await sendTelegram(tgMessages(false))} messages`; }
+      catch (e) { if (!(useEmail && opts.sender)) throw e; tgNote = `telegram failed: ${String(e).slice(0, 80)}`; }
+    }
   } catch (e) {
     await db.insert(runs).values({ task: "digest", idempotencyKey: key, status: "error", error: String(e).slice(0, 500), startedAt: started, finishedAt: new Date() })
       .onConflictDoUpdate({ target: runs.idempotencyKey, set: { status: "error", error: String(e).slice(0, 500), finishedAt: new Date() } });
@@ -234,5 +251,5 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
       sheet = `append failed (retried next run): ${String(e).slice(0, 160)}`;
     }
   }
-  return { status: "sent", email, score, sheet, ...counts };
+  return { status: "sent", email, score, sheet: tgNote ? `${sheet}; ${tgNote}` : sheet, ...counts };
 }

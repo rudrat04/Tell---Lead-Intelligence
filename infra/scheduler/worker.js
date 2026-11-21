@@ -20,6 +20,13 @@
  * page's button POSTs; the request is queued in KV ("enrich:<id>") and enrich.yml is dispatched at once, which runs the
  * person through Air Waterfall and writes the answer into the Sheet. Nothing is enriched without that click.
  * The job reads /enrich-requests (and acks them) with the secret as a bearer token.
+ *
+ * Telegram (when the digest's channels include it): Telegram calls POST /tg for button taps (setWebhook with
+ * secret_token = TG_WEBHOOK_SECRET; requests without that header are refused, and only TELEGRAM_CHAT_ID is served).
+ *   g:<id> / b:<id>  label good / bad (stored as tap:<id>, exactly like the email links)
+ *   e:<id>           find email (queued as enrich:<id>, enrich.yml dispatched, as the email button)
+ *   br:<id> / dr:<id> send the brief / the email draft, which the digest stored with POST /tg-store (bearer LABEL_SECRET)
+ * Extra secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TG_WEBHOOK_SECRET.
  */
 
 // cron expression (UTC) -> workflow file to dispatch
@@ -96,20 +103,75 @@ async function enrich(request, env, ctx) {
     const f = await request.formData();
     const d = f.get("d"), s = f.get("s");
     if (!(await validEnrich(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
-    await env.LABELS.put(`enrich:${d}`, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 7 });
     // one dispatch per minute at most: a run processes every queued request
-    const last = await env.LABELS.get("enrich-dispatched-at");
-    if (!last || Date.now() - Number(last) > 60_000) {
-      await env.LABELS.put("enrich-dispatched-at", String(Date.now()), { expirationTtl: 3600 });
-      ctx?.waitUntil(dispatch(env, "enrich.yml").catch(() => { /* the daily run picks the request up */ }));
-    }
+    await queueEnrich(env, ctx, d);
     return page("Finding email", "<p>Finding the email now. It appears in your Sheet's <b>Enrich email</b> column in about 2 minutes.</p>");
   }
   return new Response("method not allowed", { status: 405 });
 }
 
+const tgApi = (env, method, body) => fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+/** Queue a find-email request and dispatch enrich.yml at most once a minute (shared by the email link and Telegram). */
+async function queueEnrich(env, ctx, d) {
+  await env.LABELS.put(`enrich:${d}`, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 7 });
+  const last = await env.LABELS.get("enrich-dispatched-at");
+  if (!last || Date.now() - Number(last) > 60_000) {
+    await env.LABELS.put("enrich-dispatched-at", String(Date.now()), { expirationTtl: 3600 });
+    ctx?.waitUntil(dispatch(env, "enrich.yml").catch(() => { /* the daily run picks the request up */ }));
+  }
+}
+
+/** Telegram cuts a message at 4,096 characters: send long text in parts, split at lines. */
+function tgParts(text, max = 4000) {
+  const out = []; let cur = "";
+  for (const line of String(text).split("\n")) { if (cur && cur.length + line.length + 1 > max) { out.push(cur); cur = ""; } cur = cur ? `${cur}\n${line}` : line.slice(0, max); }
+  if (cur) out.push(cur);
+  return out;
+}
+
+async function telegram(request, env, ctx) {
+  if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
+  if (!env.TG_WEBHOOK_SECRET || !sameText(request.headers.get("x-telegram-bot-api-secret-token") ?? "", env.TG_WEBHOOK_SECRET)) return new Response("forbidden", { status: 403 });
+  const update = await request.json().catch(() => null);
+  const q = update?.callback_query;
+  if (!q) return Response.json({ ok: true });
+  const chat = String(q.message?.chat?.id ?? "");
+  if (!env.TELEGRAM_CHAT_ID || chat !== String(env.TELEGRAM_CHAT_ID)) return Response.json({ ok: true }); // not your chat: ignored
+  const [op, d] = String(q.data ?? "").split(":");
+  let answer = "Unknown button";
+  if (UUID.test(d ?? "")) {
+    if (op === "g" || op === "b") {
+      const v = op === "g" ? "good" : "bad";
+      await env.LABELS.put(`tap:${d}`, JSON.stringify({ v, at: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 30 });
+      answer = v === "good" ? "Saved 👍 (reaches your Sheet with the next sync)" : "Saved 👎 (reaches your Sheet with the next sync)";
+    } else if (op === "e") {
+      await queueEnrich(env, ctx, d);
+      answer = "Finding the email: it appears in your Sheet in about 2 minutes";
+    } else if (op === "br" || op === "dr") {
+      const t = await env.LABELS.get(`tgtext:${d}`, "json");
+      const text = op === "br" ? t?.brief : t?.draft;
+      if (text) { for (const part of tgParts(text)) await tgApi(env, "sendMessage", { chat_id: chat, text: part, disable_web_page_preview: true, reply_to_message_id: q.message?.message_id }); answer = "Sent below"; }
+      else answer = op === "br" ? "No brief for this lead" : "No draft for this lead (it is in your Sheet when written)";
+    }
+  }
+  await tgApi(env, "answerCallbackQuery", { callback_query_id: q.id, text: answer });
+  return Response.json({ ok: true });
+}
+
+/** The digest stores each lead's brief and draft here for the Telegram buttons (bearer LABEL_SECRET, kept 30 days). */
+async function tgStore(request, env) {
+  if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
+  if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
+  const items = ((await request.json().catch(() => [])) ?? []).filter((x) => x && UUID.test(x.d ?? "")).slice(0, 100);
+  for (const x of items) await env.LABELS.put(`tgtext:${x.d}`, JSON.stringify({ brief: typeof x.brief === "string" ? x.brief.slice(0, 20000) : null, draft: typeof x.draft === "string" ? x.draft.slice(0, 8000) : null }), { expirationTtl: 60 * 60 * 24 * 30 });
+  return Response.json({ stored: items.length });
+}
+
 async function labels(request, env, ctx) {
   const url = new URL(request.url);
+  if (url.pathname === "/tg") return telegram(request, env, ctx);
+  if (url.pathname === "/tg-store") return tgStore(request, env);
   if (url.pathname === "/enrich-requests" || url.pathname === "/enrich-requests/ack") {
     if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
     return queue(request, env, "enrich");

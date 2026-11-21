@@ -87,3 +87,43 @@ describe("one-tap labels", () => {
     expect(env.LABELS.m.has(`enrich:${D}`)).toBe(false);
   });
 });
+
+describe("telegram buttons", () => {
+  const D = "11111111-2222-4333-8444-555555555555";
+  const kv = () => {
+    const m = new Map<string, string>();
+    return { m, put: async (k: string, v: string) => void m.set(k, v), get: async (k: string) => JSON.parse(m.get(k) ?? "null"), delete: async (k: string) => void m.delete(k),
+      list: async ({ prefix }: { prefix: string }) => ({ keys: [...m.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) };
+  };
+  const env = () => ({ LABEL_SECRET: "s3cret", TG_WEBHOOK_SECRET: "hook", TELEGRAM_BOT_TOKEN: "t", TELEGRAM_CHAT_ID: "42", GH_TOKEN: "g", GH_REPO: "o/r", LABELS: kv() });
+  const tap = (data: string, chat = 42, secret = "hook") => new Request("https://w.test/tg", { method: "POST", headers: { "x-telegram-bot-api-secret-token": secret, "content-type": "application/json" },
+    body: JSON.stringify({ callback_query: { id: "q1", data, message: { message_id: 7, chat: { id: chat } } } }) });
+  const calls: { url: string; body: any }[] = [];
+  const stub = () => { calls.length = 0; vi.stubGlobal("fetch", async (url: string, init: RequestInit) => { calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : null }); return new Response(null, { status: 204 }); }); };
+
+  it("refuses a webhook call without Telegram's secret header, and ignores other chats", async () => {
+    stub(); const e = env();
+    expect((await worker.fetch(tap(`g:${D}`, 42, "wrong"), e)).status).toBe(403);
+    await worker.fetch(tap(`g:${D}`, 99), e);
+    expect(e.LABELS.m.size).toBe(0);
+  });
+  it("👍 stores the same tap as the email link and answers the button", async () => {
+    stub(); const e = env();
+    await worker.fetch(tap(`g:${D}`), e, { waitUntil: () => {} });
+    expect(JSON.parse(e.LABELS.m.get(`tap:${D}`)!).v).toBe("good");
+    expect(calls.at(-1)!.url).toContain("/answerCallbackQuery");
+  });
+  it("Brief sends the stored text; /tg-store needs the secret", async () => {
+    stub(); const e = env();
+    expect((await worker.fetch(new Request("https://w.test/tg-store", { method: "POST", body: JSON.stringify([{ d: D, brief: "the brief" }]) }), e)).status).toBe(403);
+    await worker.fetch(new Request("https://w.test/tg-store", { method: "POST", headers: { authorization: "Bearer s3cret" }, body: JSON.stringify([{ d: D, brief: "the brief", draft: "the draft" }]) }), e);
+    await worker.fetch(tap(`br:${D}`), e, { waitUntil: () => {} });
+    expect(calls.find((c) => c.url.endsWith("/sendMessage"))!.body).toMatchObject({ chat_id: "42", text: "the brief" });
+  });
+  it("Find email queues the request", async () => {
+    stub(); const e = env(); const waits: Promise<unknown>[] = [];
+    await worker.fetch(tap(`e:${D}`), e, { waitUntil: (p: Promise<unknown>) => waits.push(p) });
+    await Promise.all(waits);
+    expect(e.LABELS.m.has(`enrich:${D}`)).toBe(true);
+  });
+});
