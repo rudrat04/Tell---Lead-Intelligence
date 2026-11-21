@@ -29,13 +29,32 @@ export function parseRobots(txt: string, agentToken = botToken()): Rule[] {
   return (mine.length ? mine : groups.filter((g) => g.agents.includes("*"))).flatMap((g) => g.rules);
 }
 
-const toRegex = (p: string) =>
-  new RegExp("^" + p.replace(/[.+?^{}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\\\$$|\$$/, "$"));
+/**
+ * robots.txt wildcard match (`*` = any run, trailing `$` = end), without regular expressions: a pattern of many stars
+ * ("*****.../alerts$", seen on a real site) turned into `.*.*.*...` backtracks exponentially and froze discovery for
+ * 15 minutes. Greedy two-pointer glob match: linear in practice, never exponential. Exported for tests.
+ */
+export function robotsMatch(pattern: string, path: string): boolean {
+  let p = pattern.replace(/\*+/g, "*");
+  const anchored = p.endsWith("$");
+  if (anchored) p = p.slice(0, -1);
+  // without `$`, the pattern only has to match a prefix of the path: same as a trailing star
+  if (!anchored && !p.endsWith("*")) p += "*";
+  let i = 0, j = 0, star = -1, mark = 0;
+  while (j < path.length) {
+    if (i < p.length && p[i] !== "*" && p[i] === path[j]) { i++; j++; }
+    else if (i < p.length && p[i] === "*") { star = i++; mark = j; }
+    else if (star >= 0) { i = star + 1; j = ++mark; }
+    else return false;
+  }
+  while (i < p.length && p[i] === "*") i++;
+  return i === p.length;
+}
 
 export function isPathAllowed(rules: Rule[], path: string): boolean {
   let best: Rule | null = null;
   for (const r of rules) {
-    if (!toRegex(r.pattern).test(path)) continue;
+    if (!robotsMatch(r.pattern, path)) continue;
     if (!best || r.pattern.length > best.pattern.length || (r.pattern.length === best.pattern.length && r.allow)) best = r;
   }
   return best ? best.allow : true;
