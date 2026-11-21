@@ -6,7 +6,7 @@ import type { RankInput } from "@tell/intel";
 import { getDb, analyses, and, inArray } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
 import { proofSample } from "./sample-list.js";
-import { profileFor, buyerSample, sampleEvidence } from "./buyer-signals.js";
+import { researchFor, marketPlay, playEvidence, briefText, type MarketPlay } from "./buyer-signals.js";
 import type { ScoredAccount } from "./score.js";
 
 /** Evidence items the analyst sees per lead (strongest first). */
@@ -14,7 +14,7 @@ export const ANALYST_MAX_EVIDENCE = 6;
 /** usage_daily service for the writer's spend */
 export const WRITER_USAGE = "sonnet";
 
-export interface LeadAnalysis extends Analysis { cachedFrom?: Date | null }
+export interface LeadAnalysis extends Analysis { cachedFrom?: Date | null; /** the intelligence brief (Sheet "Brief"), when a market play was built */ brief?: string }
 
 function inputFor(l: RankInput<ScoredAccount>, contact: Contact | null | undefined, version: string, pack: Pack): { input: AnalystInput; key: string; refs: { kind: string; id: string; url: string }[] } {
   const a = l.account, s = l.score;
@@ -53,6 +53,31 @@ export async function analyzeLeads(
   const version = `${WRITER_MODEL}:${createHash("sha256").update(analystSystemPrompt(pack)).digest("hex").slice(0, 8)}`;
   const prepared = leads.map((l) => ({ l, ...inputFor(l, contacts.get(l.account.id), version, pack) }));
 
+  // steps 2-4: research each lead's business, pick the changes in its market that would matter to it and find live
+  // examples (Haiku once per account; examples from the database). The play joins the draft's cache key, so a new
+  // play means a new email; the brief is rebuilt every run from current facts.
+  const plays = new Map<string, MarketPlay>();
+  const briefs = new Map<string, string>();
+  let researcher: HaikuClient | null = null;
+  if (pack.modules.modules.length && !opts.llm && process.env.ANTHROPIC_API_KEY) {
+    const hcap = Number(process.env.HAIKU_DAILY_CAP_USD ?? 1), left = hcap - (await (opts.usage ?? neonUsage()).spentToday("haiku"));
+    if (left > 0) researcher = new HaikuClient({ capUsd: Math.min(left, 0.2) });
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  for (const p of prepared) {
+    try {
+      const top = p.l.score.drivers[0];
+      const r = await researchFor(p.l.account, top?.quote, pack, researcher, write);
+      const mp = r ? await marketPlay(r, { id: p.l.account.id, region: p.l.account.region, segment: p.l.account.segment }, pack) : null;
+      if (!mp) continue;
+      plays.set(p.l.account.id, mp);
+      briefs.set(p.l.account.id, briefText(mp, { company: p.l.account.name ?? p.l.account.domain, ...(top ? { trigger: { quote: top.quote, url: top.url } } : {}) }, today));
+      p.key = createHash("sha256").update(`${p.key}|${mp.module}|${mp.changes.map((c) => `${c.id}:${c.examples.map((e) => e.accountId).join(",")}`).join(";")}`).digest("hex").slice(0, 24);
+    } catch { /* the lead goes without a market play */ }
+  }
+  if (researcher && researcher.spent > 0) await (opts.usage ?? neonUsage()).addSpend("haiku", researcher.spent, Number(process.env.HAIKU_DAILY_CAP_USD ?? 1));
+  res.buyerSamples = plays.size;
+
   const prior = await db.select().from(analyses).where(and(
     inArray(analyses.accountId, prepared.map((p) => p.l.account.id)),
     inArray(analyses.evidenceKey, prepared.map((p) => p.key)),
@@ -67,6 +92,7 @@ export async function analyzeLeads(
         hypothesis: hit.hypothesis, angle: hit.angle, opener: hit.opener, counterEvidence: hit.counterEvidence, confidence: hit.confidence ?? 0,
         email: hit.emailSubject && hit.emailBody ? { subject: hit.emailSubject, body: hit.emailBody } : null, linkedin: hit.linkedinMessage ?? null,
         citations: urls.map((u) => p.refs.findIndex((r) => r.url === u)).filter((i) => i >= 0), cachedFrom: hit.createdAt,
+        ...(briefs.has(p.l.account.id) ? { brief: briefs.get(p.l.account.id)! } : {}),
       });
       res.cached++;
     } else todo.push(p);
@@ -101,21 +127,19 @@ export async function analyzeLeads(
           if (sample) { p.input.evidence.push({ type: "public_record_sample", ageDays: 0, current: true, quote: sample.quote, url: sample.url }); proved = true; }
         } catch { /* the email goes without a sample */ }
       }
-      // every industry: their customers showing new demand (accounts in the industries that buy from them, with a fresh
-      // signal), when no public-record list already proves the offer
-      if (!proved) {
-        try {
-          const prof = await profileFor(p.l.account, pack, critic, write);
-          const bs = prof ? await buyerSample(prof, { id: p.l.account.id, region: p.l.account.region }) : null;
-          if (bs) { p.input.evidence.push(...sampleEvidence(bs)); res.buyerSamples = (res.buyerSamples ?? 0) + 1; }
-        } catch { /* the email goes without it */ }
-      }
+      // every industry: the changes in their market with live examples (the play), and the brief the email offers
+      const mp = plays.get(p.l.account.id);
+      if (mp) {
+        p.input.evidence.push(...playEvidence(mp));
+        p.input.plays = [{ id: `market:${mp.module}`, title: mp.moduleTitle, angle: `Their business: ${mp.research.sells}, sold to ${mp.research.who}. The changes in their market: ${mp.changes.map((c) => `${c.title} (${c.why})`).join("; ")}.`,
+          offer: `a short written brief on ${mp.changes.length} changes in their market, with the companies behind each (it is ready to send); then ${mp.offer}` }, ...p.input.plays];
+      } else if (!proved) { /* no play and no list: the email stands on the lead's own signals */ }
       let a: Analysis | null = null;
       // TELL_DEBUG_DRAFTS=1 (local only: it prints lead details) shows why drafts were rejected
       const debug = process.env.TELL_DEBUG_DRAFTS && !process.env.CI ? (r: string) => console.error(`[draft rejected] ${p.input.company}: ${r}`) : undefined;
       try { a = await analyzeLead(llm, pack, p.input, debug, critic ?? undefined); } catch (e) { debug?.(`error: ${(e as Error).message}`); }
       if (!a) { res.failed++; continue; }
-      out.set(p.l.account.id, a);
+      out.set(p.l.account.id, { ...a, ...(briefs.has(p.l.account.id) ? { brief: briefs.get(p.l.account.id)! } : {}) });
       res.fresh++;
       if (write) {
         await db.insert(analyses).values({

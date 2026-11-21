@@ -105,6 +105,40 @@ export const CapabilitySchema = z.object({
 });
 export const CapabilitiesSchema = z.object({ capabilities: z.array(CapabilitySchema).default([]) });
 
+/**
+ * Intelligence modules (modules.yaml): what a prospect's business would want watched in ITS market, reused across
+ * prospects in an industry (and as the starting config when you build it for them). A module names a few changes; the
+ * research step picks the ones that fit the prospect's business model, and each change is shown with live examples.
+ */
+export const ModuleChangeSchema = z.object({
+  id: z.string().regex(/^[a-z0-9_]+$/),
+  /** the change, in the words of someone in that business ("Your buyers are building new plants") */
+  title: z.string().min(5),
+  /** whose companies show it: the prospect's customers, its competitors (same industry and region), its channel
+   *  (distributors, partners, primes) or the market (tenders, contracts, approvals anyone can act on) */
+  whose: z.enum(["customers", "competitors", "channel", "market"]),
+  signals: z.array(z.string()).min(1),
+  /** where those companies are; customers: empty = the industries the research says pay them; channel / market need it */
+  industries: z.array(z.string()).default([]),
+  /** an example's quote must match this (e.g. "hospital|clinic|lab|beds": a new home-care NPI is not a hospital opening) */
+  must: z.string().optional(),
+  /** why it matters to them, plain */
+  why: z.string().min(10),
+  /** what their team does with it, plain */
+  action: z.string().min(10),
+});
+export const ModuleSchema = z.object({
+  id: z.string().regex(/^[a-z0-9_]+$/),
+  /** "Manufacturing expansion intelligence" */
+  title: z.string().min(5),
+  /** the prospect industries it is offered to */
+  industries: z.array(z.string()).min(1),
+  changes: z.array(ModuleChangeSchema).min(2),
+  /** what you'd build for them, plain, one sentence */
+  offer: z.string().min(10),
+});
+export const ModulesSchema = z.object({ modules: z.array(ModuleSchema).default([]) });
+
 export const IcpSchema = z.object({
   hard_filters: z.object({
     team_size: z.object({ min: z.number().int().min(1), max: z.number().int().min(1) }),
@@ -809,7 +843,18 @@ export const PackSchema = z.object({
   critic: CriticSchema.default({ vendor_patterns: [], solved_tools: [], solved_types: ["core_role_filled"], solved_max_age_days: 60, enterprise: { url_patterns: [], title_patterns: [] } }),
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
   capabilities: CapabilitiesSchema.default({ capabilities: [] }),
+  modules: ModulesSchema.default({ modules: [] }),
 }).superRefine((p, ctx) => {
+  p.modules.modules.forEach((m, i) => {
+    for (const seg of m.industries) if (!p.icp.industries[seg]) ctx.addIssue({ code: "custom", path: ["modules", i, "industries"], message: `unknown industry "${seg}"` });
+    const ids = m.changes.map((c) => c.id);
+    if (new Set(ids).size !== ids.length) ctx.addIssue({ code: "custom", path: ["modules", i, "changes"], message: "change ids must be unique in a module" });
+    m.changes.forEach((c, j) => {
+      for (const t of c.signals) if (!p.signals.signals[t]) ctx.addIssue({ code: "custom", path: ["modules", i, "changes", j, "signals"], message: `unknown signal type "${t}"` });
+      for (const seg of c.industries) if (!p.icp.industries[seg]) ctx.addIssue({ code: "custom", path: ["modules", i, "changes", j, "industries"], message: `unknown industry "${seg}"` });
+      if ((c.whose === "channel" || c.whose === "market") && !c.industries.length) ctx.addIssue({ code: "custom", path: ["modules", i, "changes", j, "industries"], message: `a ${c.whose} change needs industries (where those companies are)` });
+    });
+  });
   const capIds = p.capabilities.capabilities.map((c) => c.id);
   if (new Set(capIds).size !== capIds.length) ctx.addIssue({ code: "custom", path: ["capabilities"], message: "capability ids must be unique" });
   // industries wired end to end: a play or capability names real industries, an industry counts real signal types, and
@@ -948,4 +993,4 @@ export function leadCap(pack: Pick<Pack, "delivery">): number {
   if (g.length) return g.reduce((n, x) => n + x.max_leads, 0);
   return pack.delivery.digest.max_leads === 0 ? Infinity : pack.delivery.digest.max_leads;
 }
-export const PACK_FILES = ["pack", "icp", "industries", "capabilities", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;
+export const PACK_FILES = ["pack", "icp", "industries", "capabilities", "modules", "buyers", "signals", "plays", "roles", "extractor", "sources", "domains", "delivery", "gigs", "tools", "critic", "copy"] as const;

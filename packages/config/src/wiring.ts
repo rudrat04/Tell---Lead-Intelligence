@@ -120,6 +120,7 @@ export function industryMap(pack: Pack): IndustryWiring[] {
     const loneLists = pack.capabilities.capabilities.filter((c) => c.free && c.list && !c.industries.length).map((c) => c.id);
     if (judged && loneLists.length) warnings.push(`list capabilities open to every industry: ${loneLists.join(", ")} (scope them with industries:)`);
 
+    if (pack.modules.modules.length && !pack.modules.modules.some((m) => m.industries.includes(seg))) warnings.push("no intelligence module (modules.yaml): its leads get no brief");
     const regions = ind.regions ?? pack.icp.hard_filters.regions_any;
     const groups = pack.delivery.digest.region_groups;
     const listed = (regions.length ? regions : [null]).map((r) => regionGroupFor(pack, r, seg)?.name ?? null).filter((x): x is string => !!x);

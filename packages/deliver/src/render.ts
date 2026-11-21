@@ -102,7 +102,7 @@ export function opener(c: Contact | null | undefined, company: string, e: Eviden
 }
 
 /** Analyst output for a lead (cited, validated in code); absent when Haiku was unavailable or failed validation. */
-export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number; email?: { subject: string; body: string } | null; linkedin?: string | null }
+export interface LeadNote { hypothesis: string; angle: string; opener: string; counterEvidence: string | null; confidence: number; email?: { subject: string; body: string } | null; linkedin?: string | null; /** the intelligence brief the email offers */ brief?: string }
 
 /** The pack's greeting with the contact's first name ("hey {first}," -> "hey Asha,"); without a contact the name goes. */
 export function greeting(template: string, c: Contact | null | undefined): string {
@@ -392,6 +392,7 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     Angle: note?.angle ?? s.plays[0]?.angle ?? "",
     "Email draft": emailDraft(contact, note, signature, copy?.greeting),
     "LinkedIn message": linkedinDraft(contact, note, copy?.linkedin.greeting),
+    Brief: note?.brief ?? "",
     // Label, Reason, Outcome, Notes: yours
   };
 }

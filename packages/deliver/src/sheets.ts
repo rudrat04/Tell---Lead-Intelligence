@@ -17,7 +17,7 @@ export const LEAD_COLUMNS = [
   "Date", "Company", "What they do", "Website", "Score", "ICP fit", "Timing", "Size", "Segment", "Region", "Why now", "Signals", "Plays",
   "Person", "Role", "LinkedIn", "Email", "Verified", "Risky", "Catch-all", "Enrich email",
   "Label", "Reason", "Outcome", "Notes",
-  "Opener", "Angle", "Email draft", "LinkedIn message", "Follow-up", "ID",
+  "Opener", "Angle", "Email draft", "LinkedIn message", "Brief", "Follow-up", "ID",
 ] as const;
 export type LeadColumn = (typeof LEAD_COLUMNS)[number];
 /** One lead row by column name (stored per delivery in deliveries.sheet_row, without ID). */
