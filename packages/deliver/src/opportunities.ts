@@ -4,14 +4,14 @@ import { WriterClient, HaikuClient, writerEffort, writeOpportunityDraft, type Op
 import { firstName, type Contact } from "@tell/people";
 import { getDb, deliveries, runs, eq, inArray } from "@tell/db";
 import { assignDeliveryIds, enrichLink, draftLink, fetchDraftRequests, ackDraftRequests } from "./label-links.js";
-import { emailCells, fillColumnById, ensureLeadHeaders, storedRow, type LeadRow } from "./sheets.js";
+import { emailCells, fillColumnById, ensureLeadHeaders, type OppRow } from "./sheets.js";
 import { appendPendingLeads } from "./sheet-sync.js";
 import { sendTelegram, storeTelegramTexts, telegramConfigured, tgEsc, type TgMessage } from "./telegram.js";
 import { greeting, emailText } from "./render.js";
 
 /**
  * Opportunity leads out (`pnpm opps`): Telegram (summary + one message per lead with Good / Bad / Find email /
- * Create draft / Brief) and the Leads Sheet. No email is drafted here: "Create draft" queues one through the Worker
+ * Create draft / Brief) and the Sheet's Opportunities tab. No email is drafted here: "Create draft" queues one through the Worker
  * and `pnpm drafts:requests` writes it on click. Once per IST day (runs `opps:<day>`); --test records nothing.
  * Prints counts only (CI logs are public).
  */
@@ -40,71 +40,103 @@ export function followText(l: Pick<OppLead, "opportunity">): string {
     : "These events can create work for companies like them; none of it is promised. Reach the company behind the event early, before its vendors are chosen.";
 }
 
-/** The one-page brief, written by code from the facts only (pure; exported for tests). */
+const DAY = 86_400_000;
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+/** When the signal happened, or (a contract) when it ends (pure; exported for tests). */
+export function signalWhen(l: Pick<OppLead, "opportunity">, e: { endDate: Date }, now: Date): string {
+  const days = Math.round((e.endDate.getTime() - now.getTime()) / DAY);
+  if (l.opportunity.kind === "usaspending_expiring") return `ends ${isoDay(e.endDate)} (in ${days} days)`;
+  const ago = Math.max(0, -days);
+  return `${isoDay(e.endDate)} (${ago === 0 ? "today" : `${ago} day${ago === 1 ? "" : "s"} ago`})`;
+}
+/** How this company benefits, in one line: why it fits the signal, from its own record or what it sells (pure). */
+export const howTheyBenefit = (l: Pick<OppLead, "events">) => [...new Set(l.events.slice(0, MAX_EVENTS).flatMap((e) => e.reasons))].join("; ");
+
+/**
+ * The one-page brief, written by code from the facts only (pure; exported for tests), in the order you'd pitch it:
+ * the signal (what happened), the company that can benefit and how, the play, the opportunity (what could follow and
+ * when), then who to reach and the sources.
+ */
 export function oppBrief(l: OppLead, now: Date): string {
-  const a = l.account, t = timingLine(l, now);
+  const a = l.account, e0 = l.events[0], c = l.contact, t = timingLine(l, now);
   return [
-    `${l.opportunity.label}: ${a.name ?? a.domain} (${a.domain})`,
+    "1. THE SIGNAL",
+    ...(e0 ? [e0.quote, `${signalWhen(l, e0, now)} · ${e0.url}`] : []),
+    ...(l.events.length > 1 ? ["", `More signals like it (${l.events.length - 1}):`, ...l.events.slice(1, 6).map((e) => `- ${e.quote} (${signalWhen(l, e, now)})\n  ${e.url}`)] : []),
+    "",
+    "2. WHO CAN BENEFIT, AND HOW",
+    `${a.name ?? a.domain} (${a.domain})${[a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).length ? ` · ${[a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).join(" · ")}` : ""}`,
     ...(a.description ? [a.description] : []),
-    l.score.line,
-    ...(t ? [`Timing: ${t}`] : []),
+    `Why them: ${howTheyBenefit(l)}`,
+    ...l.evidence.slice(0, 3).map((e) => `- ${e.quote}\n  ${e.url}`),
     "",
-    "What happened",
-    ...l.events.slice(0, 6).map((e, i) => `${i + 1}. ${e.quote}\n   ${e.url}\n   Why it fits them: ${e.reasons.join("; ")}`),
+    `3. THE PLAY: ${l.opportunity.label}`,
+    ...(l.opportunity.angle ? [l.opportunity.angle] : []),
     "",
-    l.opportunity.kind === "usaspending_expiring" ? "Why them (their own record)" : "Why them (what they do)",
-    ...l.evidence.map((e) => `- ${e.quote}\n  ${e.url}`),
-    "",
-    "What could follow",
+    "4. THE OPPORTUNITY",
     followText(l),
-    ...(l.opportunity.angle ? ["", `Angle: ${l.opportunity.angle}`] : []),
+    ...(t ? [`Timing: ${t}`] : []),
+    l.score.line,
+    "",
+    "5. WHO TO REACH",
+    c ? `${c.person.name}${c.person.role ? `, ${c.person.role}` : ""}${c.person.email ? ` · ${c.person.email.address} (${c.person.email.status})` : ""}${c.person.linkedin ? ` · ${c.person.linkedin}` : ""}` : "nobody found yet",
   ].join("\n");
 }
 
-/** The Sheet row (pure; exported for tests). The Email draft cell holds the Create draft link until you click it. */
-export function oppSheetRow(l: OppLead, day: string, now: Date, links: { enrich?: string; draft?: string }): LeadRow {
-  const a = l.account, c = l.contact, t = timingLine(l, now), e0 = l.events[0];
+/** The Opportunities tab row (pure; exported for tests): signal first, then the play, the company and why, the person.
+ *  The Email draft cell holds the Create draft link until you click it. */
+export function oppSheetRow(l: OppLead, day: string, now: Date, links: { enrich?: string; draft?: string }): OppRow {
+  const a = l.account, c = l.contact, e0 = l.events[0];
   const email = c?.person.email;
+  const cells = email ? emailCells(email.address, email.note || email.status) : {};
   return {
-    Date: day, Company: a.name ?? a.domain, "What they do": a.description ?? "", Website: `https://${a.domain}`, Score: l.score.line,
-    Timing: t, Size: a.sizeBand ?? "", Segment: a.segment ?? "", Region: a.region ?? "",
-    "Why now": e0 ? `${l.events.length} matched event${l.events.length === 1 ? "" : "s"}; top: ${e0.quote}` : "",
-    Signals: l.events.slice(0, MAX_EVENTS).map((e) => `${e.quote} ${e.url}`).join("\n"),
-    Plays: l.opportunity.label,
+    Date: day,
+    Signal: e0?.quote ?? "", "Signal link": e0?.url ?? "", "Signal date": e0 ? signalWhen(l, e0, now) : "", About: e0?.entityName ?? "",
+    "More signals": l.events.slice(1, MAX_EVENTS).map((e) => `${e.quote} ${e.url}`).join("\n"),
+    Opportunity: l.opportunity.label, "The play": l.opportunity.angle,
+    Company: a.name ?? a.domain, Website: `https://${a.domain}`, "What they do": a.description ?? "", "Why they benefit": howTheyBenefit(l),
+    Score: l.score.line, Timing: timingLine(l, now), Region: a.region ?? "",
     Person: c?.person.name ?? "", Role: c?.person.role ?? "", LinkedIn: c?.person.linkedin ?? "",
-    ...(email ? emailCells(email.address, email.note || email.status) : {}),
+    ...(cells.Email ? { Email: cells.Email, Verified: cells.Verified } : {}),
     ...(links.enrich && c && (!email || !["observed", "verified"].includes(email.status)) ? { "Enrich email": links.enrich } : {}),
-    Angle: l.opportunity.angle, Brief: oppBrief(l, now), ...(links.draft ? { "Email draft": links.draft } : {}),
+    Brief: oppBrief(l, now), ...(links.draft ? { "Email draft": links.draft } : {}),
   };
 }
 
-/** One lead as a Telegram message (pure; exported for tests). */
+/** One lead as a Telegram message (pure; exported for tests), in pitch order: the signal, who can benefit and how,
+ *  the play, the opportunity, then who to reach. */
 export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, test = false): TgMessage {
-  const a = l.account, c = l.contact, t = timingLine(l, now);
+  const a = l.account, c = l.contact, e0 = l.events[0], t = timingLine(l, now);
   const link = (url: string, text: string) => (/^https?:\/\//i.test(url) ? `<a href="${tgEsc(url)}">${tgEsc(text)}</a>` : tgEsc(text));
+  const facts = [a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).map((x) => tgEsc(String(x))).join(" · ");
   const lines = [
-    `🎯 <b>${tgEsc(l.opportunity.label)}</b> → ${link(`https://${a.domain}`, a.name ?? a.domain)}`,
-    [a.segment, a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).map((x) => tgEsc(String(x))).join(" · "),
-    tgEsc(l.score.line),
-    ...(a.description ? [`<i>${tgEsc(a.description)}</i>`] : []),
+    "📡 <b>THE SIGNAL</b>",
+    ...(e0 ? [`<b>${link(e0.url, e0.quote)}</b>`, `<i>${tgEsc(signalWhen(l, e0, now))}</i>`] : []),
+    ...(l.events.length > 1 ? [`+ ${l.events.length - 1} more like it: ${l.events.slice(1, MAX_EVENTS).map((e, i) => link(e.url, `#${i + 2}`)).join(" ")}`] : []),
     "",
-    `👤 <b>Reach out to:</b> ${c ? `${tgEsc(c.person.name)}${c.person.role ? `, ${tgEsc(c.person.role)}` : ""}` : "nobody found yet"}`,
+    "🏭 <b>WHO CAN BENEFIT</b>",
+    `<b>${link(`https://${a.domain}`, a.name ?? a.domain)}</b>${facts ? ` · ${facts}` : ""}`,
+    ...(a.description ? [`<i>${tgEsc(a.description)}</i>`] : []),
+    `<b>How:</b> ${tgEsc(howTheyBenefit(l))}`,
+    ...(l.evidence[0] && l.opportunity.kind === "usaspending_expiring" ? [`Their record: ${link(l.evidence[0].url, l.evidence[0].quote)}`] : []),
+    "",
+    `🎯 <b>THE PLAY: ${tgEsc(l.opportunity.label)}</b>`,
+    ...(l.opportunity.angle ? [tgEsc(l.opportunity.angle)] : []),
+    "",
+    "💰 <b>THE OPPORTUNITY</b>",
+    tgEsc(followText(l)),
+    ...(t ? [`⏱ ${tgEsc(t)}`] : []),
+    `<i>${tgEsc(l.score.line)}</i>`,
+    "",
+    `👤 <b>Reach:</b> ${c ? `${tgEsc(c.person.name)}${c.person.role ? `, ${tgEsc(c.person.role)}` : ""}` : "nobody found yet"}`,
     ...(c && emailText(c.person) ? [`✉️ ${tgEsc(emailText(c.person)!)}`] : []),
     ...(c?.person.linkedin ? [link(c.person.linkedin, "LinkedIn profile")] : []),
-    "",
-    `📡 <b>The opportunity${l.events.length > 1 ? `ies (${l.events.length})` : ""}</b>`,
-    ...l.events.slice(0, MAX_EVENTS).map((e) => `• ${link(e.url, e.quote)}\n  <i>fits: ${tgEsc(e.reasons.join("; "))}</i>`),
-    "",
-    l.opportunity.kind === "usaspending_expiring" ? "🏛 <b>Their record</b>" : "🏭 <b>What they do</b>",
-    ...l.evidence.slice(0, 2).map((e) => `• ${link(e.url, e.quote)}`),
-    ...(l.opportunity.angle ? ["", `<b>Lead with:</b> ${tgEsc(l.opportunity.angle)}`] : []),
-    ...(t ? ["", `⏱ ${t}`] : []),
   ];
   const text = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!deliveryId || test) return { text };
   const needsEmail = !!c && (!c.person.email || !["observed", "verified"].includes(c.person.email.status));
-  return { text, buttons: [[{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }],
-    [{ text: "✍️ Create draft", data: `cd:${deliveryId}` }, { text: "📄 Brief", data: `br:${deliveryId}` }, ...(needsEmail ? [{ text: "🔎 Find email", data: `e:${deliveryId}` }] : [])]] };
+  return { text, buttons: [[{ text: "✍️ Create draft", data: `cd:${deliveryId}` }, { text: "📄 Brief", data: `br:${deliveryId}` }, ...(needsEmail ? [{ text: "🔎 Find email", data: `e:${deliveryId}` }] : [])],
+    [{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }]] };
 }
 
 export function oppContext(l: OppLead, now: Date): OppContext {
@@ -215,13 +247,13 @@ export async function runDraftRequests(pack: Pack, opts: { writer?: LlmClient } 
     }
     const text = draftText(ctx, d, pack);
     cells.set(req.d, text);
-    await db.update(deliveries).set({ sheetRow: { ...storedRow(r!.row), "Email draft": text } }).where(eq(deliveries.id, req.d));
+    await db.update(deliveries).set({ sheetRow: { ...((r!.row ?? {}) as OppRow), "Email draft": text } }).where(eq(deliveries.id, req.d));
     store.push({ d: req.d, brief: ctx.brief, draft: text });
     tg.push({ text: `✍️ <b>Draft for ${tgEsc(ctx.company)}</b>${ctx.contact ? ` (to ${tgEsc(firstName(ctx.contact.name))})` : ""}\n\n${tgEsc(text)}` });
     done.push(req.d);
   }
   const sheetId = pack.delivery.sheet.spreadsheet_id;
-  if (sheetId && cells.size) { try { await ensureLeadHeaders(sheetId); await fillColumnById(sheetId, "Email draft", cells, true); } catch { /* the stored row keeps it */ } }
+  if (sheetId && cells.size) { try { await ensureLeadHeaders(sheetId, "Opportunities"); await fillColumnById(sheetId, "Email draft", cells, true, "Opportunities"); } catch { /* the stored row keeps it */ } }
   if (store.length) await storeTelegramTexts(store).catch(() => false);
   if (tg.length && telegramConfigured()) await sendTelegram(tg).catch(() => 0);
   await ackDraftRequests(base, secret, done);

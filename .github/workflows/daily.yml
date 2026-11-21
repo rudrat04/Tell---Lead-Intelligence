@@ -1,7 +1,7 @@
 name: Daily chain
 
 # One chain instead of separate crons that must line up (plan v3 section 14 "Daily").
-# migrations -> pack check -> partitions -> JSearch -> job-board diff -> gigs -> tick (fallback) -> scoring + digest (once per IST day).
+# migrations -> pack check -> partitions -> JSearch -> job-board diff -> tick (fallback) -> scoring + digest (once per IST day).
 # Starts 07:30 IST so the digest lands before 09:00 even when GitHub delays scheduled runs.
 # Public repo: every script prints counts only.
 on:
@@ -97,12 +97,6 @@ jobs:
         id: boards
         continue-on-error: true # a board outage must not stop scoring/digest; the digest reports it
         run: pnpm boards:check
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-      - name: Freelance gigs
-        continue-on-error: true
-        run: pnpm gigs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 

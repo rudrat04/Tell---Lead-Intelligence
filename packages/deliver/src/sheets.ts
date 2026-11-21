@@ -20,6 +20,24 @@ export const LEAD_COLUMNS = [
   "Opener", "Angle", "Email draft", "LinkedIn message", "Brief", "Follow-up", "ID",
 ] as const;
 export type LeadColumn = (typeof LEAD_COLUMNS)[number];
+
+/**
+ * Opportunity leads (pnpm opps) have their own tab, read the way you vet them: the signal (what happened, where, when,
+ * who it is about), the play, the company that can benefit and why, who to reach, your verdict, then the email and
+ * brief. Found by header name like the Leads tab, ID hidden.
+ */
+export const OPP_COLUMNS = [
+  "Date", "Signal", "Signal link", "Signal date", "About", "More signals",
+  "Opportunity", "The play", "Company", "Website", "What they do", "Why they benefit", "Score", "Timing", "Region",
+  "Person", "Role", "LinkedIn", "Email", "Verified", "Enrich email",
+  "Label", "Reason", "Outcome", "Notes",
+  "Email draft", "Brief", "ID",
+] as const;
+export type OppColumn = (typeof OPP_COLUMNS)[number];
+export type OppRow = Partial<Record<OppColumn, string>>;
+/** the tabs the code writes leads to */
+export type Tab = "Leads" | "Opportunities";
+export const TAB_COLUMNS: Record<Tab, readonly string[]> = { Leads: LEAD_COLUMNS, Opportunities: OPP_COLUMNS };
 /** One lead row by column name (stored per delivery in deliveries.sheet_row, without ID). */
 export type LeadRow = Partial<Record<LeadColumn, string>>;
 
@@ -60,15 +78,13 @@ export function storedRow(v: unknown): LeadRow {
 }
 
 /** Cells for a Sheet whose header row is `header` (unknown headers get ""), with the hidden ID. */
-export const rowFor = (header: string[], r: LeadRow, id: string): string[] =>
-  header.map((h) => (h.trim() === "ID" ? id : r[h.trim() as LeadColumn] ?? ""));
-export const GIG_COLUMNS = ["Date", "Gig", "Company", "Type", "Location", "Apply", "Source", "Status", "Notes", "ID"] as const;
+export const rowFor = (header: string[], r: LeadRow | OppRow, id: string): string[] =>
+  header.map((h) => (h.trim() === "ID" ? id : (r as Record<string, string | undefined>)[h.trim()] ?? ""));
 
 export const LABEL_VALUES = ["good", "bad"];
 /** plan 11b: every "bad" label gets a reason */
 export const REASON_VALUES = ["vendor", "too big", "already solved", "wrong person", "stale", "not B2B", "not ICP", "other"];
 export const OUTCOME_VALUES = ["contacted", "replied", "meeting", "won", "lost", "no reply"];
-export const GIG_STATUS_VALUES = ["applied", "skipped", "replied", "won", "lost"];
 
 export async function sheetsCall<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await googleAccessToken();
@@ -97,12 +113,11 @@ export async function createLeadsSheet(title: string): Promise<{ spreadsheetId: 
       properties: { title },
       sheets: [
         { properties: { title: "Leads", gridProperties: { frozenRowCount: 1 } }, data: [{ startRow: 0, startColumn: 0, rowData: [{ values: LEAD_COLUMNS.map((c) => ({ userEnteredValue: { stringValue: c }, userEnteredFormat: { textFormat: { bold: true } } })) }] }] },
-        { properties: { title: "Gigs", gridProperties: { frozenRowCount: 1 } }, data: [{ startRow: 0, startColumn: 0, rowData: [{ values: GIG_COLUMNS.map((c) => ({ userEnteredValue: { stringValue: c }, userEnteredFormat: { textFormat: { bold: true } } })) }] }] },
+        { properties: { title: "Opportunities", gridProperties: { frozenRowCount: 1 } }, data: [{ startRow: 0, startColumn: 0, rowData: [{ values: OPP_COLUMNS.map((c) => ({ userEnteredValue: { stringValue: c }, userEnteredFormat: { textFormat: { bold: true } } })) }] }] },
       ],
     }),
   });
   const leads = created.sheets.find((s) => s.properties.title === "Leads")!.properties.sheetId;
-  const gigs = created.sheets.find((s) => s.properties.title === "Gigs")!.properties.sheetId;
   const hide = (sheetId: number, col: number) => ({ updateDimensionProperties: { range: { sheetId, dimension: "COLUMNS", startIndex: col, endIndex: col + 1 }, properties: { hiddenByUser: true }, fields: "hiddenByUser" } });
   await sheetsCall(`/${created.spreadsheetId}:batchUpdate`, {
     method: "POST",
@@ -111,20 +126,19 @@ export async function createLeadsSheet(title: string): Promise<{ spreadsheetId: 
         dropdown(leads, LEAD_COLUMNS.indexOf("Label"), LABEL_VALUES),
         dropdown(leads, LEAD_COLUMNS.indexOf("Reason"), REASON_VALUES),
         dropdown(leads, LEAD_COLUMNS.indexOf("Outcome"), OUTCOME_VALUES),
-        dropdown(gigs, GIG_COLUMNS.indexOf("Status"), GIG_STATUS_VALUES),
         hide(leads, LEAD_COLUMNS.indexOf("ID")),
-        hide(gigs, GIG_COLUMNS.indexOf("ID")),
       ],
     }),
   });
   await formatLeadsTab(created.spreadsheetId);
+  await formatLeadsTab(created.spreadsheetId, "Opportunities");
   return { spreadsheetId: created.spreadsheetId, url: created.spreadsheetUrl };
 }
 
 /** Append rows (RAW: values are stored as typed text, never parsed as formulas). */
-export async function appendRows(spreadsheetId: string, tab: "Leads" | "Gigs", rows: string[][]): Promise<void> {
+export async function appendRows(spreadsheetId: string, tab: Tab, rows: string[][]): Promise<void> {
   if (!rows.length) return;
-  const width = Math.max(tab === "Leads" ? LEAD_COLUMNS.length : GIG_COLUMNS.length, ...rows.map((r) => r.length));
+  const width = Math.max(TAB_COLUMNS[tab].length, ...rows.map((r) => r.length));
   await sheetsCall(`/${spreadsheetId}/values/${encodeURIComponent(`${tab}!A:${colLetter(width - 1)}`)}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
     method: "POST",
     body: JSON.stringify({ values: rows }),
@@ -146,32 +160,45 @@ export function parseLabels(values: string[][]): SheetLabel[] {
     .filter((r) => /^[0-9a-f-]{36}$/i.test(r.id) && (r.label || r.reason || r.outcome || r.notes));
 }
 
+/** Your labels from both lead tabs (a Sheet made before the Opportunities tab simply has none there). */
 export async function readLabels(spreadsheetId: string): Promise<SheetLabel[]> {
-  const j = await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!A:AZ")}`);
-  return parseLabels(j.values ?? []);
+  const out: SheetLabel[] = [];
+  for (const tab of ["Leads", "Opportunities"] as Tab[]) {
+    try { out.push(...parseLabels((await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent(`${tab}!A:AZ`)}`)).values ?? [])); }
+    catch (e) { if (tab === "Leads") throw e; }
+  }
+  return out;
 }
 
 export const a1Col = (i: number) => (i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26)));
 
-/** Add any lead header missing from row 1 (a Sheet created before a column existed), at the end. Returns the full header. */
-export async function ensureLeadHeaders(spreadsheetId: string): Promise<string[]> {
-  const j = await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!1:1")}`);
+type SheetMeta = { sheets: { properties: { sheetId: number; title: string; gridProperties: { rowCount: number; columnCount: number } } }[] };
+
+/** Add any header missing from row 1 of the tab (a Sheet created before a column existed), at the end; the tab itself
+ *  is created when the Sheet doesn't have it yet (Opportunities). Returns the full header. */
+export async function ensureLeadHeaders(spreadsheetId: string, tabName: Tab = "Leads"): Promise<string[]> {
+  const cols = TAB_COLUMNS[tabName];
+  const meta0 = await sheetsCall<SheetMeta>(`/${spreadsheetId}?fields=sheets.properties`);
+  if (!meta0.sheets.some((x) => x.properties.title === tabName)) {
+    await sheetsCall(`/${spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tabName, index: tabName === "Leads" ? 0 : 1, gridProperties: { frozenRowCount: 1, columnCount: Math.max(26, cols.length) } } } }] }) });
+  }
+  const j = await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent(`${tabName}!1:1`)}`);
   const current = j.values?.[0] ?? [];
   const header = current.map((h) => h.trim().toLowerCase());
-  const missing = LEAD_COLUMNS.filter((c) => !header.includes(c.toLowerCase()));
+  const missing = cols.filter((c) => !header.includes(c.toLowerCase()));
   if (!missing.length) return current;
   const start = header.length;
   // a Sheet has a fixed grid (29 columns when it was made): widen it first, or writing a 30th header is refused
-  const meta = await sheetsCall<{ sheets: { properties: { sheetId: number; title: string; gridProperties: { columnCount: number } } }[] }>(`/${spreadsheetId}?fields=sheets.properties`);
-  const tab = meta.sheets.find((x) => x.properties.title === "Leads")?.properties;
+  const meta = await sheetsCall<SheetMeta>(`/${spreadsheetId}?fields=sheets.properties`);
+  const tab = meta.sheets.find((x) => x.properties.title === tabName)?.properties;
   const need = start + missing.length - (tab?.gridProperties.columnCount ?? 0);
   if (tab && need > 0) {
     await sheetsCall(`/${spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ appendDimension: { sheetId: tab.sheetId, dimension: "COLUMNS", length: need } }] }) });
   }
-  await sheetsCall(`/${spreadsheetId}/values/${encodeURIComponent(`Leads!${a1Col(start)}1:${a1Col(start + missing.length - 1)}1`)}?valueInputOption=RAW`, {
+  await sheetsCall(`/${spreadsheetId}/values/${encodeURIComponent(`${tabName}!${a1Col(start)}1:${a1Col(start + missing.length - 1)}1`)}?valueInputOption=RAW`, {
     method: "PUT", body: JSON.stringify({ values: [missing] }),
   });
-  await formatLeadsTab(spreadsheetId); // new columns get their dropdowns; nothing stays on an old position
+  await formatLeadsTab(spreadsheetId, tabName); // new columns get their dropdowns; nothing stays on an old position
   return [...current, ...missing];
 }
 
@@ -180,18 +207,18 @@ export async function ensureLeadHeaders(spreadsheetId: string): Promise<string[]
  * `overwrite` (for a column the code owns, e.g. Priority after a scale change; never your Label/Notes), where an empty
  * value clears the cell. Returns cells written.
  */
-export async function fillColumnById(spreadsheetId: string, column: string, values: Map<string, string>, overwrite = false): Promise<number> {
-  const j = await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!A:AZ")}`);
+export async function fillColumnById(spreadsheetId: string, column: string, values: Map<string, string>, overwrite = false, tabName: Tab = "Leads"): Promise<number> {
+  const j = await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent(`${tabName}!A:AZ`)}`);
   const [header, ...rows] = j.values ?? [];
   const idCol = header?.findIndex((h) => h.trim() === "ID") ?? -1;
   const col = header?.findIndex((h) => h.trim().toLowerCase() === column.toLowerCase()) ?? -1;
-  if (idCol < 0 || col < 0) throw new Error(`Leads tab needs "ID" and "${column}" columns`);
+  if (idCol < 0 || col < 0) throw new Error(`${tabName} tab needs "ID" and "${column}" columns`);
   const data = rows.flatMap((r, i) => {
     const v = values.get((r[idCol] ?? "").trim());
     // with overwrite, "" clears a code-owned cell (a draft that no longer passes the checks); without it, only empty cells are filled
     const cur = (r[col] ?? "").trim();
     const write = v !== undefined && (overwrite ? cur !== v : !!v && !cur);
-    return write ? [{ range: `Leads!${a1Col(col)}${i + 2}`, values: [[v]] }] : [];
+    return write ? [{ range: `${tabName}!${a1Col(col)}${i + 2}`, values: [[v]] }] : [];
   });
   if (data.length) await sheetsCall(`/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) });
   return data.length;
@@ -203,20 +230,22 @@ const COLUMN_WIDTH: Record<string, number> = {
   "Why now": 340, Signals: 240, Plays: 180, Person: 140, Role: 200, LinkedIn: 180, Email: 210, Verified: 70, Risky: 60,
   "Catch-all": 75, "Enrich email": 150, Label: 75, Reason: 110, Outcome: 100, Notes: 200, Opener: 300, Angle: 260,
   "Email draft": 340, "LinkedIn message": 300, "Follow-up": 320,
+  Signal: 360, "Signal link": 120, "Signal date": 90, About: 150, "More signals": 300, Opportunity: 170, "The play": 300,
+  "What they do": 240, "Why they benefit": 260, Brief: 200,
 };
 /** Columns whose text wraps (the reading columns); the rest clip to one line so rows stay short. */
-const WRAPPED = ["Timing", "Why now", "Signals"];
+const WRAPPED = ["Timing", "Why now", "Signals", "Signal", "The play", "Why they benefit"];
 
 /**
  * Formatting of the Leads tab, found by header name (never by position): clears every dropdown on the tab, then puts
  * Label / Reason / Outcome dropdowns and the yes-no ones on their columns, hides ID, bolds and freezes the header.
  * Safe to run any time (after columns move). Returns the columns that got a dropdown.
  */
-export async function formatLeadsTab(spreadsheetId: string): Promise<string[]> {
-  const meta = await sheetsCall<{ sheets: { properties: { sheetId: number; title: string; gridProperties: { rowCount: number; columnCount: number } } }[] }>(`/${spreadsheetId}?fields=sheets.properties`);
-  const tab = meta.sheets.find((s) => s.properties.title === "Leads")?.properties;
-  if (!tab) throw new Error("no Leads tab");
-  const header = (await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent("Leads!1:1")}`)).values?.[0] ?? [];
+export async function formatLeadsTab(spreadsheetId: string, tabName: Tab = "Leads"): Promise<string[]> {
+  const meta = await sheetsCall<SheetMeta>(`/${spreadsheetId}?fields=sheets.properties`);
+  const tab = meta.sheets.find((s) => s.properties.title === tabName)?.properties;
+  if (!tab) throw new Error(`no ${tabName} tab`);
+  const header = (await sheetsCall<{ values?: string[][] }>(`/${spreadsheetId}/values/${encodeURIComponent(`${tabName}!1:1`)}`)).values?.[0] ?? [];
   const at = (c: string) => header.findIndex((h) => h.trim().toLowerCase() === c.toLowerCase());
   const { rowCount, columnCount } = tab.gridProperties;
   const whole = { sheetId: tab.sheetId, startRowIndex: 0, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: columnCount };
@@ -239,7 +268,7 @@ export async function formatLeadsTab(spreadsheetId: string): Promise<string[]> {
         { repeatCell: { range: { sheetId: tab.sheetId, startRowIndex: 0, endRowIndex: 1 }, cell: { userEnteredFormat: { textFormat: { bold: true }, wrapStrategy: "WRAP", verticalAlignment: "MIDDLE" } }, fields: "userEnteredFormat" } },
         ...header.map((h, i) => ({ updateDimensionProperties: { range: { sheetId: tab.sheetId, dimension: "COLUMNS", startIndex: i, endIndex: i + 1 }, properties: { pixelSize: COLUMN_WIDTH[h.trim()] ?? 140 }, fields: "pixelSize" } })),
         ...WRAPPED.filter((c) => at(c) >= 0).map((c) => ({ repeatCell: { range: { sheetId: tab.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: at(c), endColumnIndex: at(c) + 1 }, cell: { userEnteredFormat: { wrapStrategy: "WRAP" } }, fields: "userEnteredFormat.wrapStrategy" } })),
-        { updateSheetProperties: { properties: { sheetId: tab.sheetId, gridProperties: { frozenRowCount: 1, frozenColumnCount: Math.max(0, at("Company") + 1) } }, fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount" } },
+        { updateSheetProperties: { properties: { sheetId: tab.sheetId, gridProperties: { frozenRowCount: 1, frozenColumnCount: Math.max(0, at(tabName === "Opportunities" ? "Signal" : "Company") + 1) } }, fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount" } },
       ],
     }),
   });

@@ -1,6 +1,6 @@
 import type { Pack } from "@tell/config";
 import { getDb, deliveries, labels, inArray, sql } from "@tell/db";
-import { appendRows, readLabels, ensureLeadHeaders, fillColumnById, storedRow, rowFor } from "./sheets.js";
+import { appendRows, readLabels, ensureLeadHeaders, fillColumnById, storedRow, rowFor, type Tab } from "./sheets.js";
 import { fetchTaps, ackTaps } from "./label-links.js";
 
 export interface SheetSyncResult { appended: number; labelsSynced: number; taps?: number; tapsNote?: string; skipped?: string }
@@ -17,7 +17,8 @@ export async function applyTaps(pack: Pack): Promise<{ taps: number; note?: stri
   const known = new Set((await getDb().select({ id: deliveries.id }).from(deliveries).where(inArray(deliveries.id, taps.map((t) => t.d)))).map((r) => r.id));
   const latest = new Map<string, string>();
   for (const t of [...taps].sort((a, b) => a.at.localeCompare(b.at))) if (known.has(t.d)) latest.set(t.d, t.v);
-  const written = await fillColumnById(id, "Label", latest);
+  let written = await fillColumnById(id, "Label", latest);
+  try { written += await fillColumnById(id, "Label", latest, false, "Opportunities"); } catch { /* no Opportunities tab yet */ }
   // acknowledged once the Sheet has them (or a label was already there); unknown ids (test sends) are cleared too
   await ackTaps(url, secret, taps.map((t) => t.d));
   return { taps: written };
@@ -28,12 +29,17 @@ export async function appendPendingLeads(pack: Pack): Promise<number> {
   const id = pack.delivery.sheet.spreadsheet_id;
   if (!id) return 0;
   const db = getDb();
-  const pending = await db.select({ id: deliveries.id, row: deliveries.sheetRow }).from(deliveries)
+  const pending = await db.select({ id: deliveries.id, row: deliveries.sheetRow, kind: deliveries.kind }).from(deliveries)
     .where(sql`${deliveries.sheetRow} is not null and ${deliveries.sheetAppendedAt} is null`).orderBy(deliveries.deliveredAt).limit(500);
   if (!pending.length) return 0;
-  const header = await ensureLeadHeaders(id); // adds columns a Sheet made earlier doesn't have yet
-  // cells placed by header name, so moving columns in the Sheet never shifts data
-  await appendRows(id, "Leads", pending.map((p) => rowFor(header, storedRow(p.row), p.id)));
+  // opportunity leads go to their own tab (signal first); every other lead to Leads. Cells placed by header name, so
+  // moving columns in the Sheet never shifts data
+  for (const tab of ["Leads", "Opportunities"] as Tab[]) {
+    const rows = pending.filter((p) => (p.kind === "opportunity") === (tab === "Opportunities"));
+    if (!rows.length) continue;
+    const header = await ensureLeadHeaders(id, tab); // adds the tab / columns a Sheet made earlier doesn't have yet
+    await appendRows(id, tab, rows.map((p) => rowFor(header, tab === "Leads" ? storedRow(p.row) : (p.row as Record<string, string>), p.id)));
+  }
   await db.update(deliveries).set({ sheetAppendedAt: new Date() }).where(inArray(deliveries.id, pending.map((p) => p.id)));
   return pending.length;
 }

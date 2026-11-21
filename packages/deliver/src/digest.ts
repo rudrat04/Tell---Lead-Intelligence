@@ -4,12 +4,11 @@ import {
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
-import { renderDigest, leadSheetRow, gigSheetRow, emailDraft, type DigestHealth, type DigestEmail } from "./render.js";
+import { renderDigest, leadSheetRow, emailDraft, type DigestHealth, type DigestEmail } from "./render.js";
 import { sendTelegram, summaryMessage, leadMessage, storeTelegramTexts, telegramConfigured } from "./telegram.js";
 import { runFollowups, type TouchBack } from "./followups.js";
 import { appendPendingLeads } from "./sheet-sync.js";
 import { assignDeliveryIds, labelLinks, enrichLink } from "./label-links.js";
-import { appendRows } from "./sheets.js";
 import type { Sender } from "./gmail.js";
 
 export interface DigestResult {
@@ -244,9 +243,9 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   let sheet = "no sheet configured";
   if (pack.delivery.sheet.spreadsheet_id) {
     try {
+      // (gigs no longer go to the Sheet: the Gigs tab was removed on Nov 22 2026)
       const n = await appendPendingLeads(pack);
-      if (gigList.length) await appendRows(pack.delivery.sheet.spreadsheet_id, "Gigs", gigList.map((g) => gigSheetRow(g, day)));
-      sheet = `appended ${n} lead${n === 1 ? "" : "s"}${gigList.length ? ` + ${gigList.length} gig${gigList.length === 1 ? "" : "s"}` : ""}`;
+      sheet = `appended ${n} lead${n === 1 ? "" : "s"}`;
     } catch (e) {
       sheet = `append failed (retried next run): ${String(e).slice(0, 160)}`;
     }

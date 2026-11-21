@@ -30,11 +30,11 @@ export function oppDraftSystemPrompt(pack: Pack, contract = true): string {
   const c = pack.copy;
   return `You write the first cold email from ${pack.meta.name} to a company that could act on a market event we found.
 What we sell: ${pack.meta.offer}
-The email has four short parts, each one or two sentences, in plain words:
-1. The event: one specific, verifiable fact from the facts given (who, what, how much, when). Not "we noticed" filler.
-2. Why it could matter to them: tie it to ${contract ? "their own record (contracts they won, agencies they work with)" : "what they sell (from their description)"}. Say "could", never claim it will become business for them.
-3. The bait: we found this and other opportunities like it for companies like theirs, and track them as they appear. One line, no product pitch.
-4. A short question that asks whether they want to see what we found. Never ask for a call, meeting or time.
+The email follows the brief's order, each part one or two short sentences, in plain words:
+1. The signal: one specific, verifiable fact from the facts given (who, what, how much, where, when). Open with it; no "we noticed" or "hope you're well".
+2. How they could benefit: tie it to ${contract ? "their own record (contracts they won, agencies they work with, set-asides they qualify for)" : "what they sell (from their description)"}. Say "could", never claim it will become business for them.
+3. The play: the one move it opens for them right now (${contract ? "start capture before the RFP: shape requirements, line up teaming partners" : "reach the company in the news before its suppliers are chosen"}), from the angle given.
+4. The bait and the ask: we found this one and others like it, and track them as they appear; then a short question asking whether they want to see what we found. Never ask for a call, meeting or time.
 Rules: under ${pack.delivery.email.max_words} words in the body. No greeting and no signature (code adds them). Never introduce yourself or say "I help companies".
 Only use numbers, names and dates that appear in the facts. ${contract ? "Never say a recompete or RFP is confirmed: a contract ending means the agency MAY buy again." : "Never claim the company in the news is buying from anyone: it MAY need suppliers."}
 Never say: ${[...c.never_say, "guaranteed", "exclusive", "the only"].join("; ")}.

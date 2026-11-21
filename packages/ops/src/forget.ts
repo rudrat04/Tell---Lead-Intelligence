@@ -68,7 +68,7 @@ export async function forgetPerson(req: ForgetRequest, pack: Pack): Promise<Forg
   if (sheetId && allNames.length) {
     const token = await googleAccessToken();
     const api = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values`;
-    for (const tab of ["Leads", "Gigs"]) {
+    for (const tab of ["Leads", "Opportunities"]) {
       const j = (await (await fetch(`${api}/${encodeURIComponent(`${tab}!A:AZ`)}`, { headers: { authorization: `Bearer ${token}` } })).json()) as { values?: string[][] };
       const data: { range: string; values: string[][] }[] = [];
       (j.values ?? []).forEach((row, ri) => row.forEach((cell, ci) => {

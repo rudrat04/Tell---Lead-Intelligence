@@ -52,7 +52,9 @@ export async function runEnrichRequests(pack: Pack): Promise<{ status: "ok" | "s
     for (const r of body) { const m = (r[ei] ?? "").match(/[?&]d=([0-9a-f-]{36})/i); if (m && r[ii]) rowOf.set(m[1]!, r[ii]!.trim()); }
     for (const [col, values] of cols) cols.set(col, new Map([...values].map(([d, v]) => [rowOf.get(d) ?? d, v])));
     for (const [col, values] of cols) {
-      const n = await fillColumnById(sheetId, col, values, true);
+      let n = await fillColumnById(sheetId, col, values, true);
+      // opportunity leads sit on their own tab (the same ID finds their row there)
+      try { n += await fillColumnById(sheetId, col, values, true, "Opportunities"); } catch { /* no such tab or column */ }
       if (col === "Enrich email") out.sheetCells = n;
     }
   }
