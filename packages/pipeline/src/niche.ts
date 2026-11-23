@@ -1,4 +1,4 @@
-import type { Pack } from "@tell/config";
+import { inScope, type Pack } from "@tell/config";
 import {
   fetchShortages, fetchAndaHolders, holderCounts, fetchExpiringAwards, fetchNewProviders, exaCompanySearch, companyKey, isSourceEnabled,
   fetchClearances, fetchAndaApprovals, fetchNewAwards, socrataRows, fillTemplate, fetchFormDFilings, fetchFormDDetail,
@@ -176,6 +176,13 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
   const web = deps.web !== undefined ? deps.web : live && rcfg.web_per_day > 0 && serperKey ? ((q: string, region: string) => serperOrganic(serperKey, q, region === "India" ? "in" : "us")) : null;
   let classify = deps.classify;
   let searches = 0;
+  // records only from the pack's working regions (pack.yaml regions): the rest are paused, never looked up
+  const scope = pack.meta.regions;
+  if (scope.length) {
+    const kept = records.filter((r) => inScope(scope, r.regions));
+    res.filtered += records.length - kept.length;
+    records = kept;
+  }
   res.records += records.length;
 
   // one lookup per company name; every record of that name follows the verdict
@@ -755,7 +762,10 @@ export async function drainNicheQueue(deps: Deps & { limit?: number }): Promise<
   // each industry gets its turn: the most valuable names per industry, round-robin (one industry's backlog never
   // starves the others)
   const limit = deps.limit ?? deps.pack.sources.niche.per_run;
-  const top = await db.select().from(nicheQueue).orderBy(desc(nicheQueue.priority), nicheQueue.queuedAt).limit(limit * 20);
+  const scope = deps.pack.meta.regions;
+  // (names from paused regions stay queued, untouched, until their region is back in pack.yaml regions)
+  const top = (await db.select().from(nicheQueue).orderBy(desc(nicheQueue.priority), nicheQueue.queuedAt).limit(limit * 60))
+    .filter((r) => inScope(scope, fromJson(r.records)[0]?.regions ?? []));
   const rows = interleaveBySegment(top.map((r) => ({ r, segment: (fromJson(r.records)[0]?.segment ?? "") }))).slice(0, limit).map((x) => x.r);
   const res = { ...empty("queue"), queued: 0, dropped: old.length };
   for (const row of rows) await persistNicheRecords(fromJson(row.records), deps, res);

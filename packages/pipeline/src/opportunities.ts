@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { SET_ASIDE_CODES, toRegex, type Pack, type Roster, type OpportunityDef, type SetAsideFamily } from "@tell/config";
+import { SET_ASIDE_CODES, toRegex, inScope, type Pack, type Roster, type OpportunityDef, type SetAsideFamily } from "@tell/config";
 import { searchFedAwards, companyKey, samWebsitesByUei, SAM_UEIS_PER_REQUEST, exaCompanySearch, serperNews, companyFromHeadline, type FedAward, type CompanyHit, type NewsItem } from "@tell/watchers";
 import { registrableDomain, domainLists } from "@tell/people";
 import { regionName } from "./niche.js";
@@ -293,6 +293,20 @@ export async function resolveRoster(id: string, r: Roster, pack: Pack, opts: { n
   return { looked, resolved, pending: p?.n ?? 0 };
 }
 
+/** Where a roster's companies are (federal awardees are US companies). */
+export const rosterRegions = (r: Roster): string[] => (r.kind === "usaspending_awardees" ? ["United States of America"] : r.regions);
+/** Is an opportunity inside the pack's working regions (pure)? Its roster's companies, a news opportunity's own region and
+ *  its beneficiary regions must all be in scope (federal recompetes are US). Out of scope = paused: no events, matches
+ *  or leads. */
+export function oppInScope(op: OpportunityDef, pack: Pack): boolean {
+  const scope = pack.meta.regions, r = pack.opportunities.rosters[op.roster];
+  if (!scope.length) return true;
+  if (!r || !inScope(scope, rosterRegions(r))) return false;
+  if (op.kind === "usaspending_expiring") return inScope(scope, ["United States of America"]);
+  if (op.kind === "news" && !inScope(scope, [op.region])) return false;
+  return !op.beneficiary_regions.length || inScope(scope, op.beneficiary_regions);
+}
+
 // ------------------------------------------------------------------------------------------------ 2. events
 
 type EventOpts = { now?: Date; fetch?: Fetch; force?: boolean; pack?: Pack; news?: (q: string, country: string) => Promise<NewsItem[]>; usage?: UsageStore };
@@ -364,7 +378,9 @@ async function collectSignalEvents(id: string, op: Extract<OpportunityDef, { kin
     from signals s join accounts a on a.id = s.account_id
     where s.type in (${sql.join(op.types.map((t) => sql`${t}`), sql`, `)}) and s.observed_at >= ${new Date(now.getTime() - op.max_age_days * DAY)}
     order by s.observed_at desc limit 2000`)).rows as { id: string; type: string; strength: number; quote: string; url: string; at: string; account_id: string; domain: string; name: string | null; region: string | null; segment: string | null }[];
-  const keep = rows.filter((r) => (!op.entity_regions.length || (r.region && op.entity_regions.includes(r.region))) && (!op.entity_segments.length || (r.segment && op.entity_segments.includes(r.segment))));
+  const scope = opts.pack?.meta.regions ?? [];
+  const keep = rows.filter((r) => (!op.entity_regions.length || (r.region && op.entity_regions.includes(r.region))) && (!op.entity_segments.length || (r.segment && op.entity_segments.includes(r.segment)))
+    && inScope(scope, [r.region]));
   await storeGeneral(id, keep.map((r) => ({ key: r.id, entityName: r.name ?? r.domain, quote: r.quote, url: r.url, at: new Date(r.at),
     facts: { kind: "signal", type: r.type, region: r.region, segment: r.segment, strength: r.strength, accountId: r.account_id, domain: r.domain } })), now);
   await dropOld(id, op.max_age_days, now);
@@ -471,7 +487,8 @@ export async function matchOpportunity(id: string, op: OpportunityDef, pack: Pac
 async function crossEvents(id: string, op: Extract<OpportunityDef, { kind: "news" | "signals" }>, pack: Pack, ownUrls: Set<string>, now: Date): Promise<(typeof marketEvents.$inferSelect)[]> {
   const cfg = pack.opportunities, roster = cfg.rosters[op.roster];
   if (!roster || roster.kind === "usaspending_awardees" || !op.verify) return [];
-  const sources = Object.entries(cfg.opportunities).filter(([oid, o]) => o.kind !== "usaspending_expiring" && !o.events_from && oid !== eventsOpp(id, op));
+  const sources = Object.entries(cfg.opportunities).filter(([oid, o]) => o.kind !== "usaspending_expiring" && !o.events_from && oid !== eventsOpp(id, op)
+    && (oppInScope(o, pack) || Object.entries(cfg.opportunities).some(([x, y]) => oppInScope(y, pack) && eventsOpp(x, y) === oid)));
   if (!sources.length) return [];
   const db = getDb();
   const rows = await db.select({ e: marketEvents, needs: eventChecks.needs }).from(marketEvents).innerJoin(eventChecks, eq(eventChecks.url, marketEvents.url))
@@ -498,11 +515,11 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   const db = getDb(), now = opts.now ?? new Date(), cfg = pack.opportunities;
   const since = new Date(now.getTime() - cfg.window_days * DAY);
   // a match belongs to the opportunity that reads its event's opportunity with its roster (events_from shares events)
-  const oppOf = new Map(Object.entries(cfg.opportunities).map(([id, op]) => [`${eventsOpp(id, op)}:${op.roster}`, id]));
+  const oppOf = new Map(Object.entries(cfg.opportunities).filter(([, op]) => oppInScope(op, pack)).map(([id, op]) => [`${eventsOpp(id, op)}:${op.roster}`, id]));
   // a fact-checked event routed to another roster by its needs (matchOpportunity's cross matches): the first
   // news / signal opportunity of that roster owns the lead
   const byRoster = new Map<string, string>();
-  for (const [id, op] of Object.entries(cfg.opportunities)) if (op.kind !== "usaspending_expiring" && !byRoster.has(op.roster)) byRoster.set(op.roster, id);
+  for (const [id, op] of Object.entries(cfg.opportunities)) if (op.kind !== "usaspending_expiring" && oppInScope(op, pack) && !byRoster.has(op.roster)) byRoster.set(op.roster, id);
   const rows0 = await db.select({
     eventId: marketEvents.id, opportunity: marketEvents.opportunity, quote: marketEvents.quote, url: marketEvents.url, amount: marketEvents.amount, eventDate: marketEvents.eventDate,
     facts: marketEvents.facts, entityName: marketEvents.entityName, firstSeenAt: marketEvents.firstSeenAt, lastSeenAt: marketEvents.lastSeenAt, accountId: opportunityMatches.accountId, roster: opportunityMatches.roster, fit: opportunityMatches.fit, reasons: opportunityMatches.reasons,
@@ -673,7 +690,7 @@ export async function discoverForNeeds(checks: Map<string, EventCheck>, entities
   const covered = new Set(proven.flatMap((l) => l.events.map((e) => `${e.url}|${cfg.opportunities[l.opportunity.id]?.roster}`)));
   const wants: { roster: string; q: string; entity: string; rank: number }[] = [];
   for (const [url, c] of checks) {
-    if (c.verdict !== "ok" || !c.where || stageRank(c.stage) < stageRank(cfg.min_stage)) continue;
+    if (c.verdict !== "ok" || !c.where || stageRank(c.stage) < stageRank(cfg.min_stage) || !inScope(pack.meta.regions, [c.where])) continue;
     for (const n of c.needs) {
       const roster = rosterForNeed(n, c.where, cfg.rosters);
       if (!roster || covered.has(`${url}|${roster}`)) continue;
@@ -824,7 +841,9 @@ export { timingFor };
 /** The whole collection side: rosters (when due) and their resolution, events, matches. */
 export async function collectOpportunities(pack: Pack, opts: { now?: Date; fetch?: Fetch; only?: "roster" | "events" | "match"; force?: boolean } = {}): Promise<Pick<OppRunStats, "rosters" | "events" | "matches">> {
   const cfg = pack.opportunities, out: Pick<OppRunStats, "rosters" | "events" | "matches"> = { rosters: {}, events: {}, matches: 0 };
+  const scope = pack.meta.regions;
   if (!opts.only || opts.only === "roster") for (const [id, r] of Object.entries(cfg.rosters)) {
+    if (!inScope(scope, rosterRegions(r))) continue; // a paused region: no searches, no lookups
     const f = await refreshRoster(id, r, { ...opts, pack }).catch(() => ({ refreshed: false, awards: 0, members: 0 }));
     // the day's SAM requests shared between rosters (the first one would otherwise take them all for weeks)
     const fedCount = Object.values(cfg.rosters).filter((x) => x.kind === "usaspending_awardees").length || 1;
@@ -834,9 +853,12 @@ export async function collectOpportunities(pack: Pack, opts: { now?: Date; fetch
     out.rosters[id] = { ...f, ...res, sam };
   }
   if (!opts.only || opts.only === "events") for (const [id, op] of Object.entries(cfg.opportunities)) {
+    // (an in-scope opportunity may read events another one collects: collect those too)
+    const used = Object.entries(cfg.opportunities).some(([oid, o]) => oppInScope(o, pack) && eventsOpp(oid, o) === id);
+    if (!oppInScope(op, pack) && !used) continue;
     const r = cfg.rosters[op.roster];
     if (r) out.events[id] = await collectEvents(id, op, r, { ...opts, pack }).catch(() => ({ fetched: 0, stored: 0, errors: 1 }));
   }
-  if (!opts.only || opts.only === "match") for (const [id, op] of Object.entries(cfg.opportunities)) out.matches += await matchOpportunity(id, op, pack, opts);
+  if (!opts.only || opts.only === "match") for (const [id, op] of Object.entries(cfg.opportunities)) if (oppInScope(op, pack)) out.matches += await matchOpportunity(id, op, pack, opts);
   return out;
 }

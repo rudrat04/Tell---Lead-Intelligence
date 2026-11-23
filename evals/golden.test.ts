@@ -121,7 +121,7 @@ describe("golden sets", () => {
       const c = validateEventCheck(JSON.stringify(r.reply), { headline: r.headline, article: r.article, industries, groups: (r.groups ?? []).map((id) => ({ id, label: id })) });
       const op = { kind: "news", beneficiary_regions: r.op.beneficiary_regions ?? [], keywords: r.group.keywords, min_stage: r.op.min_stage, verify: true } as unknown as Parameters<typeof gateEvent>[1];
       const roster = { kind: "company_search", segment: r.group.segment, must: r.group.must } as unknown as Parameters<typeof gateEvent>[2];
-      const g = gateEvent(c, op, roster, r.region, "committed", r.fallback ?? null, r.rosterId);
+      const g = gateEvent(c, op, roster, r.region, "early", r.fallback ?? null, r.rosterId);
       const got = g.ok ? "ok" : g.why;
       return { ok: got === r.expect, label: `${r.note}: expected ${r.expect}, got ${got}` };
     }));

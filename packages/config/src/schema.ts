@@ -27,7 +27,16 @@ export const PackMetaSchema = z.object({
     contact_url: z.string().url(),
   }),
   timezone: z.string().default("Asia/Kolkata"),
+  /** the only regions the engine works in (region names: India, United States of America); empty = any. Records,
+   *  queued lookups, rosters, opportunities and signal events outside them are paused (skipped, not deleted) */
+  regions: z.array(z.string()).default([]),
 });
+
+/** Is this place in the pack's working regions (pure)? Empty scope = everywhere; no known place = in. */
+export const inScope = (scope: string[], regions: (string | null | undefined)[]) => {
+  const known = regions.filter((r): r is string => !!r);
+  return !scope.length || !known.length || known.some((r) => scope.includes(r));
+};
 
 /**
  * A target buyer: the person to reach at an ICP company (buyers.yaml). The ICP (icp.yaml) describes companies; this
@@ -940,7 +949,7 @@ export const OpportunitiesSchema = z.object({
   /** Exa company searches a day for company_search rosters (usage_daily "exa_roster"; queries rotate) */
   search_per_day: z.number().int().min(0).max(100).default(8),
   /** the lowest fact-checked stage a news / signal event may have to be a lead (see GeneralOpp.min_stage) */
-  min_stage: z.enum(["early", "committed", "buying"]).default("committed"),
+  min_stage: z.enum(["early", "committed", "buying"]).default("early"),
   /** Exa company searches a run for a verified need no known company was proven for (usage_daily "exa_roster",
    *  shared with search_per_day): the companies it finds go through the same proof of fit; 0 = off */
   discover_per_run: z.number().int().min(0).max(20).default(2),
@@ -1041,7 +1050,7 @@ export const PackSchema = z.object({
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
   capabilities: CapabilitiesSchema.default({ capabilities: [] }),
   modules: ModulesSchema.default({ modules: [] }),
-  opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, min_stage: "committed", discover_per_run: 2, rosters: {}, opportunities: {} }),
+  opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, min_stage: "early", discover_per_run: 2, rosters: {}, opportunities: {} }),
 }).superRefine((p, ctx) => {
   {
     const o = p.opportunities, titles = new Set(p.icp.personas.map((x) => x.title));

@@ -70,17 +70,26 @@ const runs: Record<string, () => Promise<NicheResult>> = {
   nppes: () => runNppes({ pack }), sam: () => runSamEntities({ pack }), recalls: () => runRecalls({ pack }), news: () => runNewsEvents({ pack }),
   trials: () => runClinicalTrials({ pack }),
 };
+// US-only sources (federal awards, CMS, SEC Form D, NPPES, SAM, US city permits and carriers) are paused while the
+// pack's working regions (pack.yaml regions) leave the US out; mixed ones (FDA, recalls, trials) run and keep only
+// in-scope records
+const US_ONLY = new Set(["govcon", "cms", "awards", "formd", "nppes", "sam", "keyword", "socrata"]);
+const scope = pack.meta.regions;
+const paused = (name: string) => US_ONLY.has(name) && scope.length > 0 && !scope.includes("United States of America");
 let failed = 0;
 for (const [name, run] of Object.entries(runs)) {
   if (cmd && cmd !== name) continue;
+  if (paused(name)) { console.log(`${name}: paused (outside pack regions)`); continue; }
   try { const r = await run(); console.log(line(r)); if (!r.skipped && r.records === 0 && r.errors > 0) failed++; }
   catch (e) { console.log(`${name}: failed (${(e as Error).message.slice(0, 120)})`); failed++; }
 }
-if (!cmd || cmd === "keyword") {
+if ((!cmd || cmd === "keyword") && paused("keyword")) console.log("keyword awards: paused (outside pack regions)");
+else if (!cmd || cmd === "keyword") {
   try { for (const r of await runKeywordAwards({ pack })) { console.log(line(r)); if (!r.skipped && r.records === 0 && r.errors > 0) failed++; } }
   catch (e) { console.log(`keyword awards: failed (${(e as Error).message.slice(0, 120)})`); failed++; }
 }
-if (!cmd || cmd === "socrata") {
+if ((!cmd || cmd === "socrata") && paused("socrata")) console.log("socrata: paused (outside pack regions)");
+else if (!cmd || cmd === "socrata") {
   try { for (const r of await runSocrata({ pack })) { console.log(line(r)); if (!r.skipped && r.records === 0 && r.errors > 0) failed++; } }
   catch (e) { console.log(`socrata: failed (${(e as Error).message.slice(0, 120)})`); failed++; }
 }
