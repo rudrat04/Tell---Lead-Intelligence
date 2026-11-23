@@ -28,6 +28,19 @@ describe("opportunity lead out", () => {
     expect(m.buttons!.flat().map((b) => b.data)).toEqual(expect.arrayContaining(["cd:11111111-2222-4333-8444-555555555555", "br:11111111-2222-4333-8444-555555555555", "e:11111111-2222-4333-8444-555555555555"]));
     expect(oppMessage(lead, null, NOW, true).buttons).toBeUndefined();
   });
+  it("a fact-checked news lead shows what happened, the stage with its quote and what they will need", () => {
+    const news: OppLead = { ...lead, opportunity: { ...lead.opportunity, id: "in_pharma_plant", kind: "news", label: "Pharma plant build-out" },
+      events: [{ ...lead.events[0]!, quote: "Contoso Lifesciences starts building oral solid plant (Example News)", url: "https://news.example/a", stage: "committed",
+        happened: "Contoso Lifesciences has started construction of a new oral solid dosage plant in Gujarat.", stageQuote: "has started construction of its new oral solid dosage plant",
+        need: { what: "tablet compression and granulation machines", supplier: "pharma process equipment maker", industry: "manufacturing", quote: "will make 2 billion tablets a year" },
+        reasons: ["based in India", "they will need tablet compression and granulation machines", "stage: committed (\"has started construction\")"] }] };
+    const m = oppMessage(news, "11111111-2222-4333-8444-555555555555", NOW).text;
+    expect(m).toContain("Fact-checked: Contoso Lifesciences has started construction");
+    expect(m).toContain("Stage: committed (approved, funded, building, ordering): \"has started construction of its new oral solid dosage plant\"");
+    expect(m).toContain("<b>They will need:</b> tablet compression and granulation machines");
+    expect(m).not.toMatch(/How:.*stage:/); // the stage shows once, under the signal
+    expect(oppBrief(news, NOW)).toContain("They will need: tablet compression and granulation machines (from: \"will make 2 billion tablets a year\")");
+  });
   it("Sheet: the Email draft cell holds the Create draft link; the brief says a recompete is not a confirmed RFP", () => {
     const r = oppSheetRow(lead, "2026-11-21", NOW, { draft: "https://w.example/cd?d=x&s=y", enrich: "https://w.example/e?d=x&s=z" });
     expect(r["Email draft"]).toBe("https://w.example/cd?d=x&s=y");
