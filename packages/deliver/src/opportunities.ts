@@ -1,5 +1,5 @@
 import type { Pack } from "@tell/config";
-import { collectOpportunities, rankOpportunityLeads, timingLine, istDay, neonUsage, WRITER_USAGE, type OppLead, type OppRunStats } from "@tell/pipeline";
+import { collectOpportunities, rankOpportunityLeads, activeTrades, withTrades, timingLine, istDay, neonUsage, WRITER_USAGE, type OppLead, type OppRunStats } from "@tell/pipeline";
 import { WriterClient, HaikuClient, writerEffort, writeOpportunityDraft, type OppDraftInput, type LlmClient } from "@tell/extract";
 import { firstName, type Contact } from "@tell/people";
 import { SHOWN_EVENTS, TOP_EVENTS } from "@tell/intel";
@@ -119,13 +119,14 @@ export function oppSheetRow(l: OppLead, day: string, now: Date, links: { enrich?
 
 /** One lead as a Telegram message (pure; exported for tests), in pitch order: the signal, who can benefit and how,
  *  the play, the opportunity, then who to reach. */
-export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, test = false): TgMessage {
+export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, test = false, compact = false): TgMessage {
   const a = l.account, c = l.contact, e0 = l.events[0], t = timingLine(l, now);
   const link = (url: string, text: string) => (/^https?:\/\//i.test(url) ? `<a href="${tgEsc(url)}">${tgEsc(text)}</a>` : tgEsc(text));
   const facts = [a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).map((x) => tgEsc(String(x))).join(" · ");
   const lines = [
-    "📡 <b>THE SIGNAL</b>",
-    ...(e0 ? [`<b>${link(e0.url, e0.quote)}</b>`, `<i>${tgEsc(signalWhen(l, e0, now))}</i>`, ...checkedLines(e0).map((x, i) => (i ? `🔎 ${tgEsc(x)}` : `✔️ ${tgEsc(x)}`))] : []),
+    // (compact: the signal was just sent on its own message, with every business that can act on it)
+    ...(compact ? [] : ["📡 <b>THE SIGNAL</b>",
+      ...(e0 ? [`<b>${link(e0.url, e0.quote)}</b>`, `<i>${tgEsc(signalWhen(l, e0, now))}</i>`, ...checkedLines(e0).map((x, i) => (i ? `🔎 ${tgEsc(x)}` : `✔️ ${tgEsc(x)}`))] : [])]),
     ...(l.events.length > 1 ? [`+ ${l.events.length - 1} more like it: ${l.events.slice(1, MAX_EVENTS).map((e, i) => link(e.url, `#${i + 2}`)).join(" ")}`] : []),
     "",
     "🏭 <b>WHO CAN BENEFIT</b>",
@@ -155,6 +156,31 @@ export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, tes
     [{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }]] };
 }
 
+/** Leads grouped by their lead signal (pure; exported for tests): the strongest group first, each group's leads
+ *  strongest first. One signal, several businesses that can act on it. */
+export function bySignal(leads: OppLead[]): OppLead[][] {
+  const groups = new Map<string, OppLead[]>();
+  for (const l of [...leads].sort((a, b) => b.score.score - a.score.score)) {
+    const k = l.events[0]?.url ?? l.account.id;
+    groups.set(k, [...(groups.get(k) ?? []), l]);
+  }
+  return [...groups.values()];
+}
+
+/** The signal on its own message, with the businesses below it that can act on it (pure; exported for tests). */
+export function signalMessage(group: OppLead[], now: Date): TgMessage {
+  const l = group[0]!, e0 = l.events[0];
+  const link = (url: string, text: string) => (/^https?:\/\//i.test(url) ? `<a href="${tgEsc(url)}">${tgEsc(text)}</a>` : tgEsc(text));
+  const needs = [...new Set(group.map((x) => x.events[0]?.need?.what).filter((x): x is string => !!x))];
+  return { text: [
+    "📡 <b>THE SIGNAL</b>",
+    ...(e0 ? [`<b>${link(e0.url, e0.quote)}</b>`, `<i>${tgEsc(signalWhen(l, e0, now))}</i>`, ...checkedLines(e0).map((x, i) => (i ? `🔎 ${tgEsc(x)}` : `✔️ ${tgEsc(x)}`))] : []),
+    ...(needs.length ? ["", "<b>What it makes them buy:</b>", ...needs.map((n) => `• ${tgEsc(n)}`)] : []),
+    "",
+    `🏭 <b>${group.length} business${group.length === 1 ? "" : "es"} can act on it:</b> ${group.map((x) => tgEsc(x.account.name ?? x.account.domain)).join(" · ")}`,
+  ].join("\n").replace(/\n{3,}/g, "\n\n").trim() };
+}
+
 export function oppContext(l: OppLead, now: Date): OppContext {
   const a = l.account, c = l.contact;
   return {
@@ -176,9 +202,10 @@ export async function runOpportunityDigest(opts: { pack: Pack; dryRun?: boolean;
     const [prior] = await db.select({ status: runs.status }).from(runs).where(eq(runs.idempotencyKey, key)).limit(1);
     if (prior?.status === "ok") return { status: "skipped", reason: `already sent today (${key})`, leads: 0 };
   }
-  const collected = opts.skipCollect ? {} : await collectOpportunities(pack, { now, only: opts.only, force: opts.force });
+  // (the collection hands back the pack with today's trades in it; never spread into the counts: CI logs are public)
+  const { pack: withT, ...collected } = opts.skipCollect ? { pack: withTrades(pack, await activeTrades(pack, now)) } : await collectOpportunities(pack, { now, only: opts.only, force: opts.force });
   if (opts.only) return { status: "dry", ...collected, leads: 0 };
-  const ranked = await rankOpportunityLeads(pack, { now, write: !opts.dryRun });
+  const ranked = await rankOpportunityLeads(withT, { now, write: !opts.dryRun });
   const base = { ...collected, ...ranked.stats, leads: ranked.leads.length };
   if (opts.dryRun) return { status: "dry", ...base, shown: ranked.leads };
   if (!ranked.leads.length) {
@@ -209,8 +236,15 @@ export async function runOpportunityDigest(opts: { pack: Pack; dryRun?: boolean;
   let telegram = 0;
   if (pack.delivery.channels.includes("telegram") && telegramConfigured()) {
     if (real) await storeTelegramTexts(ranked.leads.map((l) => ({ d: ids.get(l.account.id)!, brief: oppBrief(l, now) }))).catch(() => false);
-    const head: TgMessage = { text: `${opts.test ? "[TEST] " : ""}<b>${ranked.leads.length} opportunit${ranked.leads.length === 1 ? "y lead" : "y leads"} for ${tgEsc(day)}</b>\n<i>Companies that can act on events we found. Tap Create draft to write the email.</i>` };
-    telegram = await sendTelegram([head, ...ranked.leads.map((l) => oppMessage(l, real ? ids.get(l.account.id)! : null, now, !!opts.test))]);
+    const head: TgMessage = { text: `${opts.test ? "[TEST] " : ""}<b>${ranked.leads.length} opportunit${ranked.leads.length === 1 ? "y lead" : "y leads"} for ${tgEsc(day)}</b>\n<i>Each signal, then the businesses that can act on it. Tap Create draft to write the email.</i>` };
+    // one message per signal, then each business that can act on it (federal recompetes: one message each, as before)
+    const msgs: TgMessage[] = [head];
+    for (const g of bySignal(ranked.leads)) {
+      const grouped = g[0]!.opportunity.kind !== "usaspending_expiring";
+      if (grouped) msgs.push(signalMessage(g, now));
+      for (const l of g) msgs.push(oppMessage(l, real ? ids.get(l.account.id)! : null, now, !!opts.test, grouped));
+    }
+    telegram = await sendTelegram(msgs);
   }
   if (real) await db.insert(runs).values({ task: "opps", idempotencyKey: key, status: "ok", yieldCount: ranked.leads.length, finishedAt: new Date() })
     .onConflictDoUpdate({ target: runs.idempotencyKey, set: { status: "ok", yieldCount: ranked.leads.length, finishedAt: new Date() } });

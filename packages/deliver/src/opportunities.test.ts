@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { loadFixturePack } from "@tell/config";
 import type { OppLead } from "@tell/pipeline";
-import { oppMessage, oppSheetRow, oppBrief, draftText, oppContext } from "./opportunities.js";
+import { oppMessage, oppSheetRow, oppBrief, draftText, oppContext, bySignal, signalMessage } from "./opportunities.js";
 
 const NOW = new Date("2026-11-21T00:00:00Z");
 const lead: OppLead = {
@@ -40,6 +40,20 @@ describe("opportunity lead out", () => {
     expect(m).toContain("<b>They will need:</b> tablet compression and granulation machines");
     expect(m).not.toMatch(/How:.*stage:/); // the stage shows once, under the signal
     expect(oppBrief(news, NOW)).toContain("They will need: tablet compression and granulation machines (from: \"will make 2 billion tablets a year\")");
+  });
+  it("one signal, several businesses: grouped under one signal message, each business sent without repeating it", () => {
+    const ev = { ...lead.events[0]!, quote: "Fabrikam Beverages lays foundation of a soft drink plant (Example News)", url: "https://news.example/plant", stage: "committed" as const,
+      happened: "Fabrikam Beverages laid the foundation stone of a soft drink plant in Nashik.", stageQuote: "laid the foundation stone" };
+    const mk = (id: string, name: string, score: number, what: string): typeof lead => ({ ...lead, account: { ...lead.account, id, name, domain: `${id}.example` },
+      opportunity: { ...lead.opportunity, id: `trade:${id}`, kind: "signals", label: what }, score: { ...lead.score, score },
+      events: [{ ...ev, need: { what, supplier: what, industry: "manufacturing", quote: "laid the foundation stone" } }] });
+    const other = { ...mk("c", "Woodgrove Staffing", 70, "plant workers"), events: [{ ...ev, url: "https://news.example/other" }] };
+    const groups = bySignal([mk("a", "Northwind Builders", 60, "factory construction"), other, mk("b", "Contoso Filling", 65, "bottling lines")]);
+    expect(groups.map((g) => g.map((l) => l.account.name))).toEqual([["Woodgrove Staffing"], ["Contoso Filling", "Northwind Builders"]]);
+    const head = signalMessage(groups[1]!, NOW).text;
+    expect(head).toContain("2 businesses can act on it:</b> Contoso Filling · Northwind Builders");
+    expect(head).toContain("• bottling lines");
+    expect(oppMessage(groups[1]![0]!, null, NOW, true, true).text).not.toContain("THE SIGNAL");
   });
   it("Sheet: the Email draft cell holds the Create draft link; the brief says a recompete is not a confirmed RFP", () => {
     const r = oppSheetRow(lead, "2026-11-21", NOW, { draft: "https://w.example/cd?d=x&s=y", enrich: "https://w.example/e?d=x&s=z" });

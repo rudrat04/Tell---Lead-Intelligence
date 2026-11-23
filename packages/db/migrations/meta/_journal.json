@@ -183,6 +183,13 @@
       "when": 1795421523325,
       "tag": "0025_flawless_wildside",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1795424371189,
+      "tag": "0026_natural_jazinda",
+      "breakpoints": true
     }
   ]
 }

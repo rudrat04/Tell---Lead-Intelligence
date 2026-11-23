@@ -3,6 +3,7 @@ import { readArticle } from "@tell/watchers";
 import { HaikuClient, checkEvent, stageRank, needFor, EVENT_CHECK_VERSION, type EventCheck, type EventNeed, type LlmClient, type Stage, type IndustryRef } from "@tell/extract";
 import { getDb, eventChecks, inArray, and, eq } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
+import { tradeId, isTrade } from "./trades.js";
 
 /**
  * The fact-check of each news / signal event (extract/event-check.ts), done once per URL and cached in event_checks:
@@ -68,7 +69,7 @@ export async function eventChecksFor(evs: EventToCheck[], pack: Pack, opts: { no
   return { checks, made, failed };
 }
 
-export type GateResult = { ok: true; need: EventNeed; stage: Stage } | { ok: false; why: "unchecked" | "unclear" | "no-need" | "early" | "no-place" | "elsewhere" | "peer" | "not-their-trade" };
+export type GateResult = { ok: true; need: EventNeed; stage: Stage } | { ok: false; why: "unchecked" | "unclear" | "no-need" | "early" | "no-place" | "elsewhere" | "peer" | "not-their-trade" | "excluded-industry" };
 
 /**
  * Does this verified event make a lead for a company in this supplier group (pure; exported for tests)?
@@ -80,10 +81,11 @@ export type GateResult = { ok: true; need: EventNeed; stage: Stage } | { ok: fal
  *   EPC contractors, never their lead);
  * - one of its needs is this group's trade (its industry, and its `must` / keywords when it has them).
  */
-export function gateEvent(c: EventCheck | undefined, op: Extract<OpportunityDef, { kind: "news" | "signals" }>, roster: Roster, beneficiaryRegion: string | null, minStage: Stage, eventRegion: string | null = null, rosterId?: string): GateResult {
+export function gateEvent(c: EventCheck | undefined, op: Extract<OpportunityDef, { kind: "news" | "signals" }>, roster: Roster, beneficiaryRegion: string | null, minStage: Stage, eventRegion: string | null = null, rosterId?: string, excluded?: string[]): GateResult {
   if (!c) return { ok: false, why: "unchecked" };
   if (c.verdict === "unclear") return { ok: false, why: "unclear" };
   if (c.verdict !== "ok" || !c.needs.length || !c.stage) return { ok: false, why: "no-need" };
+  if (excluded?.includes(c.entityIndustry)) return { ok: false, why: "excluded-industry" };
   if (stageRank(c.stage) < stageRank(op.min_stage ?? minStage)) return { ok: false, why: "early" };
   // the place the text names wins (an Indian company's order in Chile is work in Chile); silent text = where the event
   // was found (the news search's country, the signalling company's region)
@@ -95,6 +97,8 @@ export function gateEvent(c: EventCheck | undefined, op: Extract<OpportunityDef,
   const segment = "segment" in roster ? roster.segment : "";
   // the event company is the kind of company this group lists: a peer
   if (must && c.entitySells && must.test(c.entitySells) && c.entityIndustry === segment) return { ok: false, why: "peer" };
-  const need = needFor(c.needs, { ...(rosterId ? { id: rosterId } : {}), segment, must, keywords: op.keywords });
+  // a trade (a need's own supplier search) serves exactly the needs that named it
+  const need = rosterId && isTrade(rosterId) ? c.needs.find((n) => tradeId(n, where ?? beneficiaryRegion ?? "") === rosterId) ?? null
+    : needFor(c.needs, { ...(rosterId ? { id: rosterId } : {}), segment, must, keywords: op.keywords });
   return need ? { ok: true, need, stage: c.stage } : { ok: false, why: "not-their-trade" };
 }

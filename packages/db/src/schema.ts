@@ -510,6 +510,20 @@ export const fitChecks = pgTable("fit_checks", {
   checkedAt: ts("checked_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.accountId, t.eventKey] })]);
 
+/** A trade: the kind of company a verified need asks for ("beverage filling line maker", India), searched for and
+ *  matched like a roster (pipeline/trades.ts). Kept while needs keep naming it. */
+export const needTrades = pgTable("need_trades", {
+  id: text("id").primaryKey(), // trade:<hash of industry | region | normalised supplier>
+  supplier: text("supplier").notNull(),
+  industry: text("industry").notNull(),
+  region: text("region").notNull(),
+  /** one need that named it (shown on the lead's opportunity line) */
+  what: text("what").notNull(),
+  events: integer("events").notNull().default(1),
+  firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+  lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
+});
+
 /** Fact-check of one market event (by its article / record URL), done once: what happened, the stage, where the work
  *  is, and what it must buy from other companies, every part quoted from the text (extract/event-check.ts). */
 export const eventChecks = pgTable("event_checks", {

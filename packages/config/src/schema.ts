@@ -842,8 +842,9 @@ export const RosterSchema = z.discriminatedUnion("kind", [UsaRosterSchema, Searc
 
 const OppBase = {
   label: z.string().min(1),
-  /** the roster whose members can benefit */
-  roster: z.string().min(1),
+  /** the roster whose members can benefit. Optional for news / signals: without one the opportunity only collects
+   *  signals, and each verified need finds its own companies (a trade: pipeline/trades.ts) */
+  roster: z.string().min(1).optional(),
   /** buyers.yaml titles to reach at a beneficiary, first = preferred */
   buyers: z.array(z.string()).default([]),
   /** one line on why the event matters to a beneficiary (shown on the lead, given to the draft writer) */
@@ -950,9 +951,23 @@ export const OpportunitiesSchema = z.object({
   search_per_day: z.number().int().min(0).max(100).default(8),
   /** the lowest fact-checked stage a news / signal event may have to be a lead (see GeneralOpp.min_stage) */
   min_stage: z.enum(["early", "committed", "buying"]).default("early"),
-  /** Exa company searches a run for a verified need no known company was proven for (usage_daily "exa_roster",
-   *  shared with search_per_day): the companies it finds go through the same proof of fit; 0 = off */
-  discover_per_run: z.number().int().min(0).max(20).default(2),
+  /** signals whose company is in one of these industries are not monitored (IT / tech: the operator works blue-collar
+   *  industries); the companies that benefit can be in any industry */
+  exclude_entity_industries: z.array(z.string()).default([]),
+  /** trades (pipeline/trades.ts): a verified need no roster covers becomes its own supplier search ("beverage filling
+   *  line maker in India"), so any business that benefits can be found, not only the rosters' members */
+  trades: z.object({
+    enabled: z.boolean().default(true),
+    /** buyers.yaml titles to reach at a trade's companies, first = preferred */
+    buyers: z.array(z.string()).default(["Founder / CEO", "Head of Sales"]),
+    results_per_query: z.number().int().min(1).max(25).default(10),
+    /** a trade's search is run again after this many days */
+    refresh_days: z.number().int().min(1).default(30),
+    /** a trade no verified need has named for this long stops being searched and matched */
+    max_age_days: z.number().int().min(7).default(45),
+    /** companies looked up (resolved to accounts) per trade and run */
+    per_run: z.number().int().min(0).max(50).default(10),
+  }).default({ enabled: true, buyers: ["Founder / CEO", "Head of Sales"], results_per_query: 10, refresh_days: 30, max_age_days: 45, per_run: 10 }),
   rosters: z.record(z.string(), RosterSchema).default({}),
   opportunities: z.record(z.string(), OpportunitySchema).default({}),
 });
@@ -1050,7 +1065,8 @@ export const PackSchema = z.object({
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
   capabilities: CapabilitiesSchema.default({ capabilities: [] }),
   modules: ModulesSchema.default({ modules: [] }),
-  opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, min_stage: "early", discover_per_run: 2, rosters: {}, opportunities: {} }),
+  opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, min_stage: "early", exclude_entity_industries: [],
+    trades: { enabled: true, buyers: ["Founder / CEO", "Head of Sales"], results_per_query: 10, refresh_days: 30, max_age_days: 45, per_run: 10 }, rosters: {}, opportunities: {} }),
 }).superRefine((p, ctx) => {
   {
     const o = p.opportunities, titles = new Set(p.icp.personas.map((x) => x.title));
@@ -1059,9 +1075,10 @@ export const PackSchema = z.object({
       if (!admittedSegs.has(r.segment)) ctx.addIssue({ code: "custom", path: ["opportunities", "rosters", id, "segment"], message: `segment "${r.segment}" is not an industry the ICP admits` });
     }
     for (const [id, op] of Object.entries(o.opportunities)) {
-      const r = o.rosters[op.roster];
+      const r = op.roster ? o.rosters[op.roster] : undefined;
       const path = ["opportunities", "opportunities", id];
-      if (!r) ctx.addIssue({ code: "custom", path: [...path, "roster"], message: `unknown roster "${op.roster}" (rosters: ${Object.keys(o.rosters).join(", ") || "none"})` });
+      if (op.roster && !r) ctx.addIssue({ code: "custom", path: [...path, "roster"], message: `unknown roster "${op.roster}" (rosters: ${Object.keys(o.rosters).join(", ") || "none"})` });
+      if (!op.roster && (op.kind === "usaspending_expiring" || op.events_from)) ctx.addIssue({ code: "custom", path: [...path, "roster"], message: "a federal opportunity, or one reading another's events, needs a roster" });
       if (op.kind === "usaspending_expiring") {
         if (r && r.kind !== "usaspending_awardees") ctx.addIssue({ code: "custom", path: [...path, "roster"], message: "a usaspending_expiring opportunity needs a usaspending_awardees roster" });
         if (r?.kind === "usaspending_awardees") for (const f of op.set_asides) if (!r.set_asides.includes(f)) ctx.addIssue({ code: "custom", path: [...path, "set_asides"], message: `set-aside "${f}" events can never match: roster "${op.roster}" doesn't query that family, so no member is known to be eligible` });

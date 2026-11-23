@@ -210,10 +210,11 @@ jobs:
           # the proof-of-fit check (Haiku) and the rendered site reads (Firecrawl): without them news / signal leads stay unproven and drop
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
-          FIT_DAILY_CAP_USD: ${{ vars.FIT_DAILY_CAP_USD || '0.03' }}
+          FIT_DAILY_CAP_USD: ${{ vars.FIT_DAILY_CAP_USD || '0.06' }}
+          FIT_CHECKS_PER_RUN: ${{ vars.FIT_CHECKS_PER_RUN || '50' }}
           # the event fact-check (article read, quotes verified, stage, needs): Haiku, once per event URL
-          EVENT_DAILY_CAP_USD: ${{ vars.EVENT_DAILY_CAP_USD || '0.05' }}
-          EVENT_CHECKS_PER_RUN: ${{ vars.EVENT_CHECKS_PER_RUN || '40' }}
+          EVENT_DAILY_CAP_USD: ${{ vars.EVENT_DAILY_CAP_USD || '0.06' }}
+          EVENT_CHECKS_PER_RUN: ${{ vars.EVENT_CHECKS_PER_RUN || '80' }}
           AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
           AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}
