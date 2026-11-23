@@ -203,7 +203,7 @@ jobs:
       - name: Opportunity leads
         id: opps
         continue-on-error: true
-        timeout-minutes: 30
+        timeout-minutes: 50
         run: pnpm opps
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

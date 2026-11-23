@@ -599,7 +599,9 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   }
   // news / signal leads must prove the fit from the company's own site before they take a slot (federal leads carry
   // their proof: the contracts they won)
-  const proven = await proveFits(scored, pack, { now, write: opts.write !== false, want: max * cfg.pool_multiplier * 2, ...(opts.fit ? { fit: opts.fit } : {}) });
+  // proof is tried in turns across opportunities (each one's strongest first), so a trade's companies get their checks
+  // instead of the highest-scoring list using them all
+  const proven = await proveFits(roundRobin(scored, scored.length, scored.length), pack, { now, write: opts.write !== false, want: max * cfg.pool_multiplier * 2, ...(opts.fit ? { fit: opts.fit } : {}) });
   const pool = roundRobin(proven.leads, max * cfg.pool_multiplier, cfg.max_per_opportunity * cfg.pool_multiplier);
 
   // the opportunity's buyers first (Head of BD / Capture for a recompete), searched only for the pool
