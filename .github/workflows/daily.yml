@@ -19,7 +19,7 @@ permissions:
 jobs:
   daily:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     env:
       # private config pack in R2; falls back to packs/example-gtm when TELL_PACK_R2_PREFIX is unset
       TELL_PACK_R2_PREFIX: ${{ vars.TELL_PACK_R2_PREFIX }}
@@ -63,8 +63,12 @@ jobs:
       # Only Form D needs SEC_USER_AGENT; OPENFDA_API_KEY and SOCRATA_APP_TOKEN just raise rate limits.
       - name: Niche public records
         continue-on-error: true
+        timeout-minutes: 40
         run: pnpm niche
         env:
+          # after 25 minutes, names still to look up go to niche_queue (drained by every tick) so the digest and
+          # opportunity leads keep their time; the step timeout is the backstop
+          NICHE_MAX_MINUTES: "25"
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           # segment "auto" records (SME IPO, SBIR, PLI) get their industry from Haiku; without the key they get none
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -156,8 +160,12 @@ jobs:
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
 
+      # The old path: leads are the companies that HAVE the signal. Off: leads are opportunity leads only (next step).
+      # Set the repo variable LEGACY_LEADS=on to bring it back.
       - name: Score accounts and send digest
         id: digest
+        if: vars.LEGACY_LEADS == 'on'
+        continue-on-error: true
         run: pnpm digest
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -193,7 +201,9 @@ jobs:
       # bid on them (past winners in the same NAICS codes; the incumbent is never its own lead). Telegram + Sheet, no
       # drafts here: "Create draft" writes one on click (drafts.yml). Counts only.
       - name: Opportunity leads
+        id: opps
         continue-on-error: true
+        timeout-minutes: 30
         run: pnpm opps
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -241,6 +251,7 @@ jobs:
       # catch-up for touch-backs (the digest lists them and drafts up to 8): drafts the rest within the writer cap,
       # only from a NEW fact (Sheet "Follow-up"). Counts only.
       - name: Follow-ups
+        if: vars.LEGACY_LEADS == 'on'
         continue-on-error: true
         run: pnpm followups
         env:
@@ -253,12 +264,12 @@ jobs:
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
 
       # Dead-man's switch: healthchecks.io emails you if this ping doesn't arrive on time.
-      # Success only when the digest step itself succeeded (other steps are continue-on-error).
+      # Success only when the opportunity-leads step itself succeeded (other steps are continue-on-error).
       - name: Dead-man's switch ping
         if: always()
         env:
           HC_URL: ${{ secrets.HEALTHCHECK_DAILY_URL }}
-          OUTCOME: ${{ steps.digest.outcome }}
+          OUTCOME: ${{ steps.opps.outcome }}
         run: |
           if [ -z "$HC_URL" ]; then echo "no HEALTHCHECK_DAILY_URL set, skipping"; exit 0; fi
           if [ "$OUTCOME" = "success" ]; then curl -fsS -m 10 --retry 3 "$HC_URL" >/dev/null && echo "pinged: ok"

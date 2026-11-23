@@ -137,6 +137,13 @@ export function interleaveBySegment<T extends { segment: string }>(xs: T[]): T[]
  * Records -> accounts + signals. Company names are looked up once (company_seeds, source `niche:<source>`); a resolved
  * name is reused without a search. Exa searches are capped per source per run (sources.niche.per_run).
  */
+// wall-clock budget for one process (unset = none): set by the daily chain, not by the ticks' drain
+const NICHE_STARTED = Date.now();
+export function pastNicheDeadline(now = Date.now()): boolean {
+  const m = Number(process.env.NICHE_MAX_MINUTES ?? 0);
+  return m > 0 && now - NICHE_STARTED > m * 60_000;
+}
+
 export async function persistNicheRecords(records: NicheRecord[], deps: Deps, res: NicheResult): Promise<NicheResult> {
   const { pack } = deps;
   const db = getDb();
@@ -191,6 +198,9 @@ export async function persistNicheRecords(records: NicheRecord[], deps: Deps, re
       const freeTried = seed?.reason === `deferred:${FREE_RESOLVERS}` && !!seed.siteCheckedAt && now.getTime() - seed.siteCheckedAt.getTime() < FREE_RETRY_DAYS * DAY;
       // (a record that brings its own website, e.g. SAM's by UEI, is always worth one try: no search needed)
       if (freeTried && searches >= cap && !r0.website) { res.capped++; await enqueue(seedSource, k, recs); continue; }
+      // the run's time budget is spent (NICHE_MAX_MINUTES, daily chain): queue the rest for the ticks' drain so later
+      // steps (digest, opportunity leads) still run inside the job's limit
+      if (pastNicheDeadline()) { res.capped++; await enqueue(seedSource, k, recs); continue; }
       res.looked++;
       const v = await resolve(r0, searches < cap, freeTried).catch(() => ({ reason: "error" } as Verdict));
       // nothing could look it up today (Exa's cap spent, the free ways found nothing): keep it for the next budget, and
