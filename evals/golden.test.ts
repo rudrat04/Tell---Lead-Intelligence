@@ -7,7 +7,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadFixturePack } from "@tell/config";
 import { validateAnalysis, validateJudged, type AnalystInput } from "@tell/extract";
-import { listReady } from "@tell/pipeline";
+import { listReady, gateEvent } from "@tell/pipeline";
+import { validateEventCheck } from "@tell/extract";
 import { matchEvent, entityKey, type OppEvent } from "@tell/intel";
 import { classifyJob, compileRoles, compileGigRules, gigVerdict, gate1, gate1Rules, looksLikeStaffing, critic, buildEvidence, scoreAccount, type JobRow, type SignalRow, type Evidence } from "@tell/intel";
 import type { Pack } from "@tell/config";
@@ -108,6 +109,21 @@ describe("golden sets", () => {
       const m = { key: entityKey(r.member.name), name: r.member.name, facts: { naics: r.member.naics, agencies: {}, subAgencies: {}, setAsides: r.member.setAsides, awards: 3, total: 5e6, largest: 2e6, lastAwardAt: null, ueis: r.member.ueis, states: [], evidence: [] } };
       const got = matchEvent(e, m) != null;
       return { ok: got === r.expect, label: `${r.note}: got ${got}` };
+    }));
+    expect(failures).toEqual([]);
+  });
+
+  it("event fact-check: every lead's event is quoted, far enough along, where the prospect works, from a non-peer, in its trade", () => {
+    type Row = { headline: string; article: string; reply: unknown; group: { segment: string; must?: string; keywords: string[] }; op: { beneficiary_regions?: string[]; min_stage?: "early" | "committed" | "buying" };
+      region: string; fallback?: string; rosterId?: string; groups?: string[]; expect: string; note: string };
+    const industries = ["pharma", "manufacturing", "construction", "staffing", "logistics", "medtech", "healthcare", "food"].map((id) => ({ id, label: id }));
+    const failures = report("event gate", load<Row>("event-gate.jsonl").map((r) => {
+      const c = validateEventCheck(JSON.stringify(r.reply), { headline: r.headline, article: r.article, industries, groups: (r.groups ?? []).map((id) => ({ id, label: id })) });
+      const op = { kind: "news", beneficiary_regions: r.op.beneficiary_regions ?? [], keywords: r.group.keywords, min_stage: r.op.min_stage, verify: true } as unknown as Parameters<typeof gateEvent>[1];
+      const roster = { kind: "company_search", segment: r.group.segment, must: r.group.must } as unknown as Parameters<typeof gateEvent>[2];
+      const g = gateEvent(c, op, roster, r.region, "committed", r.fallback ?? null, r.rosterId);
+      const got = g.ok ? "ok" : g.why;
+      return { ok: got === r.expect, label: `${r.note}: expected ${r.expect}, got ${got}` };
     }));
     expect(failures).toEqual([]);
   });

@@ -883,6 +883,9 @@ const GeneralOpp = {
   /** prove the fit before a lead goes out: the company's own website must show it offers what the event needs (the
    *  molecule, the destination, the equipment), quoted word for word; unproven = not a lead */
   verify: z.boolean().default(true),
+  /** the event's fact-checked stage this opportunity needs at least (early: plans, land, MoUs; committed: approvals,
+   *  funding, construction, orders; buying: open tenders, RFQs, hiring drives); unset = opportunities.min_stage */
+  min_stage: z.enum(["early", "committed", "buying"]).optional(),
 };
 
 const NewsOppSchema = z.object({
@@ -936,6 +939,11 @@ export const OpportunitiesSchema = z.object({
   news_per_day: z.number().int().min(0).max(100).default(10),
   /** Exa company searches a day for company_search rosters (usage_daily "exa_roster"; queries rotate) */
   search_per_day: z.number().int().min(0).max(100).default(8),
+  /** the lowest fact-checked stage a news / signal event may have to be a lead (see GeneralOpp.min_stage) */
+  min_stage: z.enum(["early", "committed", "buying"]).default("committed"),
+  /** Exa company searches a run for a verified need no known company was proven for (usage_daily "exa_roster",
+   *  shared with search_per_day): the companies it finds go through the same proof of fit; 0 = off */
+  discover_per_run: z.number().int().min(0).max(20).default(2),
   rosters: z.record(z.string(), RosterSchema).default({}),
   opportunities: z.record(z.string(), OpportunitySchema).default({}),
 });
@@ -1033,7 +1041,7 @@ export const PackSchema = z.object({
   gigs: GigsSchema.default({ enabled: false, match_any: [], exclude: [], contract_any: [], locations_allowed: [], max_age_days: 14, max_in_digest: 8, sources: { remoteok: true, himalayas: true, yc: true, hn_hiring_thread: true } }),
   capabilities: CapabilitiesSchema.default({ capabilities: [] }),
   modules: ModulesSchema.default({ modules: [] }),
-  opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, rosters: {}, opportunities: {} }),
+  opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, min_stage: "committed", discover_per_run: 2, rosters: {}, opportunities: {} }),
 }).superRefine((p, ctx) => {
   {
     const o = p.opportunities, titles = new Set(p.icp.personas.map((x) => x.title));

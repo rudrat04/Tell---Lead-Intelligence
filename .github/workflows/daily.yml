@@ -211,6 +211,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
           FIT_DAILY_CAP_USD: ${{ vars.FIT_DAILY_CAP_USD || '0.03' }}
+          # the event fact-check (article read, quotes verified, stage, needs): Haiku, once per event URL
+          EVENT_DAILY_CAP_USD: ${{ vars.EVENT_DAILY_CAP_USD || '0.05' }}
+          EVENT_CHECKS_PER_RUN: ${{ vars.EVENT_CHECKS_PER_RUN || '40' }}
           AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
           AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
           SAM_API_KEY: ${{ secrets.SAM_API_KEY }}

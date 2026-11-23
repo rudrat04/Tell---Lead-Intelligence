@@ -6,7 +6,7 @@ import { regionName } from "./niche.js";
 import { profileLine } from "./company-facts.js";
 import { neonUsage, type UsageStore } from "./usage.js";
 import {
-  rosterFromAwards, isJointVenture, expiringEvents, eventQuote, matchEvent, matchGeneral, matchValue, scoreBeneficiary, heldBack, hasNewTopEvent, deliveredEvents, timingFor, generalFacts, TOP_EVENTS,
+  rosterFromAwards, isJointVenture, sameEntity, affiliates, expiringEvents, eventQuote, matchEvent, matchGeneral, matchValue, scoreBeneficiary, heldBack, hasNewTopEvent, deliveredEvents, timingFor, generalFacts, TOP_EVENTS,
   type MemberFacts, type OppEvent, type BeneficiaryScore, type GeneralEvent, type ScoredMatch,
 } from "@tell/intel";
 import type { Contact } from "@tell/people";
@@ -17,7 +17,10 @@ import { attachEmails } from "./emails.js";
 import { decisionPower } from "./reach.js";
 import { waterfallContacts } from "./waterfall.js";
 import { readSite, type SitePage } from "@tell/watchers";
-import { HaikuClient, checkFit, type FitVerdict, type LlmClient } from "@tell/extract";
+import { HaikuClient, checkFit, STAGE_STRENGTH, stageRank, needFor, EVENT_CHECK_VERSION, type FitVerdict, type LlmClient, type EventNeed, type Stage } from "@tell/extract";
+import { eventChecksFor, gateEvent, type EventCheckDeps, type EventToCheck, type GateResult } from "./event-checks.js";
+import type { EventCheck } from "@tell/extract";
+import { eventChecks } from "@tell/db";
 import { fitChecks } from "@tell/db";
 
 /**
@@ -72,6 +75,10 @@ export interface OppRunStats {
   events: Record<string, { fetched: number; stored: number; errors: number; skipped?: boolean }>;
   matches: number; beneficiaries: number; held: number; pool: number; noContact: number; leads: number;
   proven?: number; unproven?: number; fitChecks?: number;
+  /** company searches made for verified needs nobody was proven for, and the companies they added to rosters */
+  discovered?: { searches: number; members: number };
+  /** event fact-checks made this run, and news / signal events dropped by the check, by reason */
+  eventChecks?: number; eventDropped?: Partial<Record<Exclude<GateResult, { ok: true }>["why"], number>>;
 }
 
 export interface OppLead {
@@ -79,7 +86,11 @@ export interface OppLead {
   opportunity: { id: string; kind: OpportunityDef["kind"]; label: string; angle: string; follow: string; buyers: string[] };
   score: BeneficiaryScore;
   /** endDate: the contract's end date (federal), else the event's date */
-  events: { id: string; quote: string; url: string; amount: number; endDate: Date; agency: string; naics: string; setAside: string | null; strength?: number; entityName: string; fit: number; reasons: string[]; firstSeenAt: Date }[];
+  events: { id: string; quote: string; url: string; amount: number; endDate: Date; agency: string; naics: string; setAside: string | null; strength?: number; entityName: string; fit: number; reasons: string[]; firstSeenAt: Date;
+    /** news / signal events, after the fact-check: the need this company can serve, the stage, what happened */
+    need?: EventNeed; stage?: Stage; happened?: string; stageQuote?: string | null; entitySells?: string;
+    /** where the event was found (the news search's country, the signalling company's region) */
+    region?: string | null }[];
   evidence: MemberFacts["evidence"];
   facts: MemberFacts;
   contact: Contact | null;
@@ -414,7 +425,9 @@ export const MATCHES_PER_ACCOUNT = 20;
 export async function matchOpportunity(id: string, op: OpportunityDef, pack: Pack, opts: { now?: Date } = {}): Promise<number> {
   const db = getDb(), now = opts.now ?? new Date();
   const all = await db.select().from(marketEvents).where(eq(marketEvents.opportunity, eventsOpp(id, op)));
-  const evs = all.filter((e) => isLive(op, e, pack.opportunities.window_days, now));
+  const own = all.filter((e) => isLive(op, e, pack.opportunities.window_days, now));
+  const cross = op.kind !== "usaspending_expiring" ? await crossEvents(id, op, pack, new Set(own.map((e) => e.url)), now) : [];
+  const evs = [...own, ...cross];
   const members = await db.select({ m: rosterMembers, domain: accounts.domain }).from(rosterMembers).innerJoin(accounts, eq(accounts.id, rosterMembers.accountId))
     .where(and(eq(rosterMembers.roster, op.roster), eq(rosterMembers.status, "resolved")));
   const byAccount = new Map<string, { row: typeof opportunityMatches.$inferInsert; v: number }[]>();
@@ -440,12 +453,39 @@ export async function matchOpportunity(id: string, op: OpportunityDef, pack: Pac
     return l.sort((a, b) => b.v - a.v).filter((x) => !seen.has(x.row.eventId) && !!seen.add(x.row.eventId)).slice(0, MATCHES_PER_ACCOUNT).map((x) => x.row);
   });
   // this opportunity's matches (its events x its roster) are rebuilt from scratch: a member loses matches it no longer earns
-  if (all.length) await db.delete(opportunityMatches).where(and(inArray(opportunityMatches.eventId, all.map((e) => e.id)), eq(opportunityMatches.roster, op.roster)));
+  const mine = [...all, ...cross].map((e) => e.id);
+  for (let i = 0; i < mine.length; i += 1000) await db.delete(opportunityMatches).where(and(inArray(opportunityMatches.eventId, mine.slice(i, i + 1000)), eq(opportunityMatches.roster, op.roster)));
   for (let i = 0; i < rows.length; i += 300) {
     await db.insert(opportunityMatches).values(rows.slice(i, i + 300))
       .onConflictDoUpdate({ target: [opportunityMatches.eventId, opportunityMatches.accountId], set: { fit: sql`excluded.fit`, reasons: sql`excluded.reasons` } });
   }
   return rows.length;
+}
+
+/**
+ * One signal, several businesses: events another opportunity collected whose fact-check names a need this roster's
+ * trade serves (a new API plant: machinery for the machinery makers, cleanrooms for the HVAC firms, workers for the
+ * staffing agencies). Only checked events (verdict ok) travel, each once, while live under its own opportunity; the
+ * ranking gate still checks stage, place and peer for every company.
+ */
+async function crossEvents(id: string, op: Extract<OpportunityDef, { kind: "news" | "signals" }>, pack: Pack, ownUrls: Set<string>, now: Date): Promise<(typeof marketEvents.$inferSelect)[]> {
+  const cfg = pack.opportunities, roster = cfg.rosters[op.roster];
+  if (!roster || roster.kind === "usaspending_awardees" || !op.verify) return [];
+  const sources = Object.entries(cfg.opportunities).filter(([oid, o]) => o.kind !== "usaspending_expiring" && !o.events_from && oid !== eventsOpp(id, op));
+  if (!sources.length) return [];
+  const db = getDb();
+  const rows = await db.select({ e: marketEvents, needs: eventChecks.needs }).from(marketEvents).innerJoin(eventChecks, eq(eventChecks.url, marketEvents.url))
+    .where(and(inArray(marketEvents.opportunity, sources.map(([oid]) => oid)), eq(eventChecks.verdict, "ok"), eq(eventChecks.version, EVENT_CHECK_VERSION)));
+  const srcOp = new Map(sources);
+  const group = { id: op.roster, segment: roster.segment, must: "must" in roster && roster.must ? toRegex(roster.must) : null, keywords: op.keywords };
+  const seen = new Set(ownUrls), out: (typeof marketEvents.$inferSelect)[] = [];
+  for (const { e, needs } of rows) {
+    const so = srcOp.get(e.opportunity);
+    if (!so || seen.has(e.url) || !isLive(so, e, cfg.window_days, now) || !needFor((needs as EventNeed[]) ?? [], group)) continue;
+    seen.add(e.url);
+    out.push(e);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------------ 4-5. rank + people
@@ -454,22 +494,26 @@ export async function matchOpportunity(id: string, op: OpportunityDef, pack: Pac
  * The day's opportunity leads: every beneficiary with live matched events, scored, held back when delivered recently
  * with nothing new, the pool searched for the opportunity's buyers, re-scored with the contact, cut at max_leads.
  */
-export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; waterfall?: typeof waterfallContacts; fit?: FitDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks"> }> {
+export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; waterfall?: typeof waterfallContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped" | "discovered"> }> {
   const db = getDb(), now = opts.now ?? new Date(), cfg = pack.opportunities;
   const since = new Date(now.getTime() - cfg.window_days * DAY);
   // a match belongs to the opportunity that reads its event's opportunity with its roster (events_from shares events)
   const oppOf = new Map(Object.entries(cfg.opportunities).map(([id, op]) => [`${eventsOpp(id, op)}:${op.roster}`, id]));
+  // a fact-checked event routed to another roster by its needs (matchOpportunity's cross matches): the first
+  // news / signal opportunity of that roster owns the lead
+  const byRoster = new Map<string, string>();
+  for (const [id, op] of Object.entries(cfg.opportunities)) if (op.kind !== "usaspending_expiring" && !byRoster.has(op.roster)) byRoster.set(op.roster, id);
   const rows0 = await db.select({
     eventId: marketEvents.id, opportunity: marketEvents.opportunity, quote: marketEvents.quote, url: marketEvents.url, amount: marketEvents.amount, eventDate: marketEvents.eventDate,
     facts: marketEvents.facts, entityName: marketEvents.entityName, firstSeenAt: marketEvents.firstSeenAt, lastSeenAt: marketEvents.lastSeenAt, accountId: opportunityMatches.accountId, roster: opportunityMatches.roster, fit: opportunityMatches.fit, reasons: opportunityMatches.reasons,
   }).from(opportunityMatches).innerJoin(marketEvents, eq(marketEvents.id, opportunityMatches.eventId))
     .where(sql`${marketEvents.lastSeenAt} >= ${new Date(since.getTime() - 365 * DAY)}`);
   const live = rows0.flatMap((r) => {
-    const oid = oppOf.get(`${r.opportunity}:${r.roster}`), op = oid ? cfg.opportunities[oid] : undefined;
+    const oid = oppOf.get(`${r.opportunity}:${r.roster}`) ?? byRoster.get(r.roster), op = oid ? cfg.opportunities[oid] : undefined;
     return op && isLive(op, { lastSeenAt: r.lastSeenAt, eventDate: r.eventDate }, cfg.window_days, now) ? [{ ...r, opportunity: oid! }] : [];
   });
   const ids = [...new Set(live.map((r) => r.accountId))];
-  if (!ids.length) return { leads: [], stats: { beneficiaries: 0, held: 0, pool: 0, noContact: 0, leads: 0 } };
+  if (!ids.length) return { leads: [], stats: { beneficiaries: 0, held: 0, pool: 0, noContact: 0, leads: 0, eventChecks: 0 } };
   const accts = new Map((await db.select().from(accounts).where(and(inArray(accounts.id, ids), eq(accounts.status, "active")))).map((a) => [a.id, a]));
   const members = new Map((await db.select().from(rosterMembers).where(inArray(rosterMembers.accountId, ids))).map((m) => [`${m.roster}:${m.accountId}`, m]));
   // the last opportunity delivery per account, with the events it showed (a lead returns early only with a new top event)
@@ -483,43 +527,56 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   // one lead per beneficiary and opportunity kind (its strongest opportunity when it has several)
   const byAccount = new Map<string, typeof live>();
   for (const r of live) if (accts.has(r.accountId)) byAccount.set(r.accountId, [...(byAccount.get(r.accountId) ?? []), r]);
-  let held = 0;
-  const scored: OppLead[] = [];
+  // every company x opportunity it matched is a candidate: the fact-check decides which events stand, and only then
+  // is each company's best opportunity picked (a packaging firm whose strongest match fails the check may still have
+  // a beverage plant that passes)
+  const cands: OppLead[] = [];
   for (const [aid, rs] of byAccount) {
     const byOpp = new Map<string, typeof rs>();
     for (const r of rs) byOpp.set(r.opportunity, [...(byOpp.get(r.opportunity) ?? []), r]);
-    let best: OppLead | null = null;
     for (const [oid, list] of byOpp) {
       const op = cfg.opportunities[oid]!;
       const m = members.get(`${op.roster}:${aid}`);
       const facts = (m?.facts ?? {}) as MemberFacts;
       const s = scoreBeneficiary(list.map((r) => asScored(op, { fit: r.fit, amount: r.amount ?? 0, date: new Date(r.eventDate!), facts: r.facts }, facts)), sweet(op), null, now);
-      if (best && best.score.score >= s.score) continue;
       const a = accts.get(aid)!;
-      best = {
+      cands.push({
         account: { id: a.id, domain: a.domain, name: a.name, description: a.description, region: a.region, sizeBand: a.sizeBand, segment: a.segment },
         opportunity: { id: oid, kind: op.kind, label: op.label, angle: op.angle, follow: op.follow, buyers: op.buyers }, score: s, facts, evidence: facts.evidence ?? [], contact: null,
         events: list.map((r) => {
-          const f = (r.facts ?? {}) as { agency?: string; naics?: string; setAside?: string | null; strength?: number };
+          const f = (r.facts ?? {}) as { agency?: string; naics?: string; setAside?: string | null; strength?: number; region?: string | null };
           return { id: r.eventId, quote: r.quote, url: r.url, amount: r.amount ?? 0, endDate: new Date(r.eventDate!), agency: f.agency ?? "", naics: f.naics ?? "", setAside: f.setAside ?? null,
-            strength: f.strength, entityName: r.entityName === "?" ? "" : r.entityName, fit: r.fit, reasons: (r.reasons as string[]) ?? [], firstSeenAt: new Date(r.firstSeenAt) };
+            strength: f.strength, entityName: r.entityName === "?" ? "" : r.entityName, fit: r.fit, reasons: (r.reasons as string[]) ?? [], firstSeenAt: new Date(r.firstSeenAt), region: f.region ?? null };
         }).sort((x, y) => matchValue(asScored(op, { ...y, date: y.endDate, facts: y }, facts)) - matchValue(asScored(op, { ...x, date: x.endDate, facts: x }, facts))),
-      };
+      });
     }
-    if (!best) continue;
+  }
+  cands.sort((a, b) => b.score.score - a.score.score);
+  const max = cfg.max_leads || cands.length;
+  // news / signal events must survive the fact-check first: a quoted need this company's trade can serve, at the
+  // stage the opportunity asks for, where the company works, from an event company that isn't its peer
+  // (checks are facts about an article, not deliveries: kept on dry runs too, so nothing is paid for twice)
+  const gated = await gateLeads(cands, pack, { now, write: true, want: max * cfg.pool_multiplier * 3, ...(opts.events ? { deps: opts.events } : {}) });
+  let held = 0;
+  const scored: OppLead[] = [];
+  const picked = new Set<string>();
+  for (const best of gated.leads) { // strongest first: the first one per company is its best
+    if (picked.has(best.account.id)) continue;
+    picked.add(best.account.id);
     // new = one of its top events wasn't on the lead you got (a weekly refresh brings far-off contracts into the window,
     // which alone is no reason to send the same company again)
-    const last = lastDelivered.get(aid);
+    const last = lastDelivered.get(best.account.id);
     const fresh = !!last && hasNewTopEvent(best.events.map((e) => e.url), last);
     if (heldBack(last?.at ?? null, fresh, cfg.redeliver_after_days, now)) { held++; continue; }
     scored.push(best);
   }
-  scored.sort((a, b) => b.score.score - a.score.score);
-  const max = cfg.max_leads || scored.length;
   // news / signal leads must prove the fit from the company's own site before they take a slot (federal leads carry
   // their proof: the contracts they won)
   const proven = await proveFits(scored, pack, { now, write: opts.write !== false, want: max * cfg.pool_multiplier * 2, ...(opts.fit ? { fit: opts.fit } : {}) });
   const pool = roundRobin(proven.leads, max * cfg.pool_multiplier, cfg.max_per_opportunity * cfg.pool_multiplier);
+  // verified needs no known company was proven for: search for companies that sell it (they join the roster of that
+  // trade and are matched and proven like any member on the next run)
+  const discovered = opts.write !== false ? await discoverForNeeds(gated.checks, gated.entities, proven.leads, pack, { now }).catch(() => ({ searches: 0, members: 0 })) : { searches: 0, members: 0 };
 
   // the opportunity's buyers first (Head of BD / Capture for a recompete), searched only for the pool
   const preferred = new Map(pool.map((l) => [l.account.id, l.opportunity.buyers]));
@@ -540,7 +597,111 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   }
   leads.sort((a, b) => b.score.score - a.score.score);
   const out = roundRobin(leads, max, cfg.max_per_opportunity).sort((a, b) => b.score.score - a.score.score);
-  return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, leads: out.length, proven: proven.proven, unproven: proven.unproven, fitChecks: proven.checks } };
+  return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, leads: out.length, proven: proven.proven, unproven: proven.unproven, fitChecks: proven.checks, eventChecks: gated.made, eventDropped: gated.dropped, discovered } };
+}
+
+// ------------------------------------------------------------------------------------------------ event fact-check
+
+/** a lead's events that are fact-checked: all it matched (checks are cached per article, so only new ones cost) */
+const EVENTS_GATED = MATCHES_PER_ACCOUNT;
+
+/**
+ * Keep only the news / signal events that pass the fact-check (pipeline/event-checks.ts `gateEvent`), re-scored by
+ * their stage (buying > committed > early); a lead with none left is dropped. Federal recompetes and opportunities
+ * with `verify: false` pass as they are. Checks are made for the first `want` candidates' events, strongest first.
+ */
+export async function gateLeads(cands: OppLead[], pack: Pack, opts: { now: Date; write: boolean; want: number; deps?: EventCheckDeps }): Promise<{ leads: OppLead[]; made: number; dropped: NonNullable<OppRunStats["eventDropped"]>; checks: Map<string, EventCheck>; entities: Map<string, string> }> {
+  const cfg = pack.opportunities;
+  const general = (c: OppLead) => { const op = cfg.opportunities[c.opportunity.id]; return op && op.kind !== "usaspending_expiring" && op.verify ? op : null; };
+  const toCheck: EventToCheck[] = [];
+  // every candidate's top events, strongest lead first: many companies share one event, so the run's new checks
+  // (EVENT_CHECKS_PER_RUN) go to distinct articles down the list, never to the same few
+  for (const c of cands) if (general(c)) for (const e of c.events.slice(0, EVENTS_GATED)) toCheck.push({ url: e.url, quote: e.quote, entityName: e.entityName });
+  const { checks, made } = await eventChecksFor(toCheck, pack, { now: opts.now, write: opts.write, ...(opts.deps ? { deps: opts.deps } : {}) });
+  const dropped: NonNullable<OppRunStats["eventDropped"]> = {};
+  const out: OppLead[] = [];
+  for (const c of cands) {
+    const op = general(c);
+    if (!op) { out.push(c); continue; }
+    const roster = cfg.rosters[op.roster];
+    if (!roster) continue;
+    const kept: OppLead["events"] = [];
+    for (const e of c.events.slice(0, EVENTS_GATED)) {
+      const ck = checks.get(e.url), g = gateEvent(ck, op, roster, c.account.region, cfg.min_stage, e.region ?? null, op.roster);
+      if (!g.ok) { dropped[g.why] = (dropped[g.why] ?? 0) + 1; continue; }
+      kept.push({ ...e, strength: STAGE_STRENGTH[g.stage], need: g.need, stage: g.stage, happened: ck!.happened, stageQuote: ck!.stageQuote, entitySells: ck!.entitySells,
+        reasons: [...e.reasons.filter((r) => r.startsWith("based in")), `they will need ${g.need.what}`, `stage: ${g.stage}${ck!.stageQuote ? ` ("${ck!.stageQuote}")` : ""}`] });
+    }
+    if (!kept.length) continue;
+    // a request you can answer now leads; then the newest
+    kept.sort((x, y) => stageRank(y.stage) - stageRank(x.stage) || y.endDate.getTime() - x.endDate.getTime());
+    const score = scoreBeneficiary(kept.map((e) => asScored(op, { fit: e.fit, amount: 0, date: e.endDate, facts: e }, c.facts)), sweet(op), null, opts.now);
+    out.push({ ...c, events: kept, score });
+  }
+  out.sort((a, b) => b.score.score - a.score.score);
+  const entities = new Map(toCheck.map((e) => [e.url, e.entityName]));
+  return { leads: out, made, dropped, checks, entities };
+}
+
+/** a need is searched again after this many days */
+const NEED_SEARCH_DAYS = 30;
+
+/** The supplier roster a verified need belongs to (pure; exported for tests): a company_search roster of the need's
+ *  industry, in the place the work is, whose trade (`must`) the need names. */
+export function rosterForNeed(n: EventNeed, where: string, rosters: Pack["opportunities"]["rosters"]): string | null {
+  const named = n.group ? rosters[n.group] : undefined;
+  if (named && named.kind === "company_search" && named.regions.includes(where)) return n.group!;
+  for (const [id, r] of Object.entries(rosters)) {
+    if (r.kind !== "company_search" || r.segment !== n.industry || !r.regions.includes(where)) continue;
+    if (r.must && !toRegex(r.must).test(`${n.what} ${n.supplier}`)) continue;
+    return id;
+  }
+  return null;
+}
+
+/**
+ * Companies outside the pile: for verified needs (stage at least min_stage, buying first) that no proven lead covers
+ * today, one Exa company search for "<supplier> in <place>" (inside discover_per_run and the day's exa_roster budget);
+ * results pass the roster's own filters (HQ in its regions, description names its trade, never the event company)
+ * and join that roster, so they are matched, fact-checked and proven on the next run like every member.
+ */
+export async function discoverForNeeds(checks: Map<string, EventCheck>, entities: Map<string, string>, proven: OppLead[], pack: Pack, opts: { now: Date; search?: (q: string, n: number) => Promise<CompanyHit[]>; usage?: UsageStore }): Promise<{ searches: number; members: number }> {
+  const cfg = pack.opportunities, usage = opts.usage ?? neonUsage();
+  if (!cfg.discover_per_run) return { searches: 0, members: 0 };
+  const search = opts.search ?? (process.env.EXA_API_KEY ? (q: string, n: number) => exaCompanySearch(q, process.env.EXA_API_KEY, n) : null);
+  if (!search) return { searches: 0, members: 0 };
+  const covered = new Set(proven.flatMap((l) => l.events.map((e) => `${e.url}|${cfg.opportunities[l.opportunity.id]?.roster}`)));
+  const wants: { roster: string; q: string; entity: string; rank: number }[] = [];
+  for (const [url, c] of checks) {
+    if (c.verdict !== "ok" || !c.where || stageRank(c.stage) < stageRank(cfg.min_stage)) continue;
+    for (const n of c.needs) {
+      const roster = rosterForNeed(n, c.where, cfg.rosters);
+      if (!roster || covered.has(`${url}|${roster}`)) continue;
+      wants.push({ roster, q: `${n.supplier} in ${c.where}`, entity: entities.get(url) ?? "", rank: stageRank(c.stage) });
+    }
+  }
+  wants.sort((a, b) => b.rank - a.rank);
+  const lists = domainLists(pack.domains);
+  let searches = 0, members = 0;
+  const asked = new Set<string>();
+  for (const w of wants) {
+    if (searches >= cfg.discover_per_run) break;
+    const key = `${w.roster}|${w.q.toLowerCase()}`;
+    if (asked.has(key)) continue;
+    asked.add(key);
+    if (!(await dueQueries(`need-query:${w.roster}`, [w.q], NEED_SEARCH_DAYS, opts.now)).length) continue;
+    if ((await usage.spentToday("exa_roster")) >= cfg.search_per_day) break;
+    await usage.addSpend("exa_roster", 1, cfg.search_per_day);
+    searches++;
+    const r = cfg.rosters[w.roster] as Extract<Roster, { kind: "company_search" }>;
+    let hits: CompanyHit[];
+    try { hits = await search(w.q, r.results_per_query); } catch { continue; }
+    const ms = searchMembers(hits, r, w.q, lists).filter((m) => !w.entity || (!sameEntity(m.name, w.entity) && !affiliates(m.name, w.entity)));
+    await upsertGeneral(w.roster, ms, opts.now);
+    await markQuery(`need-query:${w.roster}`, w.q, opts.now);
+    members += ms.length;
+  }
+  return { searches, members };
 }
 
 // ------------------------------------------------------------------------------------------------ proof of fit
@@ -581,13 +742,17 @@ export async function proveFits(cands: OppLead[], pack: Pack, opts: { now: Date;
   const sites = new Map<string, SitePage[]>();
   const out: OppLead[] = [];
   let proven = 0, unproven = 0, checks = 0;
+  // `want` counts the leads that need proving: federal recompetes (which carry their proof) never use up the room,
+  // or their high scores would keep every news / signal lead from being checked
+  let tried = 0;
   for (const c of cands) {
-    if (out.length >= opts.want) break;
     const op = pack.opportunities.opportunities[c.opportunity.id];
     if (!op || op.kind === "usaspending_expiring" || !op.verify) { out.push(c); continue; }
+    if (tried++ >= opts.want) continue;
     let hit: { event: OppLead["events"][number]; v: { need: string; proof: string; url: string } } | null = null;
     for (const e of c.events.slice(0, EVENTS_TRIED)) {
-      const k = `${c.account.id}|${e.url}`;
+      // (a check against the event's verified need is a different question from the old play-label one)
+      const eventKey = e.need ? `${e.url}#need` : e.url, k = `${c.account.id}|${eventKey}`;
       const prior = cached.get(k);
       let v: FitVerdict | null = prior ? { verdict: prior.verdict as FitVerdict["verdict"], need: prior.need ?? "", proof: prior.proof, url: prior.proofUrl, reason: prior.reason ?? "" } : null;
       if (!v) {
@@ -595,18 +760,19 @@ export async function proveFits(cands: OppLead[], pack: Pack, opts: { now: Date;
         let pages = sites.get(c.account.domain);
         if (!pages) {
           const rendered = (await usage.spentToday("firecrawl")) < fcCap;
-          const r = await read(c.account.domain, siteWords(e.quote, op.keywords), rendered).catch(() => ({ pages: [] as SitePage[], usedFirecrawl: false }));
+          const r = await read(c.account.domain, siteWords(`${e.need?.what ?? ""} ${e.quote}`, op.keywords), rendered).catch(() => ({ pages: [] as SitePage[], usedFirecrawl: false }));
           if (r.usedFirecrawl) await usage.addSpend("firecrawl", 1, fcCap);
           pages = r.pages;
           sites.set(c.account.domain, pages);
         }
         checks++;
         const before = llm.spent ?? 0;
-        v = await checkFit(llm, { event: e.quote, opportunity: c.opportunity.label, angle: c.opportunity.angle, company: c.account.name ?? c.account.domain, description: c.account.description, pages })
+        v = await checkFit(llm, { event: e.happened || e.quote, opportunity: e.need ? `${e.need.what} (sold by: ${e.need.supplier})` : c.opportunity.label, angle: e.need ? "" : c.opportunity.angle,
+          company: c.account.name ?? c.account.domain, description: c.account.description, pages, ...(e.entitySells ? { peer: e.entitySells } : {}) })
           .catch(() => null);
         if (llm.spent != null) await usage.addSpend("haiku_fit", llm.spent - before, cap);
         if (!v) break; // the checker failed (cap, outage): this lead stays unproven today
-        if (opts.write) await db.insert(fitChecks).values({ accountId: c.account.id, eventKey: e.url, verdict: v.verdict, need: v.need || null, proof: v.proof, proofUrl: v.url, reason: v.reason || null, checkedAt: opts.now })
+        if (opts.write) await db.insert(fitChecks).values({ accountId: c.account.id, eventKey, verdict: v.verdict, need: v.need || null, proof: v.proof, proofUrl: v.url, reason: v.reason || null, checkedAt: opts.now })
           .onConflictDoUpdate({ target: [fitChecks.accountId, fitChecks.eventKey], set: { verdict: v.verdict, need: v.need || null, proof: v.proof, proofUrl: v.url, reason: v.reason || null, checkedAt: opts.now } });
       }
       if (v.verdict === "yes" && v.proof && v.url) { hit = { event: e, v: { need: v.need, proof: v.proof, url: v.url } }; break; }

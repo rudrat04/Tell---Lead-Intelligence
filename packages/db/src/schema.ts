@@ -509,3 +509,24 @@ export const fitChecks = pgTable("fit_checks", {
   reason: text("reason"),
   checkedAt: ts("checked_at").notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.accountId, t.eventKey] })]);
+
+/** Fact-check of one market event (by its article / record URL), done once: what happened, the stage, where the work
+ *  is, and what it must buy from other companies, every part quoted from the text (extract/event-check.ts). */
+export const eventChecks = pgTable("event_checks", {
+  url: text("url").primaryKey(),
+  verdict: text("verdict").notNull(), // ok | none | unclear
+  stage: text("stage"), // early | committed | buying
+  where: text("where_region"),
+  entityIndustry: text("entity_industry"),
+  entitySells: text("entity_sells"),
+  happened: text("happened"),
+  quote: text("quote"),
+  stageQuote: text("stage_quote"),
+  /** [{ what, supplier, industry, quote }] */
+  needs: jsonb("needs").notNull(),
+  source: text("source").notNull(), // article | headline
+  reason: text("reason"),
+  /** EVENT_CHECK_VERSION it was made with (an older one is checked again) */
+  version: integer("version").notNull().default(1),
+  checkedAt: ts("checked_at").notNull().defaultNow(),
+});

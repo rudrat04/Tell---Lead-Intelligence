@@ -169,6 +169,20 @@
       "when": 1795300790251,
       "tag": "0023_delivery_day_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1795420197606,
+      "tag": "0024_lazy_wonder_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1795421523325,
+      "tag": "0025_flawless_wildside",
+      "breakpoints": true
     }
   ]
 }

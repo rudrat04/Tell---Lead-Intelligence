@@ -53,8 +53,16 @@ export function signalWhen(l: Pick<OppLead, "opportunity">, e: { endDate: Date }
   return `${isoDay(e.endDate)} (${ago === 0 ? "today" : `${ago} day${ago === 1 ? "" : "s"} ago`})`;
 }
 /** How this company benefits, in one line: why it fits the signal, from its own record or what it sells (pure). */
-export const howTheyBenefit = (l: Pick<OppLead, "events" | "proof">) => [...new Set(l.events.slice(0, MAX_EVENTS).flatMap((e) => e.reasons).filter((r) => !r.startsWith("their site:")))].join("; ")
+export const howTheyBenefit = (l: Pick<OppLead, "events" | "proof">) => [...new Set(l.events.slice(0, MAX_EVENTS).flatMap((e) => e.reasons).filter((r) => !r.startsWith("their site:") && !r.startsWith("stage:")))].join("; ")
   + (l.proof ? `; proven: they offer ${l.proof.need} ("${l.proof.quote}")` : "");
+
+const STAGE_LABEL = { early: "early (plans, land, MoUs)", committed: "committed (approved, funded, building, ordering)", buying: "buying now (tender, RFQ, hiring drive)" } as const;
+/** The fact-check of the lead's top event, in one or two lines (pure; exported for tests): what happened and the stage,
+ *  each from the article's own words. Empty for federal recompetes (their record is the fact). */
+export function checkedLines(e: OppLead["events"][number] | undefined): string[] {
+  if (!e?.stage) return [];
+  return [`Fact-checked: ${e.happened || e.quote}`, `Stage: ${STAGE_LABEL[e.stage]}${e.stageQuote ? `: "${e.stageQuote}"` : ""}`];
+}
 
 /**
  * The one-page brief, written by code from the facts only (pure; exported for tests), in the order you'd pitch it:
@@ -65,7 +73,7 @@ export function oppBrief(l: OppLead, now: Date): string {
   const a = l.account, e0 = l.events[0], c = l.contact, t = timingLine(l, now);
   return [
     "1. THE SIGNAL",
-    ...(e0 ? [e0.quote, `${signalWhen(l, e0, now)} · ${e0.url}`] : []),
+    ...(e0 ? [e0.quote, `${signalWhen(l, e0, now)} · ${e0.url}`, ...checkedLines(e0)] : []),
     ...(l.events.length > 1 ? ["", `More signals like it (${l.events.length - 1}):`, ...l.events.slice(1, 6).map((e) => `- ${e.quote} (${signalWhen(l, e, now)})\n  ${e.url}`)] : []),
     "",
     "2. WHO CAN BENEFIT, AND HOW",
@@ -79,6 +87,7 @@ export function oppBrief(l: OppLead, now: Date): string {
     ...(l.opportunity.angle ? [l.opportunity.angle] : []),
     "",
     "4. THE OPPORTUNITY",
+    ...(e0?.need ? [`They will need: ${e0.need.what} (from: "${e0.need.quote}")`] : []),
     followText(l),
     ...(t ? [`Timing: ${t}`] : []),
     l.score.line,
@@ -116,7 +125,7 @@ export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, tes
   const facts = [a.region, a.sizeBand && `${a.sizeBand} people`].filter(Boolean).map((x) => tgEsc(String(x))).join(" · ");
   const lines = [
     "📡 <b>THE SIGNAL</b>",
-    ...(e0 ? [`<b>${link(e0.url, e0.quote)}</b>`, `<i>${tgEsc(signalWhen(l, e0, now))}</i>`] : []),
+    ...(e0 ? [`<b>${link(e0.url, e0.quote)}</b>`, `<i>${tgEsc(signalWhen(l, e0, now))}</i>`, ...checkedLines(e0).map((x, i) => (i ? `🔎 ${tgEsc(x)}` : `✔️ ${tgEsc(x)}`))] : []),
     ...(l.events.length > 1 ? [`+ ${l.events.length - 1} more like it: ${l.events.slice(1, MAX_EVENTS).map((e, i) => link(e.url, `#${i + 2}`)).join(" ")}`] : []),
     "",
     "🏭 <b>WHO CAN BENEFIT</b>",
@@ -130,6 +139,7 @@ export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, tes
     ...(l.opportunity.angle ? [tgEsc(l.opportunity.angle)] : []),
     "",
     "💰 <b>THE OPPORTUNITY</b>",
+    ...(e0?.need ? [`<b>They will need:</b> ${tgEsc(e0.need.what)}`] : []),
     tgEsc(followText(l)),
     ...(t ? [`⏱ ${tgEsc(t)}`] : []),
     `<i>${tgEsc(l.score.line)}</i>`,
