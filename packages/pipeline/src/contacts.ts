@@ -84,7 +84,9 @@ export async function contactsFor(
           found = hits.flatMap((h): Person[] => {
             const p = acceptPeopleHit(h, company, acct.domain, rx);
             return p ? [{ ...p, workHistory: h.roles.map((r) => ({ title: r.title, company: r.company, from: r.from ?? null, to: r.to ?? null })) }] : [];
-          }).slice(0, 2);
+          })
+            // (one person can come back twice, e.g. under two profile links: one row per name, or the insert fails)
+            .filter((p, i, all) => all.findIndex((q) => q.name === p.name) === i).slice(0, 2);
           // dated roles in the same results: a new GTM leader, or an ops person who left (only types the pack defines)
           const evs = hits.flatMap((h) => peopleEvents(h, company, acct.domain, opsRx, new Date(), leaderRx)).filter((e) => pack.signals.signals[e.type]);
           if (write && evs.length) {
@@ -99,10 +101,11 @@ export async function contactsFor(
         byAccount.set(acct.id, list);
         if (write) {
           if (found.length) {
+            // (a save that fails costs this company its stored contact, never the whole run)
             await db.insert(people).values(found.map((f) => ({
               accountId: acct.id, fullName: f.name, role: f.role, source: "exa", confidence: 0.7, sourceUrl: f.sourceUrl,
               profileUrls: { linkedin: f.linkedin ?? undefined }, workHistory: f.workHistory ?? null, fetchedAt: new Date(),
-            }))).onConflictDoUpdate({ target: [people.accountId, people.fullName, people.source], set: { role: sql`excluded.role`, workHistory: sql`excluded.work_history`, fetchedAt: sql`excluded.fetched_at` } });
+            }))).onConflictDoUpdate({ target: [people.accountId, people.fullName, people.source], set: { role: sql`excluded.role`, workHistory: sql`excluded.work_history`, fetchedAt: sql`excluded.fetched_at` } }).catch(() => undefined);
           }
           await db.insert(peopleSearches).values({ accountId: acct.id, persona: persona.title, provider: "exa", found: found.length, searchedAt: new Date() })
             .onConflictDoUpdate({ target: [peopleSearches.accountId, peopleSearches.persona, peopleSearches.provider], set: { found: found.length, searchedAt: new Date() } });
