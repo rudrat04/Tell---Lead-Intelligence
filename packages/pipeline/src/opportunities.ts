@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
 import { SET_ASIDE_CODES, toRegex, inScope, type Pack, type Roster, type OpportunityDef, type SetAsideFamily } from "@tell/config";
+import { searchJSearch, jsearchProvider, type JSearchJob, type JSearchQuery } from "@tell/watchers";
+import { monthUsed, countRequest } from "./discover-jsearch.js";
+import { looksLikeStaffing } from "@tell/intel";
 import { searchFedAwards, companyKey, samWebsitesByUei, SAM_UEIS_PER_REQUEST, exaCompanySearch, serperNews, companyFromHeadline, type FedAward, type CompanyHit, type NewsItem } from "@tell/watchers";
 import { registrableDomain, domainLists } from "@tell/people";
 import { regionName } from "./niche.js";
@@ -303,10 +306,10 @@ export function oppInScope(op: OpportunityDef, pack: Pack): boolean {
   const scope = pack.meta.regions, r = op.roster ? pack.opportunities.rosters[op.roster] : undefined;
   if (!scope.length) return true;
   // a signals-only collector (no roster): its own region decides
-  if (!op.roster && op.kind !== "usaspending_expiring") return op.kind !== "news" || inScope(scope, [op.region]);
+  if (!op.roster && op.kind !== "usaspending_expiring") return op.kind === "signals" || inScope(scope, [op.region]);
   if (!r || !inScope(scope, rosterRegions(r))) return false;
   if (op.kind === "usaspending_expiring") return inScope(scope, ["United States of America"]);
-  if (op.kind === "news" && !inScope(scope, [op.region])) return false;
+  if ((op.kind === "news" || op.kind === "jobs") && !inScope(scope, [op.region])) return false;
   return !op.beneficiary_regions.length || inScope(scope, op.beneficiary_regions);
 }
 
@@ -319,6 +322,7 @@ export async function collectEvents(id: string, op: OpportunityDef, r: Roster | 
   if (op.kind === "usaspending_expiring") return r?.kind === "usaspending_awardees" ? collectFedEvents(id, op, r, opts) : { fetched: 0, stored: 0, errors: 0, skipped: true };
   if (op.events_from) return { fetched: 0, stored: 0, errors: 0, skipped: true };
   if (op.kind === "news") return opts.pack ? collectNewsEvents(id, op, opts.pack, opts) : { fetched: 0, stored: 0, errors: 0, skipped: true };
+  if (op.kind === "jobs") return opts.pack ? collectJobsEvents(id, op, opts.pack, opts) : { fetched: 0, stored: 0, errors: 0, skipped: true };
   if (!op.types.length) return { fetched: 0, stored: 0, errors: 0, skipped: true }; // a trade: its events come through their needs
   return collectSignalEvents(id, op, opts);
 }
@@ -368,6 +372,53 @@ async function collectNewsEvents(id: string, op: Extract<OpportunityDef, { kind:
       await storeGeneral(id, evs.map((e) => ({ ...e, facts: { kind: "news", region: op.region, strength: op.strength } })), now);
       stored += evs.length;
       await markQuery(`opp-query:${id}`, q, now);
+    } catch { errors++; }
+  }
+  await dropOld(id, op.max_age_days, now);
+  return { fetched, stored, errors };
+}
+
+/** Job postings -> events (pure; exported for tests): the posting must say the role is for a new site (`site`), the
+ *  employer is who it's about (staffing agencies posting for a client are not), and the quote carries the posting's own
+ *  words about the site so the fact-check can hold them. */
+export function jobsEvents(jobs: JSearchJob[], op: Extract<OpportunityDef, { kind: "jobs" }>, now: Date): { key: string; entityName: string; quote: string; url: string; at: Date }[] {
+  const site = toRegex(op.site), exclude = op.exclude ? toRegex(op.exclude) : null, seen = new Set<string>();
+  return jobs.flatMap((j) => {
+    const text = `${j.title}. ${j.description ?? ""}`.replace(/\s+/g, " ");
+    const m = site.exec(text);
+    if (!m || (exclude && exclude.test(text)) || !j.employer || looksLikeStaffing(j.employer, [text], [j.title]) || seen.has(j.jobId)) return [];
+    seen.add(j.jobId);
+    const at = j.postedAt && j.postedAt <= now ? j.postedAt : now;
+    if (now.getTime() - at.getTime() > op.max_age_days * DAY) return [];
+    // the sentence around the site words (what the check reads when the job page can't be fetched)
+    const start = Math.max(0, text.lastIndexOf(". ", m.index) + 2), end = text.indexOf(". ", m.index + m[0].length);
+    const said = text.slice(start, end < 0 ? Math.min(text.length, m.index + 250) : end + 1).slice(0, 300).trim();
+    // "exposure to greenfield projects preferred" asks about the candidate, it says nothing about a new site
+    if (/\b(exposure|experience|preferred|knowledge|familiar|worked|background|track record|candidates?)\b/i.test(said)) return [];
+    return [{ key: `jsearch:${j.jobId}`, entityName: j.employer.trim(), quote: `${j.employer.trim()} is hiring a ${j.title.trim()}${j.location ? ` (${j.location})` : ""}: "${said}"`, url: j.applyLink, at }];
+  });
+}
+
+/** Job postings for a new site, inside the JSearch monthly quota (shared with sources.jsearch) and the op's per_day. */
+async function collectJobsEvents(id: string, op: Extract<OpportunityDef, { kind: "jobs" }>, pack: Pack, opts: EventOpts & { jobs?: (q: JSearchQuery) => Promise<JSearchJob[]> }): Promise<{ fetched: number; stored: number; errors: number; skipped?: boolean }> {
+  const now = opts.now ?? new Date(), perMonth = pack.sources.jsearch.per_month;
+  const search = opts.jobs ?? (jsearchProvider() ? (q: JSearchQuery) => searchJSearch(q) : null);
+  if (!search) return { fetched: 0, stored: 0, errors: 0, skipped: true };
+  const pairs = op.locations.flatMap((p) => op.queries.map((query) => ({ query, ...p })));
+  const keyOf = (p: (typeof pairs)[number]) => `${p.query}|${p.location}`;
+  const dueKeys = new Set(opts.force ? pairs.map(keyOf) : await dueQueries(`opp-jobs:${id}`, pairs.map(keyOf), op.refresh_days, now));
+  let fetched = 0, stored = 0, errors = 0, n = 0;
+  for (const p of pairs.filter((x) => dueKeys.has(keyOf(x)))) {
+    if (n >= op.per_day || (await monthUsed("jsearch", now)) >= perMonth) break;
+    await countRequest("jsearch", perMonth, now);
+    n++;
+    try {
+      const jobs = await search({ query: p.query, location: p.location, country: p.country, datePosted: op.date_posted });
+      fetched += jobs.length;
+      const evs = jobsEvents(jobs, op, now);
+      await storeGeneral(id, evs.map((e) => ({ ...e, facts: { kind: "jobs", region: op.region, strength: op.strength } })), now);
+      stored += evs.length;
+      await markQuery(`opp-jobs:${id}`, keyOf(p), now);
     } catch { errors++; }
   }
   await dropOld(id, op.max_age_days, now);
@@ -490,7 +541,7 @@ export async function matchOpportunity(id: string, op: OpportunityDef, pack: Pac
  * staffing agencies). Only checked events (verdict ok) travel, each once, while live under its own opportunity; the
  * ranking gate still checks stage, place and peer for every company.
  */
-async function crossEvents(id: string, op: Extract<OpportunityDef, { kind: "news" | "signals" }>, pack: Pack, ownUrls: Set<string>, now: Date): Promise<(typeof marketEvents.$inferSelect)[]> {
+async function crossEvents(id: string, op: Exclude<OpportunityDef, { kind: "usaspending_expiring" }>, pack: Pack, ownUrls: Set<string>, now: Date): Promise<(typeof marketEvents.$inferSelect)[]> {
   const cfg = pack.opportunities, roster = op.roster ? cfg.rosters[op.roster] : undefined;
   if (!roster || roster.kind === "usaspending_awardees" || !op.verify) return [];
   const sources = Object.entries(cfg.opportunities).filter(([oid, o]) => o.kind !== "usaspending_expiring" && !o.events_from && oid !== eventsOpp(id, op)

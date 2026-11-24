@@ -59,3 +59,18 @@ describe("trades: any business a verified need asks for", () => {
     expect(gateEvent(check({ needs: [n], entityIndustry: "software" }), op as Parameters<typeof gateEvent>[1], r, "India", "early", null, id, ["software"])).toEqual({ ok: false, why: "excluded-industry" });
   });
 });
+
+import { jobsEvents } from "./opportunities.js";
+describe("job posts for a new site", () => {
+  const op = { kind: "jobs", site: "(?i)(new|upcoming|greenfield|proposed|under construction|expansion of)[^.]{0,40}(plant|factory|facility|unit|site|warehouse|hospital|campus)|green ?field|plant (start|set)[- ]?up", max_age_days: 45 } as never;
+  const job = (description: string, employer = "Contoso Foods") => ({ jobId: description.slice(0, 12), title: "Plant Head", employer, website: null, applyLink: "https://jobs.example/1", publisher: null, location: "Nashik", countryCodes: ["IN"], description });
+  it("a posting that says the role is for a new plant is a signal, quoted in its own words", () => {
+    const ev = jobsEvents([job("We are hiring for our upcoming greenfield plant at Nashik. Lead commissioning and hiring.")], op, new Date());
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.quote).toContain('"We are hiring for our upcoming greenfield plant at Nashik."');
+  });
+  it("a requirement about the candidate, or a staffing agency's post, is not", () => {
+    expect(jobsEvents([job("Exposure to greenfield projects and plant commissioning will be preferred.")], op, new Date())).toHaveLength(0);
+    expect(jobsEvents([job("Our client is setting up a new plant in Pune.", "Woodgrove Staffing Solutions")], op, new Date())).toHaveLength(0);
+  });
+});

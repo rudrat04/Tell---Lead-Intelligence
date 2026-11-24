@@ -214,6 +214,9 @@ jobs:
           FIT_CHECKS_PER_RUN: ${{ vars.FIT_CHECKS_PER_RUN || '50' }}
           # the event fact-check (article read, quotes verified, stage, needs): Haiku, once per event URL
           EVENT_DAILY_CAP_USD: ${{ vars.EVENT_DAILY_CAP_USD || '0.06' }}
+          # job posts for a new plant / site (opportunities kind jobs): JSearch, quota shared with sources.jsearch
+          JSEARCH_API_KEY: ${{ secrets.JSEARCH_API_KEY }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
           EVENT_CHECKS_PER_RUN: ${{ vars.EVENT_CHECKS_PER_RUN || '80' }}
           AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
           AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}

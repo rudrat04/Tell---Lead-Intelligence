@@ -90,14 +90,14 @@ export function groupEmployers(hits: (JSearchJob & { cls: JobClass })[]): Employ
   return [...by.values()];
 }
 
-async function monthUsed(service: string, now: Date): Promise<number> {
+export async function monthUsed(service: string, now: Date): Promise<number> {
   const month = istDay(now).slice(0, 7);
   const [r] = await getDb().select({ used: sql<number>`coalesce(sum(${usageDaily.used}), 0)` }).from(usageDaily)
     .where(and(eq(usageDaily.service, service), sql`to_char(${usageDaily.day}, 'YYYY-MM') = ${month}`));
   return Number(r?.used ?? 0);
 }
 
-async function countRequest(service: string, limit: number, now: Date) {
+export async function countRequest(service: string, limit: number, now: Date) {
   await getDb().insert(usageDaily).values({ day: istDay(now), service, used: 1, limit })
     .onConflictDoUpdate({ target: [usageDaily.day, usageDaily.service], set: { used: sql`${usageDaily.used} + 1`, limit } });
 }

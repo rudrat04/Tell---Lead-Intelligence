@@ -81,7 +81,7 @@ export type GateResult = { ok: true; need: EventNeed; stage: Stage } | { ok: fal
  *   EPC contractors, never their lead);
  * - one of its needs is this group's trade (its industry, and its `must` / keywords when it has them).
  */
-export function gateEvent(c: EventCheck | undefined, op: Extract<OpportunityDef, { kind: "news" | "signals" }>, roster: Roster, beneficiaryRegion: string | null, minStage: Stage, eventRegion: string | null = null, rosterId?: string, excluded?: string[]): GateResult {
+export function gateEvent(c: EventCheck | undefined, op: Exclude<OpportunityDef, { kind: "usaspending_expiring" }>, roster: Roster, beneficiaryRegion: string | null, minStage: Stage, eventRegion: string | null = null, rosterId?: string, excluded?: string[]): GateResult {
   if (!c) return { ok: false, why: "unchecked" };
   if (c.verdict === "unclear") return { ok: false, why: "unclear" };
   if (c.verdict !== "ok" || !c.needs.length || !c.stage) return { ok: false, why: "no-need" };

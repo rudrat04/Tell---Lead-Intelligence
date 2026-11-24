@@ -927,7 +927,26 @@ const SignalsOppSchema = z.object({
   entity_regions: z.array(z.string()).default([]),
 });
 
-export const OpportunitySchema = z.discriminatedUnion("kind", [UsaOppSchema, NewsOppSchema, SignalsOppSchema]);
+const JobsOppSchema = z.object({
+  /** jobs: job postings (JSearch: Google for Jobs) whose text says the role is for a new plant, site or unit: the
+   *  employer is about to open it (staff, equipment, transport, fit-out). Shares the JSearch monthly quota
+   *  (sources.jsearch.per_month, usage_daily "jsearch") */
+  kind: z.literal("jobs"),
+  ...GeneralOpp,
+  /** role searches ("plant head", "production manager") rotated with the places */
+  queries: z.array(z.string().min(3)).min(1),
+  locations: z.array(z.object({ location: z.string(), country: z.string() })).default([{ location: "India", country: "in" }]),
+  /** the posting must say the role is for a new site (its title + description) */
+  site: pattern.default("(?i)(new|upcoming|greenfield|proposed|under construction|expansion of)[^.]{0,40}(plant|factory|facility|unit|site|warehouse|hospital|campus)|green ?field|plant (start|set)[- ]?up"),
+  exclude: pattern.optional(),
+  /** searches a day */
+  per_day: z.number().int().min(0).max(20).default(4),
+  date_posted: z.enum(["today", "3days", "week", "month"]).default("week"),
+  region: z.string().default("India"),
+  strength: z.number().int().min(1).max(5).default(4),
+});
+
+export const OpportunitySchema = z.discriminatedUnion("kind", [UsaOppSchema, NewsOppSchema, SignalsOppSchema, JobsOppSchema]);
 
 export const OpportunitiesSchema = z.object({
   enabled: z.boolean().default(false),
