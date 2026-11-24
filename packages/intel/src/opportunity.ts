@@ -193,15 +193,31 @@ export function timingFor(endDate: Date, sweet: [number, number], now: Date): nu
  *  (half credit until contacts are found, as in lead scoring). */
 /** events counted toward one beneficiary's opportunity part: its strongest few (a broad code matches hundreds) */
 export const TOP_EVENTS = 5;
+/** news / signal events: weight of the strongest one by its fact-checked stage (strength 2 early, 3.5 committed, 5
+ *  buying), and freshness half-life by stage (a tender closes, a land deal's purchases are months away) */
+export const stageWeight = (strength: number) => Math.max(0, Math.min(1, strength / 5));
+export const halfLifeDays = (strength: number) => (strength >= 5 ? 14 : strength >= 3.5 ? 21 : 45);
+
 export function scoreBeneficiary(ms: ScoredMatch[], sweet: [number, number], buyer: number | null, now: Date): BeneficiaryScore {
   const top = [...ms].sort((a, b) => matchValue(b) - matchValue(a)).slice(0, TOP_EVENTS);
+  const b = 15 * (buyer == null ? 0.5 : Math.max(0, Math.min(1, buyer)));
+  if (top.length && top.every((m) => m.strength != null)) {
+    // a signal, not a contract: the strongest signal's stage, +10% for each more verified signal like it (up to 3);
+    // fit = the best match (a proven fit is 1); timing = freshness at the stage's own half-life
+    const best = Math.max(...top.map((m) => m.fit * stageWeight(m.strength!)));
+    const opportunity = 45 * Math.min(1, best + 0.1 * Math.min(3, top.length - 1));
+    const fit = 25 * Math.max(...top.map((m) => m.fit));
+    const timing = 15 * Math.max(0, ...ms.map((m) => Math.pow(0.5, Math.max(0, now.getTime() - (m.observedAt ?? m.endDate).getTime()) / (halfLifeDays(m.strength ?? 3) * 86_400_000))));
+    const parts = { opportunity: Math.round(opportunity), fit: Math.round(fit), timing: Math.round(timing), buyer: Math.round(b) };
+    const score = parts.opportunity + parts.fit + parts.timing + parts.buyer;
+    return { score, parts, line: `Score ${score} = opportunity ${parts.opportunity} · fit ${parts.fit} · timing ${parts.timing} · buyer ${parts.buyer}` };
+  }
   const value = top.reduce((s, m) => s + matchValue(m), 0);
   const opportunity = 45 * (1 - Math.exp(-value / 6));
   // how well its strongest events fit, not its single best one (one lucky match shouldn't max the part)
   const fit = top.length ? 25 * (top.reduce((s, m) => s + m.fit, 0) / top.length) : 0;
   // contracts: how close the end date is to the capture sweet spot; news and signals: how fresh (half-life 14 days)
   const timing = 15 * Math.max(0, ...ms.map((m) => m.observedAt ? Math.pow(0.5, Math.max(0, now.getTime() - m.observedAt.getTime()) / (14 * 86_400_000)) : timingFor(m.endDate, sweet, now)));
-  const b = 15 * (buyer == null ? 0.5 : Math.max(0, Math.min(1, buyer)));
   const parts = { opportunity: Math.round(opportunity), fit: Math.round(fit), timing: Math.round(timing), buyer: Math.round(b) };
   const score = parts.opportunity + parts.fit + parts.timing + parts.buyer;
   return { score, parts, line: `Score ${score} = opportunity ${parts.opportunity} · fit ${parts.fit} · timing ${parts.timing} · buyer ${parts.buyer}` };

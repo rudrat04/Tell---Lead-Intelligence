@@ -746,7 +746,8 @@ export async function proveFits(cands: OppLead[], pack: Pack, opts: { now: Date;
     proven++;
     // the proven event leads; the proof joins the reasons and the evidence the brief and the draft use
     const events = [hit.event, ...c.events.filter((x) => x !== hit!.event)];
-    events[0] = { ...events[0]!, reasons: [...events[0]!.reasons, `their site: "${hit.v.proof}"`] };
+    // (proven from their own site: the fit is certain for this event)
+    events[0] = { ...events[0]!, fit: 1, reasons: [...events[0]!.reasons, `their site: "${hit.v.proof}"`] };
     out.push({ ...c, events, proof: { need: hit.v.need, quote: hit.v.proof, url: hit.v.url }, evidence: [{ quote: `Their site: "${hit.v.proof}"`, url: hit.v.url }, ...c.evidence] });
   }
   return { leads: out, proven, unproven, checks };

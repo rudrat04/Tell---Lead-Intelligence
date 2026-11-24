@@ -157,9 +157,24 @@ describe("news and signal events", () => {
   });
   it("news events score on strength and freshness", () => {
     const fresh = scoreBeneficiary([{ fit: 1, amount: 0, endDate: NOW, strength: 4, observedAt: NOW }], [0, 0], null, NOW);
-    const old = scoreBeneficiary([{ fit: 1, amount: 0, endDate: d("2026-10-01"), strength: 4, observedAt: d("2026-10-01") }], [0, 0], null, NOW);
+    const old = scoreBeneficiary([{ fit: 1, amount: 0, endDate: d("2026-09-01"), strength: 4, observedAt: d("2026-09-01") }], [0, 0], null, NOW);
     expect(fresh.parts.timing).toBe(15);
     expect(old.parts.timing).toBeLessThan(3);
+  });
+  it("a signal scores on its fact-checked stage: an open tender with a proven fit and a decision maker is near 100", () => {
+    const ev = (strength: number, daysAgo = 0, fit = 1) => ({ fit, amount: 0, endDate: new Date(NOW.getTime() - daysAgo * 86_400_000), strength, observedAt: new Date(NOW.getTime() - daysAgo * 86_400_000) });
+    const buying = scoreBeneficiary([ev(5)], [0, 0], 1, NOW), committed = scoreBeneficiary([ev(3.5)], [0, 0], 1, NOW), early = scoreBeneficiary([ev(2)], [0, 0], 1, NOW);
+    expect(buying.parts.opportunity).toBe(45);
+    expect(committed.parts.opportunity).toBe(31);
+    expect(early.parts.opportunity).toBe(18);
+    expect(buying.score).toBe(100);
+    expect(committed.score).toBeGreaterThan(early.score);
+    // more verified signals for the same need add a little; a proven fit is full fit
+    expect(scoreBeneficiary([ev(3.5), ev(3.5, 3), ev(2, 5)], [0, 0], 1, NOW).parts.opportunity).toBe(40);
+    expect(scoreBeneficiary([ev(3.5, 0, 0.6), ev(3.5, 2, 1)], [0, 0], 1, NOW).parts.fit).toBe(25);
+    // a land deal three weeks old is still timely (its purchases are months away); a three-week-old tender much less so
+    expect(scoreBeneficiary([ev(2, 21)], [0, 0], 1, NOW).parts.timing).toBeGreaterThan(10);
+    expect(scoreBeneficiary([ev(5, 21)], [0, 0], 1, NOW).parts.timing).toBeLessThan(6);
   });
 });
 
