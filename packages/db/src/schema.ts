@@ -524,6 +524,17 @@ export const needTrades = pgTable("need_trades", {
   lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
 });
 
+/** People at the company behind a signal who handle what it must buy (procurement, projects, tenders), found once per
+ *  company name by people search (pipeline/signal-contacts.ts) and re-searched after opportunities.signal_contacts.refresh_days.
+ *  Names, titles and profile links only: no email is ever guessed for them. */
+export const signalContacts = pgTable("signal_contacts", {
+  entityKey: text("entity_key").primaryKey(),
+  entityName: text("entity_name").notNull(),
+  /** [{ name, role, linkedin }] */
+  people: jsonb("people").notNull(),
+  searchedAt: ts("searched_at").notNull().defaultNow(),
+});
+
 /** Fact-check of one market event (by its article / record URL), done once: what happened, the stage, where the work
  *  is, and what it must buy from other companies, every part quoted from the text (extract/event-check.ts). */
 export const eventChecks = pgTable("event_checks", {

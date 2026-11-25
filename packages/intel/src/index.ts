@@ -14,3 +14,4 @@ export * from "./send-window.js";
 export * from "./gaps.js";
 export * from "./explore.js";
 export * from "./opportunity.js";
+export * from "./signal-contacts.js";

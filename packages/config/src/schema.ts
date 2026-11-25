@@ -15,6 +15,11 @@ export function toRegex(p: string): RegExp {
   return m ? new RegExp(m[2]!, m[1]) : new RegExp(p);
 }
 
+/** opportunities.signal_contacts defaults: the people at a signal's company who deal with what it buys */
+const SIGNAL_CONTACT_TITLES = ["head of procurement", "purchase head", "projects head", "contracts and tenders manager", "supply chain head"];
+const SIGNAL_CONTACT_PATTERNS = ["(?i)procure", "(?i)purchas", "(?i)sourcing", "(?i)supply chain", "(?i)\\bprojects?\\b", "(?i)\\bcontracts?\\b", "(?i)tender",
+  "(?i)\\bmaterials?\\b", "(?i)\\bplant head\\b", "(?i)\\b(head|vp|director|gm|general manager|chief) (of )?operations\\b", "(?i)\\bcommercial\\b", "(?i)\\bcapex\\b", "(?i)\\bepc\\b"];
+
 export const PackMetaSchema = z.object({
   version: z.literal(1),
   name: z.string().min(1),
@@ -987,6 +992,18 @@ export const OpportunitiesSchema = z.object({
     /** companies looked up (resolved to accounts) per trade and run */
     per_run: z.number().int().min(0).max(50).default(10),
   }).default({ enabled: true, buyers: ["Founder / CEO", "Head of Sales"], results_per_query: 10, refresh_days: 30, max_age_days: 45, per_run: 10 }),
+  /** who to reach at the company behind a news / signal event (the tender's owner, the plant's builder): people whose
+   *  current title handles what it must buy, found by people search on its name (pipeline/signal-contacts.ts) */
+  signal_contacts: z.object({
+    enabled: z.boolean().default(true),
+    /** what the search asks for at that company (the need's topic is added) */
+    titles: z.array(z.string()).default(SIGNAL_CONTACT_TITLES),
+    /** a person counts only while their current title matches one of these */
+    patterns: z.array(pattern).default(SIGNAL_CONTACT_PATTERNS),
+    /** companies searched per run, also the daily cap (usage_daily "exa_signal_contacts") */
+    per_run: z.number().int().min(0).max(20).default(5),
+    refresh_days: z.number().int().min(1).default(30),
+  }).default({ enabled: true, titles: SIGNAL_CONTACT_TITLES, patterns: SIGNAL_CONTACT_PATTERNS, per_run: 5, refresh_days: 30 }),
   rosters: z.record(z.string(), RosterSchema).default({}),
   opportunities: z.record(z.string(), OpportunitySchema).default({}),
 });
@@ -1085,7 +1102,8 @@ export const PackSchema = z.object({
   capabilities: CapabilitiesSchema.default({ capabilities: [] }),
   modules: ModulesSchema.default({ modules: [] }),
   opportunities: OpportunitiesSchema.default({ enabled: false, window_days: 60, max_leads: 10, min_score: 0, pool_multiplier: 2, redeliver_after_days: 30, max_people_searches: 20, max_per_opportunity: 2, news_per_day: 10, search_per_day: 8, min_stage: "early", exclude_entity_industries: [],
-    trades: { enabled: true, buyers: ["Founder / CEO", "Head of Sales"], results_per_query: 10, refresh_days: 30, max_age_days: 45, per_run: 10 }, rosters: {}, opportunities: {} }),
+    trades: { enabled: true, buyers: ["Founder / CEO", "Head of Sales"], results_per_query: 10, refresh_days: 30, max_age_days: 45, per_run: 10 },
+    signal_contacts: { enabled: true, titles: SIGNAL_CONTACT_TITLES, patterns: SIGNAL_CONTACT_PATTERNS, per_run: 5, refresh_days: 30 }, rosters: {}, opportunities: {} }),
 }).superRefine((p, ctx) => {
   {
     const o = p.opportunities, titles = new Set(p.icp.personas.map((x) => x.title));

@@ -134,6 +134,17 @@ describe("telegram buttons", () => {
     await Promise.all(waits);
     expect(e.LABELS.m.has(`enrich:${D}`)).toBe(true);
   });
+  it("Signal-side email joins the same request (both sides kept); its Sheet link needs its own signature", async () => {
+    stub(); const e = env(); const waits: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => waits.push(p) };
+    await worker.fetch(tap(`es:${D}`), e, ctx);
+    await worker.fetch(tap(`e:${D}`), e, ctx);
+    await Promise.all(waits);
+    expect(JSON.parse(e.LABELS.m.get(`enrich:${D}`)!)).toMatchObject({ signal: true, person: true });
+    const { sign } = await import("./sign.js");
+    expect((await worker.fetch(new Request(`https://w.test/e?d=${D}&s=${await sign("s3cret", D, "enrich")}&side=signal`), e, ctx)).status).toBe(400);
+    expect((await worker.fetch(new Request(`https://w.test/e?d=${D}&s=${await sign("s3cret", D, "enrich-signal")}&side=signal`), e, ctx)).status).toBe(200);
+  });
   it("Create draft queues a draft request and dispatches drafts.yml; the Sheet link needs its own signature", async () => {
     stub(); const e = env(); const waits: Promise<unknown>[] = [];
     const ctx = { waitUntil: (p: Promise<unknown>) => waits.push(p) };

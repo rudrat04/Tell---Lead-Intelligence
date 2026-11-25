@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { r2, type Pack } from "@tell/config";
-import { getDb, people, emails, deliveries, suppressionList, deletionRequests, accounts, networkContacts, signals, and, eq, inArray, sql } from "@tell/db";
+import { getDb, people, emails, deliveries, suppressionList, deletionRequests, accounts, networkContacts, signals, signalContacts, and, eq, inArray, sql } from "@tell/db";
 import { googleAccessToken, a1Col } from "@tell/deliver";
 
 /**
@@ -44,6 +44,9 @@ export async function forgetPerson(req: ForgetRequest, pack: Pack): Promise<Forg
     res.people = (await db.delete(people).where(inArray(people.id, ids)).returning({ id: people.id })).length;
   }
   if (req.email) res.emails += (await db.delete(emails).where(sql`lower(${emails.address}) = ${req.email.toLowerCase()}`).returning({ id: emails.id })).length;
+
+  // people found at a signal's company (signal_contacts): the cached search naming them is dropped whole
+  for (const n of allNames) await db.delete(signalContacts).where(sql`${signalContacts.people}::text like ${"%" + JSON.stringify(n).slice(1, -1) + "%"}`);
 
   // your imported network (connections, past clients) and the champion_moved signals naming them
   if (allNames.length) {

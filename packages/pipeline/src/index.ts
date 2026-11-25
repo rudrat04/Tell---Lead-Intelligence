@@ -34,3 +34,4 @@ export * from "./email-apis.js";
 export * from "./opportunities.js";
 export * from "./event-checks.js";
 export * from "./trades.js";
+export * from "./signal-contacts.js";

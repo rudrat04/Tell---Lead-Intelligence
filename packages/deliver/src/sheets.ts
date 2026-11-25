@@ -29,7 +29,7 @@ export type LeadColumn = (typeof LEAD_COLUMNS)[number];
 export const OPP_COLUMNS = [
   "Date", "Signal", "Signal link", "Signal date", "About", "More signals",
   "Opportunity", "The play", "Company", "Website", "What they do", "Why they benefit", "Score", "Timing", "Region",
-  "Person", "Role", "LinkedIn", "Email", "Verified", "Enrich email",
+  "Person", "Role", "LinkedIn", "Email", "Verified", "Enrich email", "Signal-side contact", "Signal-side email",
   "Label", "Reason", "Outcome", "Notes",
   "Email draft", "Brief", "ID",
 ] as const;

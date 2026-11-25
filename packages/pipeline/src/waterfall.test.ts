@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseDiscover, parseEnrich, type WaterfallEmail } from "@tell/watchers";
-import { enrichStatus } from "./waterfall.js";
+import { enrichStatus, waterfallSure } from "./waterfall.js";
 
 const r = (verdict: WaterfallEmail["verdict"], email: string | null, extra: Partial<WaterfallEmail> = {}): WaterfallEmail =>
   ({ email, verdict, confidence: 0.9, catchAll: false, foundAt: "tomba", cached: false, credits: 1, ...extra });
@@ -24,10 +24,26 @@ describe("Air Waterfall responses", () => {
 
 describe("Enrich email cell", () => {
   it("is a short status after the click (the address goes in Email); suppressed never shows anything", () => {
-    expect(enrichStatus(r("valid", "mila@acme.test"))).toBe("done: valid, 90% (tomba)");
-    expect(enrichStatus(r("risky", "mila@acme.test", { confidence: 0.4, foundAt: null }))).toBe("done: risky, 40%");
+    expect(enrichStatus(r("valid", "mila@acme.test"))).toBe("done: verified (tomba)");
+    // a guess is never "done": the Email cell stays empty
+    expect(enrichStatus(r("risky", "mila@acme.test", { confidence: 0.4, foundAt: null }))).toBe("no verified address (risky)");
+    expect(enrichStatus(r("likely", "mila@acme.test"))).toBe("no verified address (likely)");
+    expect(enrichStatus(r("valid", "mila@acme.test", { catchAll: true }))).toBe("no verified address (catch-all domain)");
+    // our own verifier confirmed what Air Waterfall only guessed
+    expect(enrichStatus(r("risky", "mila@acme.test"), false, { address: "mila@acme.test", status: "verified", note: "verified (QuickEmailVerification)" })).toBe("done: verified (QuickEmailVerification)");
     expect(enrichStatus(r("invalid", null))).toBe("no deliverable address");
     expect(enrichStatus(r("not_found", null))).toBe("not found");
     expect(enrichStatus(r("valid", "mila@acme.test"), true)).toBe("suppressed (do not contact)");
+  });
+});
+
+describe("Air Waterfall answers that count as sure", () => {
+  it("only valid on a domain that is not catch-all; risky and likely are guesses", () => {
+    expect(waterfallSure(r("valid", "mila@acme.test"))).toBe(true);
+    expect(waterfallSure(r("valid", "mila@acme.test", { catchAll: null }))).toBe(true);
+    expect(waterfallSure(r("valid", "mila@acme.test", { catchAll: true }))).toBe(false);
+    expect(waterfallSure(r("risky", "mila@acme.test"))).toBe(false);
+    expect(waterfallSure(r("likely", "mila@acme.test"))).toBe(false);
+    expect(waterfallSure(r("not_found", null))).toBe(false);
   });
 });

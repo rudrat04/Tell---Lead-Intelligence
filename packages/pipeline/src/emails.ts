@@ -93,9 +93,9 @@ export async function attachEmails(
     }
 
     for (const p of everyone) {
-      // a bounce marked this person's address invalid: keep it that way, don't offer another guess silently
+      // a bounce (or you: source "operator:...") marked this person's address invalid: keep it that way, don't offer another guess silently
       const id = pid(p.name);
-      const bounced = stored.find((e) => e.personId === id && e.status === "invalid" && e.source === "bounce");
+      const bounced = stored.find((e) => e.personId === id && e.status === "invalid" && (e.source === "bounce" || !!e.source?.startsWith("operator")));
       const g: EmailGuess | null = bounced
         ? { address: bounced.address, status: "invalid", source: "bounce", note: "bounced" }
         : emailFor(p.name, a.domain, ev.mail, ev.seen, a.size);

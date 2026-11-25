@@ -77,3 +77,45 @@ describe("opportunity lead out", () => {
     expect(t).toContain("Asha");
   });
 });
+
+describe("only verified emails, and who deals with it on the signal's side", () => {
+  const news: OppLead = { ...lead, opportunity: { ...lead.opportunity, id: "in_solar", kind: "news", label: "Rooftop solar tender" },
+    events: [{ ...lead.events[0]!, quote: "Contoso Power invites bids for rooftop solar (Example News)", url: "https://news.example/solar", entityName: "Contoso Power" }],
+    signalContacts: [{ name: "Ravi Sen", role: "Head of Procurement", linkedin: "https://www.linkedin.com/in/ravi-sen" }] };
+  it("a guessed or likely address is never shown: no Email cell, the Find email button stays", () => {
+    const guessed = { ...news, contact: { ...news.contact!, person: { ...news.contact!.person, email: { address: "asha.rao@northwind.example", status: "likely" as const, note: "pattern" } } } };
+    const row = oppSheetRow(guessed, "2026-11-21", NOW, { enrich: "https://w.example/e?d=x&s=z" });
+    expect(row.Email).toBeUndefined();
+    expect(row["Enrich email"]).toBe("https://w.example/e?d=x&s=z");
+    const m = oppMessage(guessed, "11111111-2222-4333-8444-555555555555", NOW);
+    expect(m.text).not.toContain("asha.rao@");
+    expect(oppBrief(guessed, NOW)).not.toContain("asha.rao@");
+    expect(m.buttons!.flat().map((b) => b.data)).toContain("e:11111111-2222-4333-8444-555555555555");
+    const sure = { ...guessed, contact: { ...guessed.contact, person: { ...guessed.contact.person, email: { address: "asha.rao@northwind.example", status: "verified" as const, note: "verified (QuickEmailVerification)" } } } };
+    expect(oppSheetRow(sure, "2026-11-21", NOW, {}).Email).toBe("asha.rao@northwind.example");
+    expect(oppMessage(sure, "11111111-2222-4333-8444-555555555555", NOW).buttons!.flat().map((b) => b.data)).not.toContain("e:11111111-2222-4333-8444-555555555555");
+  });
+  it("the signal's company contact shows on the signal message, the lead, the brief and the Sheet", () => {
+    expect(signalMessage([news], NOW).text).toContain("Who deals with it at Contoso Power:</b>");
+    expect(signalMessage([news], NOW).text).toContain(">Ravi Sen</a>, Head of Procurement");
+    expect(oppMessage(news, null, NOW, true).text).toContain("Ravi Sen");
+    expect(oppMessage(news, null, NOW, true, true).text).not.toContain("Ravi Sen"); // compact: the signal message has it
+    expect(oppBrief(news, NOW)).toContain("On the signal's side (Contoso Power, who deals with it): Ravi Sen, Head of Procurement (https://www.linkedin.com/in/ravi-sen)");
+    expect(oppSheetRow(news, "2026-11-21", NOW, {})["Signal-side contact"]).toBe("Contoso Power: Ravi Sen, Head of Procurement (https://www.linkedin.com/in/ravi-sen)");
+  });
+});
+
+describe("signal-side emails on a click", () => {
+  const news: OppLead = { ...lead, opportunity: { ...lead.opportunity, id: "in_solar", kind: "news", label: "Rooftop solar tender" },
+    events: [{ ...lead.events[0]!, quote: "Contoso Power invites bids (Example News)", url: "https://news.example/solar", entityName: "CPWR" }],
+    signalEntity: "Contoso Power Works", signalContacts: [{ name: "Ravi Sen", role: "Head of Procurement", linkedin: "https://www.linkedin.com/in/ravi-sen" }] };
+  it("a Signal-side email button and Sheet link while someone there has no verified address; the context keeps the people", () => {
+    const m = oppMessage(news, "11111111-2222-4333-8444-555555555555", NOW);
+    expect(m.buttons!.flat().map((b) => b.data)).toContain("es:11111111-2222-4333-8444-555555555555");
+    expect(oppSheetRow(news, "2026-11-21", NOW, { enrichSignal: "https://w.example/e?side=signal" })["Signal-side email"]).toBe("https://w.example/e?side=signal");
+    expect(oppContext(news, NOW).signal).toEqual({ entity: "CPWR", full: "Contoso Power Works", people: news.signalContacts });
+    const done = { ...news, signalContacts: [{ ...news.signalContacts![0]!, email: { address: "ravi.sen@cpwr.example", status: "verified" as const, note: "" } }] };
+    expect(oppMessage(done, "11111111-2222-4333-8444-555555555555", NOW).buttons!.flat().map((b) => b.data)).not.toContain("es:11111111-2222-4333-8444-555555555555");
+    expect(oppSheetRow(done, "2026-11-21", NOW, {})["Signal-side contact"]).toContain("ravi.sen@cpwr.example (verified)");
+  });
+});

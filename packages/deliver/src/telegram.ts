@@ -1,6 +1,6 @@
 import type { Contact } from "@tell/people";
 import type { ScoreRunResult } from "@tell/pipeline";
-import { describe, emailText, emailDraft, type LeadNote } from "./render.js";
+import { describe, emailText, emailDraft, sureEmail, type LeadNote } from "./render.js";
 import { sendWindow, sendWindowText } from "@tell/intel";
 import type { Pack } from "@tell/config";
 
@@ -70,7 +70,7 @@ export function leadMessage(l: Lead, c: Contact | null | undefined, n: LeadNote 
   ];
   const text = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!deliveryId || test) return { text };
-  const needsEmail = !!c && (!c.person.email || !["observed", "verified"].includes(c.person.email.status));
+  const needsEmail = !!c && !sureEmail(c.person);
   return { text, buttons: [[{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }],
     [...(needsEmail ? [{ text: "🔎 Find email", data: `e:${deliveryId}` }] : []), ...(n?.brief ? [{ text: "📄 Brief", data: `br:${deliveryId}` }] : [])]] };
 }

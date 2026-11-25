@@ -4,11 +4,12 @@ import { WriterClient, HaikuClient, writerEffort, writeOpportunityDraft, type Op
 import { firstName, type Contact } from "@tell/people";
 import { SHOWN_EVENTS, TOP_EVENTS } from "@tell/intel";
 import { getDb, deliveries, runs, eq, and, inArray, sql } from "@tell/db";
-import { assignDeliveryIds, enrichLink, draftLink, fetchDraftRequests, ackDraftRequests } from "./label-links.js";
+import { assignDeliveryIds, enrichLink, enrichSignalLink, draftLink, fetchDraftRequests, ackDraftRequests } from "./label-links.js";
+import type { SignalPerson } from "@tell/intel";
 import { emailCells, fillColumnById, ensureLeadHeaders, type OppRow } from "./sheets.js";
 import { appendPendingLeads } from "./sheet-sync.js";
 import { sendTelegram, storeTelegramTexts, telegramConfigured, tgEsc, type TgMessage } from "./telegram.js";
-import { greeting, emailText } from "./render.js";
+import { greeting, emailText, sureEmail } from "./render.js";
 
 /**
  * Opportunity leads out (`pnpm opps`): Telegram (summary + one message per lead with Good / Bad / Find email /
@@ -31,6 +32,8 @@ export interface OppContext {
   /** the event kind (contract recompete vs news / signal), so the draft speaks about it the right way */
   kindOf?: string;
   draft?: { subject: string; body: string; at: string } | null;
+  /** the people at the signal's company (its headline name, its full name), for the signal-side Find email click */
+  signal?: { entity: string; full: string; people: SignalPerson[] } | null;
 }
 
 const MAX_EVENTS = SHOWN_EVENTS;
@@ -93,16 +96,17 @@ export function oppBrief(l: OppLead, now: Date): string {
     l.score.line,
     "",
     "5. WHO TO REACH",
-    c ? `${c.person.name}${c.person.role ? `, ${c.person.role}` : ""}${c.person.email ? ` · ${c.person.email.address} (${c.person.email.status})` : ""}${c.person.linkedin ? ` · ${c.person.linkedin}` : ""}` : "nobody found yet",
+    c ? `${c.person.name}${c.person.role ? `, ${c.person.role}` : ""}${emailText(c.person) ? ` · ${emailText(c.person)}` : ""}${c.person.linkedin ? ` · ${c.person.linkedin}` : ""}` : "nobody found yet",
+    ...(l.signalContacts?.length && e0?.entityName ? [`On the signal's side (${e0.entityName}, who deals with it): ${signalSideText(l.signalContacts)}`] : []),
   ].join("\n");
 }
 
 /** The Opportunities tab row (pure; exported for tests): signal first, then the play, the company and why, the person.
  *  The Email draft cell holds the Create draft link until you click it. */
-export function oppSheetRow(l: OppLead, day: string, now: Date, links: { enrich?: string; draft?: string }): OppRow {
+export function oppSheetRow(l: OppLead, day: string, now: Date, links: { enrich?: string; draft?: string; enrichSignal?: string }): OppRow {
   const a = l.account, c = l.contact, e0 = l.events[0];
-  const email = c?.person.email;
-  const cells = email ? emailCells(email.address, email.note || email.status) : {};
+  const email = c ? sureEmail(c.person) : null;
+  const cells = email ? emailCells(email.address, email.status) : {};
   return {
     Date: day,
     Signal: e0?.quote ?? "", "Signal link": e0?.url ?? "", "Signal date": e0 ? signalWhen(l, e0, now) : "", About: e0?.entityName ?? "",
@@ -111,8 +115,10 @@ export function oppSheetRow(l: OppLead, day: string, now: Date, links: { enrich?
     Company: a.name ?? a.domain, Website: `https://${a.domain}`, "What they do": a.description ?? "", "Why they benefit": howTheyBenefit(l),
     Score: l.score.line, Timing: timingLine(l, now), Region: a.region ?? "",
     Person: c?.person.name ?? "", Role: c?.person.role ?? "", LinkedIn: c?.person.linkedin ?? "",
+    ...(l.signalContacts?.length ? { "Signal-side contact": `${e0?.entityName ? `${e0.entityName}: ` : ""}${signalSideText(l.signalContacts)}`,
+      ...(links.enrichSignal && l.signalContacts.some((p) => !p.email) ? { "Signal-side email": links.enrichSignal } : {}) } : {}),
     ...(cells.Email ? { Email: cells.Email, Verified: cells.Verified } : {}),
-    ...(links.enrich && c && (!email || !["observed", "verified"].includes(email.status)) ? { "Enrich email": links.enrich } : {}),
+    ...(links.enrich && c && !email ? { "Enrich email": links.enrich } : {}),
     Brief: oppBrief(l, now), ...(links.draft ? { "Email draft": links.draft } : {}),
   };
 }
@@ -148,12 +154,15 @@ export function oppMessage(l: OppLead, deliveryId: string | null, now: Date, tes
     `👤 <b>Reach:</b> ${c ? `${tgEsc(c.person.name)}${c.person.role ? `, ${tgEsc(c.person.role)}` : ""}` : "nobody found yet"}`,
     ...(c && emailText(c.person) ? [`✉️ ${tgEsc(emailText(c.person)!)}`] : []),
     ...(c?.person.linkedin ? [link(c.person.linkedin, "LinkedIn profile")] : []),
+    // (compact: the signal's own message already names them)
+    ...(!compact && l.signalContacts?.length ? ["", ...signalSideTg(l.signalContacts, e0?.entityName ?? "", link)] : []),
   ];
   const text = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   if (!deliveryId || test) return { text };
-  const needsEmail = !!c && (!c.person.email || !["observed", "verified"].includes(c.person.email.status));
+  const needsEmail = !!c && !sureEmail(c.person);
+  const signalEmail = !!l.signalContacts?.some((p) => !p.email);
   return { text, buttons: [[{ text: "✍️ Create draft", data: `cd:${deliveryId}` }, { text: "📄 Brief", data: `br:${deliveryId}` }, ...(needsEmail ? [{ text: "🔎 Find email", data: `e:${deliveryId}` }] : [])],
-    [{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }]] };
+    [{ text: "👍 Good", data: `g:${deliveryId}` }, { text: "👎 Bad", data: `b:${deliveryId}` }, ...(signalEmail ? [{ text: "🔎 Signal-side email", data: `es:${deliveryId}` }] : [])]] };
 }
 
 /** Leads grouped by their lead signal (pure; exported for tests): the strongest group first, each group's leads
@@ -168,6 +177,14 @@ export function bySignal(leads: OppLead[]): OppLead[][] {
 }
 
 /** The signal on its own message, with the businesses below it that can act on it (pure; exported for tests). */
+/** People at the signal's company who deal with it, for the brief and the Sheet: "Jo Doe, Head of Procurement
+ *  (linkedin url) · ..." (pure). Name, title and profile only: never an email. */
+export const signalSideText = (ps: SignalPerson[]) => ps.map((p) => `${p.name}, ${p.role}${p.email ? ` · ${p.email.address} (verified)` : ""}${p.linkedin ? ` (${p.linkedin})` : ""}`).join(" · ");
+/** The same on Telegram (pure). */
+function signalSideTg(ps: SignalPerson[], entity: string, link: (url: string, text: string) => string): string[] {
+  return [`🤝 <b>Who deals with it at ${tgEsc(entity || "the signal's company")}:</b>`, ...ps.map((p) => `• ${p.linkedin ? link(p.linkedin, p.name) : tgEsc(p.name)}, ${tgEsc(p.role)}${p.email ? ` · ✉️ ${tgEsc(p.email.address)}` : ""}`)];
+}
+
 export function signalMessage(group: OppLead[], now: Date): TgMessage {
   const l = group[0]!, e0 = l.events[0];
   const link = (url: string, text: string) => (/^https?:\/\//i.test(url) ? `<a href="${tgEsc(url)}">${tgEsc(text)}</a>` : tgEsc(text));
@@ -178,6 +195,7 @@ export function signalMessage(group: OppLead[], now: Date): TgMessage {
     ...(needs.length ? ["", "<b>What it makes them buy:</b>", ...needs.map((n) => `• ${tgEsc(n)}`)] : []),
     "",
     `🏭 <b>${group.length} business${group.length === 1 ? "" : "es"} can act on it:</b> ${group.map((x) => tgEsc(x.account.name ?? x.account.domain)).join(" · ")}`,
+    ...(l.signalContacts?.length ? ["", ...signalSideTg(l.signalContacts, e0?.entityName ?? "", link)] : []),
   ].join("\n").replace(/\n{3,}/g, "\n\n").trim() };
 }
 
@@ -188,6 +206,7 @@ export function oppContext(l: OppLead, now: Date): OppContext {
     contact: c ? { name: c.person.name, role: c.person.role, persona: c.persona } : null, kindOf: l.opportunity.kind,
     events: l.events.slice(0, MAX_EVENTS).map((e) => ({ quote: e.quote, url: e.url, reasons: e.reasons, ...(e.entityName ? { about: e.entityName } : {}) })),
     topEvents: l.events.slice(0, TOP_EVENTS).map((e) => e.url), record: l.evidence.map((e) => e.quote), brief: oppBrief(l, now),
+    ...(l.signalContacts?.length && l.events[0]?.entityName ? { signal: { entity: l.events[0].entityName, full: l.signalEntity ?? l.events[0].entityName, people: l.signalContacts } } : {}),
   };
 }
 
@@ -218,7 +237,7 @@ export async function runOpportunityDigest(opts: { pack: Pack; dryRun?: boolean;
   if (real) {
     const rows = ranked.leads.map((l) => {
       const id = ids.get(l.account.id)!;
-      const links = url && secret ? { enrich: enrichLink(url, secret, id), draft: draftLink(url, secret, id) } : {};
+      const links = url && secret ? { enrich: enrichLink(url, secret, id), draft: draftLink(url, secret, id), enrichSignal: enrichSignalLink(url, secret, id) } : {};
       return { id, accountId: l.account.id, deliveredAt: now, kind: "opportunity", configVersion: `opps:${pack.meta.name}`, sheetRow: oppSheetRow(l, day, now, links), context: oppContext(l, now) };
     });
     // one lead per account per IST day (unique index deliveries_opp_day_uq): a retry skips what an earlier attempt wrote

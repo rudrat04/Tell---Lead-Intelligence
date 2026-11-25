@@ -138,15 +138,17 @@ const A = (href: string, text: string, style = "") => `<a href="${safeHref(href)
 const regionShort = (r: string | null) => (r === "United States of America" ? "US" : r === "United Kingdom" ? "UK" : r === "United Arab Emirates" ? "UAE" : r);
 
 const EMAIL_LABEL: Record<NonNullable<Contact["person"]["email"]>["status"], string> = { observed: "seen in public", verified: "verified", likely: "likely", guessed: "guessed", invalid: "" };
-/** "jo@acme.com (likely)" for usable addresses; nothing for invalid ones. */
+/** Sure = verified, or published in public for this exact name; nothing else is ever shown (no pattern guesses). */
+export const sureEmail = (p: Contact["person"]) => (p.email && (p.email.status === "verified" || p.email.status === "observed") ? p.email : null);
+/** "jo@acme.com (verified)" for sure addresses; nothing for guesses or invalid ones. */
 export function emailText(p: Contact["person"]): string | null {
-  const e = p.email;
-  return e && e.status !== "invalid" ? `${e.address} (${EMAIL_LABEL[e.status]})` : null;
+  const e = sureEmail(p);
+  return e ? `${e.address} (${EMAIL_LABEL[e.status]})` : null;
 }
 
 /** Ways to reach the contact: email (with how sure we are), shared inbox, LinkedIn, X. */
 function reachHtml(c: Contact): string {
-  const e = c.person.email && c.person.email.status !== "invalid" ? c.person.email : null;
+  const e = sureEmail(c.person);
   const parts = [
     e && `${A(`mailto:${e.address}`, esc(e.address))} <span style="color:${C.faint}">${EMAIL_LABEL[e.status]}</span>`,
     !e && c.generic && `${A(`mailto:${c.generic}`, esc(c.generic))} <span style="color:${C.faint}">shared inbox</span>`,
@@ -368,7 +370,7 @@ export function renderDigest(r: ScoreRunResult, pack: Pack, health: DigestHealth
 export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date: string, note?: LeadNote, signature = "", copy?: { greeting: string; linkedin: { greeting: string } }, calendar?: Pack["icp"]["calendar"], enrichUrl?: string): LeadRow {
   const a = l.account, s = l.score;
   const company = a.name ?? a.domain;
-  const e = contact?.person.email;
+  const e = contact ? sureEmail(contact.person) : null;
   return {
     Date: date,
     Company: company,
@@ -386,7 +388,7 @@ export function leadSheetRow(l: Lead, contact: Contact | null | undefined, date:
     Person: contact?.person.name ?? "",
     Role: contact?.person.role ?? "",
     LinkedIn: contact?.person.linkedin ?? contact?.person.twitter ?? "",
-    ...(e && e.status !== "invalid" ? emailCells(e.address, EMAIL_LABEL[e.status], /catch-all/i.test(e.note) ? true : null) : {}),
+    ...(e ? emailCells(e.address, EMAIL_LABEL[e.status], /catch-all/i.test(e.note) ? true : null) : {}),
     "Enrich email": enrichUrl && needsEmail(contact) ? enrichUrl : "", // a link until clicked, then the result
     Opener: leadOpener(contact, company, s.drivers[0], note) ?? "",
     Angle: note?.angle ?? s.plays[0]?.angle ?? "",

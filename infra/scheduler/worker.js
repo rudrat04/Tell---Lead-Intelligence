@@ -25,6 +25,7 @@
  * secret_token = TG_WEBHOOK_SECRET; requests without that header are refused, and only TELEGRAM_CHAT_ID is served).
  *   g:<id> / b:<id>  label good / bad (stored as tap:<id>, exactly like the email links)
  *   e:<id>           find email (queued as enrich:<id>, enrich.yml dispatched, as the email button)
+ *   es:<id>          find the emails of the people at the signal's company (the same entry, with signal: true)
  *   cd:<id>          create draft (queued as draft:<id>, drafts.yml dispatched; the Sheet's /cd link does the same)
  *   br:<id> / dr:<id> send the brief / the email draft, which the digest stored with POST /tg-store (bearer LABEL_SECRET)
  * Extra secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TG_WEBHOOK_SECRET.
@@ -71,8 +72,9 @@ async function valid(env, d, v, s) {
   return !!env.LABEL_SECRET && UUID.test(d ?? "") && LABELS.has(v) && sameText(s, await sign(env.LABEL_SECRET, d, v));
 }
 
-async function validEnrich(env, d, s) {
-  return !!env.LABEL_SECRET && UUID.test(d ?? "") && sameText(s, await sign(env.LABEL_SECRET, d, "enrich"));
+/** side "signal" = the people at the signal's company (its own signature, so a contact link can't ask for it) */
+async function validEnrich(env, d, s, side = "person") {
+  return !!env.LABEL_SECRET && UUID.test(d ?? "") && sameText(s, await sign(env.LABEL_SECRET, d, side === "signal" ? "enrich-signal" : "enrich"));
 }
 
 async function validDraft(env, d, s) {
@@ -101,18 +103,18 @@ async function queue(request, env, prefix) {
 async function enrich(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "GET") {
-    const d = url.searchParams.get("d"), s = url.searchParams.get("s");
-    if (!(await validEnrich(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
-    return page("Find email", `<p>Find this person's work email with Air Waterfall?</p><p style="color:#6b7280;font-size:14px">Runs the email waterfall once (free sources first, then finders that bill only on a find).</p>
-<form method="post" action="/e"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}">
+    const d = url.searchParams.get("d"), s = url.searchParams.get("s"), side = url.searchParams.get("side") === "signal" ? "signal" : "person";
+    if (!(await validEnrich(env, d, s, side))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    return page("Find email", `<p>${side === "signal" ? "Find the work emails of the people on the signal's side?" : "Find this person's work email?"}</p><p style="color:#6b7280;font-size:14px">Runs the email waterfall once (free checks first, then finders that bill only on a find). Only a verified address is written.</p>
+<form method="post" action="/e"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}"><input type="hidden" name="side" value="${side}">
 <button style="font-size:18px;padding:12px 24px;border-radius:8px;border:0;background:#1d4ed8;color:#fff">Find email</button></form>`);
   }
   if (request.method === "POST") {
     const f = await request.formData();
-    const d = f.get("d"), s = f.get("s");
-    if (!(await validEnrich(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    const d = f.get("d"), s = f.get("s"), side = f.get("side") === "signal" ? "signal" : "person";
+    if (!(await validEnrich(env, d, s, side))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
     // one dispatch per minute at most: a run processes every queued request
-    await queueEnrich(env, ctx, d);
+    await queueEnrich(env, ctx, d, side);
     return page("Finding email", "<p>Finding the email now. It appears in your Sheet's <b>Enrich email</b> column in about 2 minutes.</p>");
   }
   return new Response("method not allowed", { status: 405 });
@@ -121,8 +123,10 @@ async function enrich(request, env, ctx) {
 const tgApi = (env, method, body) => fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 /** Queue a find-email request and dispatch enrich.yml at most once a minute (shared by the email link and Telegram). */
-async function queueEnrich(env, ctx, d) {
-  await env.LABELS.put(`enrich:${d}`, JSON.stringify({ at: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 7 });
+async function queueEnrich(env, ctx, d, side = "person") {
+  // one entry per delivery, with the sides asked for (the contact, the signal's people, or both)
+  const prior = (await env.LABELS.get(`enrich:${d}`, "json")) ?? {};
+  await env.LABELS.put(`enrich:${d}`, JSON.stringify({ ...prior, at: new Date().toISOString(), [side]: true }), { expirationTtl: 60 * 60 * 24 * 7 });
   const last = await env.LABELS.get("enrich-dispatched-at");
   if (!last || Date.now() - Number(last) > 60_000) {
     await env.LABELS.put("enrich-dispatched-at", String(Date.now()), { expirationTtl: 3600 });
@@ -186,6 +190,9 @@ async function telegram(request, env, ctx) {
     } else if (op === "e") {
       await queueEnrich(env, ctx, d);
       answer = "Finding the email: it appears in your Sheet in about 2 minutes";
+    } else if (op === "es") {
+      await queueEnrich(env, ctx, d, "signal");
+      answer = "Finding the signal side's emails: the answer arrives here in about 2 minutes";
     } else if (op === "cd") {
       await queueDraft(env, ctx, d);
       answer = "Writing the draft: it arrives here in about 2 minutes";

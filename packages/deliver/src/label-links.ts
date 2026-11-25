@@ -43,7 +43,14 @@ export function enrichLink(baseUrl: string, secret: string, deliveryId: string):
   return `${baseUrl.replace(/\/+$/, "")}/e?d=${deliveryId}&s=${sig}`;
 }
 
-export interface EnrichRequest { d: string; at: string }
+/** Find-email link for the people at the signal's company (its own signature: a contact link can't ask for it). */
+export function enrichSignalLink(baseUrl: string, secret: string, deliveryId: string): string {
+  const sig = createHmac("sha256", secret).update(`${deliveryId}|enrich-signal`).digest("hex").slice(0, 32);
+  return `${baseUrl.replace(/\/+$/, "")}/e?d=${deliveryId}&s=${sig}&side=signal`;
+}
+
+/** person / signal: which side was asked for (older entries carry neither: the contact) */
+export interface EnrichRequest { d: string; at: string; person?: boolean; signal?: boolean }
 
 /** Find-email clicks waiting in the Worker. Throws on auth or network failure. */
 export async function fetchEnrichRequests(baseUrl: string, secret: string): Promise<EnrichRequest[]> {

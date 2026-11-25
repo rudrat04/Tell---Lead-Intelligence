@@ -64,3 +64,26 @@ describe("opportunity draft checks", () => {
     expect((await writeOpportunityDraft(ok, pack, input)).draft).toEqual(good);
   });
 });
+
+import { maxWords, targetWords, OPP_MAX_WORDS } from "./opportunity-draft.js";
+describe("opportunity drafts are short and to the point", () => {
+  const news: OppDraftInput = { company: "Northwind Solar", opportunity: "Rooftop solar tender", angle: "", contract: false,
+    events: [{ quote: "Contoso Power invites bids for a 3.45 MW rooftop solar project on government buildings", url: "u", reasons: ["makes inverters"], about: "Contoso Power" }], record: ["Makes string inverters"] };
+  const ok = { subject: "a 3.45 mw rooftop tender", body: "A state power trader just invited bids for a 3.45 MW rooftop solar project, and the EPC firms bidding will pick their inverter suppliers soon, which could suit your string inverters.\n\nWe build systems that put tenders like this in front of you before the EPC shortlist is set.\n\nShould we build one for your inverter line?" };
+  it("a three-part draft of about 55 words passes", async () => {
+    expect(draftProblems(ok, news, await loadFixturePack())).toBe("");
+  });
+  it("the cap is the shorter of 75 words and the pack's own cap, and the prompt aims under it", async () => {
+    const pack = await loadFixturePack();
+    expect(maxWords(pack)).toBe(Math.min(OPP_MAX_WORDS, pack.delivery.email.max_words));
+    expect(targetWords(pack)).toBeLessThan(maxWords(pack));
+    expect(maxWords({ delivery: { ...pack.delivery, email: { ...pack.delivery.email, max_words: 60 } } })).toBe(60);
+    const long = { ...ok, body: ok.body.replace("soon,", `soon, ${"and more words here ".repeat(8)}`) };
+    expect(draftProblems(long, news, pack)).toMatch(/too long/);
+  });
+  it("rejects a one-word close like \"Interested?\" and a long closing question", async () => {
+    const pack = await loadFixturePack();
+    expect(draftProblems({ ...ok, body: ok.body.replace("Should we build one for your inverter line?", "We build one for your line if you want. Interested?") }, news, pack)).toMatch(/closes on "Interested\?"/);
+    expect(draftProblems({ ...ok, body: ok.body.replace("Should we build one for your inverter line?", "Should we build one for your inverter line and every other product line you sell across all of your regions in India this year?") }, news, pack)).toMatch(/closing question is too long/);
+  });
+});

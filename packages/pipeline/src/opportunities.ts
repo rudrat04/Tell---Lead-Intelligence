@@ -17,6 +17,9 @@ import { getDb, accounts, companySeeds, deliveries, marketEvents, rosterMembers,
 import { persistNicheRecords, type NicheRecord, type NicheResult } from "./niche.js";
 import { contactsFor } from "./contacts.js";
 import { attachEmails } from "./emails.js";
+import { upgradeEmails, keepSureEmails } from "./email-apis.js";
+import { attachSignalContacts, type SignalContactDeps } from "./signal-contacts.js";
+import type { SignalPerson } from "@tell/intel";
 import { decisionPower } from "./reach.js";
 import { waterfallContacts } from "./waterfall.js";
 import { readSite, type SitePage } from "@tell/watchers";
@@ -93,6 +96,8 @@ export interface OppLead {
   events: { id: string; quote: string; url: string; amount: number; endDate: Date; agency: string; naics: string; setAside: string | null; strength?: number; entityName: string; fit: number; reasons: string[]; firstSeenAt: Date;
     /** news / signal events, after the fact-check: the need this company can serve, the stage, what happened */
     need?: EventNeed; stage?: Stage; happened?: string; stageQuote?: string | null; entitySells?: string;
+    /** the fact-check's sentence from the article, word for word (it often names the company in full: "Contoso Vidyut Vyapar Nigam (CVVN)") */
+    factQuote?: string | null;
     /** where the event was found (the news search's country, the signalling company's region) */
     region?: string | null }[];
   evidence: MemberFacts["evidence"];
@@ -100,6 +105,11 @@ export interface OppLead {
   contact: Contact | null;
   /** the fit proven from their own site (news / signal leads): what the event needs, and the sentence that shows they offer it */
   proof?: { need: string; quote: string; url: string } | null;
+  /** people at the company behind the lead signal who deal with what it buys (procurement, projects, tenders): name,
+   *  title and profile link only (pipeline/signal-contacts.ts) */
+  signalContacts?: SignalPerson[];
+  /** the signal's company by its full name (a headline acronym spelled out from the article) */
+  signalEntity?: string;
 }
 
 type Fetch = typeof searchFedAwards;
@@ -572,7 +582,7 @@ async function crossEvents(id: string, op: Exclude<OpportunityDef, { kind: "usas
  * The day's opportunity leads: every beneficiary with live matched events, scored, held back when delivered recently
  * with nothing new, the pool searched for the opportunity's buyers, re-scored with the contact, cut at max_leads.
  */
-export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; waterfall?: typeof waterfallContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
+export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; upgrade?: typeof upgradeEmails; signalContacts?: SignalContactDeps; waterfall?: typeof waterfallContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
   const db = getDb(), now = opts.now ?? new Date(), cfg = pack.opportunities;
   const since = new Date(now.getTime() - cfg.window_days * DAY);
   // a match belongs to the opportunity that reads its event's opportunity with its roster (events_from shares events)
@@ -674,6 +684,12 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   }
   leads.sort((a, b) => b.score.score - a.score.score);
   const out = roundRobin(leads, max, cfg.max_per_opportunity).sort((a, b) => b.score.score - a.score.score);
+  // only a sure address goes out: today's leads' guesses go through the verifiers and finders (never the whole pool:
+  // the finders' monthly caps are small), and whatever stays unsure is dropped (lead.contact is the map's object)
+  try { await (opts.upgrade ?? upgradeEmails)(contacts, out.map((l) => l.account.id), { write: opts.write !== false }); } catch { /* verifiers down: guesses are dropped below */ }
+  keepSureEmails(contacts);
+  // who to reach on the signal's side (the tender's owner, the plant's builder), one search per signal company
+  try { await attachSignalContacts(out, pack, { now, ...(opts.signalContacts ? { deps: opts.signalContacts } : {}) }); } catch { /* table not migrated yet or search down: leads go out without them */ }
   return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, leads: out.length, proven: proven.proven, unproven: proven.unproven, fitChecks: proven.checks, eventChecks: gated.made, eventDropped: gated.dropped } };
 }
 
@@ -706,7 +722,7 @@ export async function gateLeads(cands: OppLead[], pack: Pack, opts: { now: Date;
     for (const e of c.events.slice(0, EVENTS_GATED)) {
       const ck = checks.get(e.url), g = gateEvent(ck, op, roster, c.account.region, cfg.min_stage, e.region ?? null, op.roster, cfg.exclude_entity_industries);
       if (!g.ok) { dropped[g.why] = (dropped[g.why] ?? 0) + 1; continue; }
-      kept.push({ ...e, strength: STAGE_STRENGTH[g.stage], need: g.need, stage: g.stage, happened: ck!.happened, stageQuote: ck!.stageQuote, entitySells: ck!.entitySells,
+      kept.push({ ...e, strength: STAGE_STRENGTH[g.stage], need: g.need, stage: g.stage, happened: ck!.happened, stageQuote: ck!.stageQuote, factQuote: ck!.quote, entitySells: ck!.entitySells,
         reasons: [...e.reasons.filter((r) => r.startsWith("based in")), `they will need ${g.need.what}`, `stage: ${g.stage}${ck!.stageQuote ? ` ("${ck!.stageQuote}")` : ""}`] });
     }
     if (!kept.length) continue;

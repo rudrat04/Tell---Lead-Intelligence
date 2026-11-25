@@ -3,6 +3,7 @@ import { toRegex, type Pack } from "@tell/config";
 import { pickContact, titleFitsCompany, type Contact, type Person } from "@tell/people";
 import { airWaterfall, type AirWaterfall, type WaterfallEmail } from "@tell/watchers";
 import { getDb, accounts, people, peopleSearches, emails, suppressionList, and, eq, inArray, sql } from "@tell/db";
+import { upgradeEmails, isSureEmail } from "./email-apis.js";
 
 /**
  * Air Waterfall (the operator's own lookup + email service) in the digest, after Tell's free steps:
@@ -65,34 +66,65 @@ export async function waterfallContacts(
   return { looked, found };
 }
 
-/** What the "Enrich email" cell says after a click (the address itself goes in Email). Pure; exported for tests. */
-export function enrichStatus(r: WaterfallEmail, suppressed = false): string {
+const NO_ANSWER: WaterfallEmail = { email: null, verdict: "not_found", confidence: 0, catchAll: null, foundAt: null, cached: false, credits: 0 };
+/** A bounced or operator-marked address of this person, so the waterfall never offers it again. */
+async function knownInvalid(accountId: string, name: string): Promise<{ address: string; status: "invalid"; note: string } | null> {
+  const [r] = await getDb().select({ address: emails.address }).from(emails).innerJoin(people, eq(people.id, emails.personId))
+    .where(and(eq(people.accountId, accountId), eq(people.fullName, name), eq(emails.status, "invalid"), sql`(${emails.source} = 'bounce' or ${emails.source} like 'operator%')`)).limit(1);
+  return r ? { address: r.address, status: "invalid", note: "marked invalid" } : null;
+}
+
+/** A sure address after a click: the address and who vouched for it (null = nothing we can stand behind). */
+export type SureEmail = { address: string; status: "verified" | "observed"; note: string } | null;
+
+/** Is Air Waterfall's own answer sure? Only "valid" on a domain that isn't catch-all (a catch-all accepts any
+ *  address, so "valid" there proves nothing); likely and risky are guesses (pure; exported for tests). */
+export const waterfallSure = (r: WaterfallEmail): boolean => !!r.email && r.verdict === "valid" && r.catchAll !== true;
+
+/** What the "Enrich email" cell says after a click (the address itself goes in Email, only when it is sure). Pure;
+ *  exported for tests. */
+export function enrichStatus(r: WaterfallEmail, suppressed = false, sure?: SureEmail): string {
   if (suppressed) return "suppressed (do not contact)";
-  if (r.email) return `done: ${r.verdict}, ${Math.round(r.confidence * 100)}%${r.foundAt ? ` (${r.foundAt})` : ""}`;
+  const s = sure === undefined ? (waterfallSure(r) ? { note: "" } : null) : sure;
+  // who vouched: "verified (QuickEmailVerification)" / "found by Hunter (score 91)" -> the service's name
+  const by = s?.note.match(/^verified \((.+)\)$/)?.[1] ?? s?.note.match(/^found by (\S+)/)?.[1] ?? "";
+  if (s) return `done: verified${by && by !== "Air Waterfall" ? ` (${by})` : r.foundAt ? ` (${r.foundAt})` : ""}`;
+  if (r.email) return `no verified address (${r.catchAll ? "catch-all domain" : r.verdict})`;
   return r.verdict === "invalid" ? "no deliverable address" : "not found";
 }
 
 /**
- * One find-email click: the delivery's contact through /enrich, stored in `emails` (status by verdict, source
- * "air-waterfall:<verdict>"). Suppressed addresses are never returned.
+ * One find-email click: the delivery's contact through /enrich. Only a sure answer comes back: Air Waterfall's "valid"
+ * on a domain that isn't catch-all, or (for its likely / risky answers, or none) our own verifiers and finders
+ * (upgradeEmails: QEV, InboxTrue, Hunter, Prospeo, Apollo, inside their caps). A guess is stored as what it is and
+ * never returned. Suppressed addresses are never returned.
  */
 export async function enrichContact(
-  p: { accountId: string; name: string; role?: string | null }, client: AirWaterfall,
-): Promise<{ result: WaterfallEmail; suppressed: boolean }> {
+  p: { accountId: string; name: string; role?: string | null; linkedin?: string | null }, client: AirWaterfall | null,
+  opts: { upgrade?: typeof upgradeEmails } = {},
+): Promise<{ result: WaterfallEmail; suppressed: boolean; sure: SureEmail }> {
   const db = getDb();
   const [a] = await db.select({ domain: accounts.domain }).from(accounts).where(eq(accounts.id, p.accountId));
   if (!a) throw new Error("account not found");
-  const result = await client.enrich({ ...splitName(p.name), domain: a.domain, role: p.role });
-  let suppressed = false;
-  if (result.email) {
-    const sup = await db.select().from(suppressionList);
-    const hash = createHash("sha256").update(result.email).digest("hex");
-    suppressed = sup.some((r) => r.hashedEmail === hash || r.domain === result.email!.split("@")[1]);
-    const [person] = await db.select({ id: people.id }).from(people).where(and(eq(people.accountId, p.accountId), eq(people.fullName, p.name))).limit(1);
-    if (person && !suppressed) {
-      await db.insert(emails).values({ personId: person.id, address: result.email, status: STORED_STATUS[result.verdict], source: `${SOURCE}:${result.verdict}`, checkedAt: new Date() })
-        .onConflictDoUpdate({ target: [emails.personId, emails.address], set: { status: sql`excluded.status`, source: sql`excluded.source`, checkedAt: sql`excluded.checked_at` } });
-    }
+  // Air Waterfall first when it is configured; its outage or absence leaves our own waterfall
+  const result: WaterfallEmail = client ? await client.enrich({ ...splitName(p.name), domain: a.domain, role: p.role }).catch(() => NO_ANSWER) : NO_ANSWER;
+  const [person] = await db.select({ id: people.id }).from(people).where(and(eq(people.accountId, p.accountId), eq(people.fullName, p.name))).limit(1);
+  const sup = await db.select().from(suppressionList);
+  const isSuppressed = (addr: string) => { const hash = createHash("sha256").update(addr.trim().toLowerCase()).digest("hex"); return sup.some((r) => r.hashedEmail === hash || r.domain === addr.split("@")[1]); };
+  if (result.email && isSuppressed(result.email)) return { result: { ...result, email: null }, suppressed: true, sure: null };
+  if (result.email && person) {
+    await db.insert(emails).values({ personId: person.id, address: result.email, status: waterfallSure(result) ? "verified" : STORED_STATUS[result.verdict], source: `${SOURCE}:${result.verdict}${result.catchAll ? ":catch-all" : ""}`, checkedAt: new Date() })
+      .onConflictDoUpdate({ target: [emails.personId, emails.address], set: { status: sql`excluded.status`, source: sql`excluded.source`, checkedAt: sql`excluded.checked_at` } });
   }
-  return { result: suppressed ? { ...result, email: null } : result, suppressed };
+  let sure: SureEmail = waterfallSure(result) ? { address: result.email!, status: "verified", note: "verified (Air Waterfall)" } : null;
+  if (!sure) {
+    // its guess (or nothing) goes through our verifiers, then the finders: only a verified mailbox comes back
+    const c: Contact = { person: { name: p.name, role: p.role ?? null, source: SOURCE, linkedin: p.linkedin ?? null,
+      email: result.email ? { address: result.email, status: result.verdict === "invalid" ? "invalid" : "likely", note: `Air Waterfall: ${result.verdict}` } : (await knownInvalid(p.accountId, p.name)) }, persona: null, note: "" };
+    const contacts = new Map<string, Contact | null>([[p.accountId, c]]);
+    try { await (opts.upgrade ?? upgradeEmails)(contacts, [p.accountId]); } catch { /* verifiers down: no sure address */ }
+    const e = c.person.email;
+    if (e && isSureEmail(e) && !isSuppressed(e.address)) sure = { address: e.address, status: e.status as "verified" | "observed", note: e.note };
+  }
+  return { result, suppressed: false, sure };
 }

@@ -9,8 +9,9 @@ describe("email upgrades", () => {
     expect(afterVerify(guess, { result: "invalid", acceptAll: false, disposable: false }).status).toBe("invalid");
     expect(afterVerify(guess, { result: "unknown", acceptAll: false, disposable: false })).toEqual(guess);
   });
-  it("a finder's address is verified only when it says so or scores 80+", () => {
-    expect(fromFinder({ address: "a@b.test", score: 91, verified: false }, "Hunter")?.status).toBe("verified");
+  it("a finder's address is verified only when the finder verified it: a high score alone is still a guess", () => {
+    expect(fromFinder({ address: "a@b.test", score: 91, verified: false }, "Hunter")?.status).toBe("likely");
+    expect(fromFinder({ address: "a@b.test", score: 91, verified: true }, "Hunter")?.status).toBe("verified");
     expect(fromFinder({ address: "a@b.test", score: 50, verified: false }, "Hunter")).toEqual({ address: "a@b.test", status: "likely", note: "found by Hunter (score 50)" });
     expect(fromFinder(null, "Prospeo")).toBeNull();
   });
@@ -35,5 +36,63 @@ describe("the second verifier (InboxTrue) never changes a verdict QuickEmailVeri
     }
     expect(afterVerify(guess, { result: "valid", acceptAll: false, disposable: false }).note).toBe("verified (QuickEmailVerification)");
     expect(afterVerify(guess, { result: "valid", acceptAll: false, disposable: false }, "InboxTrue").note).toBe("verified (InboxTrue)");
+  });
+});
+
+import { keepSureEmails, isSureEmail } from "./email-apis.js";
+describe("only sure addresses go out (no pattern guesses)", () => {
+  it("verified and published-for-this-name are sure; likely, guessed, catch-all and invalid are not", () => {
+    expect(isSureEmail({ address: "a@b.test", status: "verified", note: "" })).toBe(true);
+    expect(isSureEmail({ address: "a@b.test", status: "observed", note: "" })).toBe(true);
+    for (const status of ["likely", "guessed", "invalid"] as const) expect(isSureEmail({ address: "a@b.test", status, note: "" })).toBe(false);
+    expect(isSureEmail(null)).toBe(false);
+  });
+  it("strips every unsure address, the main contact and the people under them", () => {
+    const person = (name: string, status: "verified" | "likely" | "guessed") => ({ name, role: null, source: "x", email: { address: `${name}@northwind.test`, status, note: "" } });
+    const contacts = new Map([
+      ["a", { person: person("jo", "likely"), others: [{ persona: "CEO", person: person("max", "verified") }], persona: null, note: "" }],
+      ["b", { person: person("ana", "verified"), persona: null, note: "" }],
+      ["c", { person: person("lee", "guessed"), persona: null, note: "" }],
+      ["d", null],
+    ]);
+    expect(keepSureEmails(contacts)).toBe(2);
+    expect(contacts.get("a")!.person.email).toBeNull();
+    expect(contacts.get("a")!.others![0]!.person.email?.status).toBe("verified");
+    expect(contacts.get("b")!.person.email?.status).toBe("verified");
+    expect(contacts.get("c")!.person.email).toBeNull();
+  });
+});
+
+import { findSureEmail, candidateAddresses, type WaterfallDeps } from "./email-apis.js";
+describe("our own email waterfall", () => {
+  const usage = () => { const m = new Map<string, number>(); return { spentToday: async (s: string) => m.get(s) ?? 0, addSpend: async (s: string, n: number) => { m.set(s, (m.get(s) ?? 0) + n); } }; };
+  const keys = { qev: true, hunter: true, prospeo: true, inboxtrue: false, apollo: false, web: true };
+  const exists = (good: string[], acceptAll = false) => async (a: string) => ({ result: good.includes(a) ? "valid" as const : "invalid" as const, acceptAll, disposable: false });
+  const base = (over: Partial<WaterfallDeps> = {}): WaterfallDeps => ({ keys, usage: usage(), monthUsed: async () => 0, web: async () => [], hunter: async () => null, prospeo: async () => null, ...over });
+  it("tries the usual formats, learned pattern first, and returns the one a verifier confirms", async () => {
+    expect(candidateAddresses("Ravi Sen", "contoso.test", "flast")).toEqual(["rsen@contoso.test", "ravi.sen@contoso.test", "ravi@contoso.test", "ravisen@contoso.test"]);
+    const r = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test" }, base({ verify: exists(["ravi@contoso.test"]) }));
+    expect(r.email).toMatchObject({ address: "ravi@contoso.test", status: "verified" });
+    expect(r.steps).toEqual(["web", "formats"]);
+  });
+  it("a catch-all domain proves nothing: formats stop at once, finders are asked, nothing unsure is called sure", async () => {
+    let hunter = 0;
+    const r = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test" }, base({ verify: exists([], true), hunter: async () => { hunter++; return { address: "ravi.sen@contoso.test", score: 95, verified: false }; } }));
+    expect(r.catchAll).toBe(true);
+    expect(hunter).toBe(1);
+    expect(r.email?.status).not.toBe("verified");
+  });
+  it("a web page's address counts once verified; a finder's address on another domain is ignored", async () => {
+    const r = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test" }, base({ web: async () => [{ address: "r.sen@contoso.test", url: "https://dir.example" }], verify: exists(["r.sen@contoso.test"]) }));
+    expect(r.email).toMatchObject({ address: "r.sen@contoso.test", status: "verified" });
+    const off = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test" }, base({ verify: exists([]), prospeo: async () => ({ address: "ravi@oldjob.test", score: null, verified: true, domain: null }) }));
+    expect(off.email?.status).not.toBe("verified");
+  });
+  it("a bounced address is never tried again, and a finder's verified address is sure", async () => {
+    const checked: string[] = [];
+    const r = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test", current: { address: "ravi.sen@contoso.test", status: "invalid", note: "bounced" } },
+      base({ verify: async (a) => { checked.push(a); return { result: "invalid", acceptAll: false, disposable: false }; }, hunter: async () => ({ address: "rs@contoso.test", score: 70, verified: true }) }));
+    expect(checked).not.toContain("ravi.sen@contoso.test");
+    expect(r.email).toMatchObject({ address: "rs@contoso.test", status: "verified" });
   });
 });
