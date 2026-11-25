@@ -36,6 +36,7 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WRITER_DAILY_CAP_USD: ${{ vars.WRITER_DAILY_CAP_USD || '0.08' }}
           ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}

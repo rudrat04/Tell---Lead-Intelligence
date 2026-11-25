@@ -456,8 +456,6 @@ export async function runCmsNewProviders(deps: Deps & { providers?: (kind: NewPr
 
 /** Operator exports (pnpm niche import <csv>): one row = company, signal type, quote, URL, date (+ optional domain,
  *  region, segment). Parsed here (pure; exported for tests); rows without the required fields are skipped. */
-export interface ImportRow { company: string; signal_type: string; quote: string; url: string; date?: string; domain?: string; region?: string; segment?: string; query?: string }
-
 export function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   let row: string[] = [], cell = "", q = false;

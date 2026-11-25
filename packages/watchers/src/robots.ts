@@ -1,3 +1,4 @@
+import { publicFetch } from "@tell/config";
 /** Minimal robots.txt support (plan 5d: robots.txt respected). Longest-match Allow/Disallow, `*` and `$` wildcards. */
 
 import { botToken, userAgent } from "./identity.js";
@@ -63,7 +64,7 @@ export function isPathAllowed(rules: Rule[], path: string): boolean {
 const cache = new Map<string, Promise<Rule[]>>();
 
 /** Fetches and caches robots.txt per origin. Unreachable/4xx robots.txt = allowed (standard behaviour). */
-export async function robotsAllows(url: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+export async function robotsAllows(url: string, fetchImpl: typeof fetch = publicFetch as typeof fetch): Promise<boolean> {
   const u = new URL(url);
   let rules = cache.get(u.origin);
   if (!rules) {

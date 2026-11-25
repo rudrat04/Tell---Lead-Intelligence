@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { intentProbability, timing, isFastLane } from "./scoring.js";
+import { intentProbability, timing } from "./scoring.js";
 
 describe("intentProbability", () => {
   it("reproduces the Ledgerly walkthrough (~0.79)", () => {
@@ -31,6 +31,4 @@ describe("intentProbability", () => {
 
 describe("timing / fast lane", () => {
   it("halves every 14 days", () => expect(timing(14)).toBeCloseTo(0.5));
-  it("explicit intent is fast lane", () => expect(isFastLane({ explicitIntent: true, maxStrength: 3 })).toBe(true));
-  it("weak single signal is not", () => expect(isFastLane({ explicitIntent: false, maxStrength: 3 })).toBe(false));
 });

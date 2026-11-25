@@ -1,3 +1,4 @@
+import { jobBearer } from "./label-links.js";
 import type { Contact } from "@tell/people";
 import type { ScoreRunResult } from "@tell/pipeline";
 import { describe, emailText, emailDraft, sureEmail, type LeadNote } from "./render.js";
@@ -16,7 +17,8 @@ type Lead = ScoreRunResult["ranking"]["leads"][number];
 export interface TgMessage { text: string; buttons?: { text: string; data: string }[][] }
 
 /** Telegram HTML: only &, < and > need escaping (pure; exported for tests). */
-export const tgEsc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** Telegram HTML escape; `"` too, since URLs go inside href="..." (a quote there would break the message) */
+export const tgEsc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const link = (url: string, text: string) => (/^https?:\/\//i.test(url) ? `<a href="${tgEsc(url)}">${tgEsc(text)}</a>` : tgEsc(text));
 /** Telegram caps a message at 4,096 characters: cut long text at a line (pure; exported for tests). */
 export function chunks(text: string, max = 4000): string[] {
@@ -119,6 +121,6 @@ export async function sendTelegram(msgs: TgMessage[], opts: { token?: string; ch
 export async function storeTelegramTexts(items: { d: string; brief?: string; draft?: string }[], opts: { url?: string; secret?: string; fetcher?: typeof fetch } = {}): Promise<boolean> {
   const url = opts.url ?? process.env.TELL_LABEL_URL, secret = opts.secret ?? process.env.LABEL_SECRET;
   if (!url || !secret || !items.length) return false;
-  const res = await (opts.fetcher ?? fetch)(`${url.replace(/\/$/, "")}/tg-store`, { method: "POST", headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" }, body: JSON.stringify(items.slice(0, 100)) });
+  const res = await (opts.fetcher ?? fetch)(`${url.replace(/\/$/, "")}/tg-store`, { method: "POST", headers: { authorization: jobBearer(secret), "content-type": "application/json" }, body: JSON.stringify(items.slice(0, 100)) });
   return res.ok;
 }

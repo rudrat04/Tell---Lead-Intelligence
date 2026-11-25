@@ -93,6 +93,3 @@ export function pickSignalPeople(hits: SignalHit[], entity: string | string[], p
   // the closest to the purchase first (stable: the search's own order breaks ties)
   return out.map((p, i) => ({ p, i, s: fitScore(p.role) })).sort((a, b) => b.s - a.s || a.i - b.i).slice(0, max).map((x) => x.p);
 }
-
-/** "Jo Doe, Head of Procurement · Ana Ray, Projects Head" (pure). */
-export const signalPeopleText = (ps: SignalPerson[]) => ps.map((p) => `${p.name}, ${p.role}${p.email ? ` <${p.email.address}>` : ""}`).join(" · ");

@@ -1,3 +1,4 @@
+import { publicFetch } from "@tell/config";
 import { robotsAllows } from "./robots.js";
 import { userAgent } from "./identity.js";
 
@@ -33,7 +34,7 @@ export async function fetchSitePages(domain: string, paths = SITE_MAIL_PATHS, ti
     const url = `https://${domain}${p}`;
     try {
       if (!(await robotsAllows(url))) continue;
-      const res = await fetch(url, { headers: { "user-agent": userAgent(), accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+      const res = await publicFetch(url, { headers: { "user-agent": userAgent(), accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
       if (!res.ok) continue;
       // only pages still on the same site (no redirects off to a hosted page builder or a parent brand)
       const host = new URL(res.url).hostname.replace(/^www\./, "");

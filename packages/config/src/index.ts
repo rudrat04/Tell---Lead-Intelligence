@@ -3,3 +3,4 @@ export * from "./load.js";
 export * from "./fixture.js";
 export * from "./r2.js";
 export * from "./wiring.js";
+export * from "./net.js";

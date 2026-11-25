@@ -28,7 +28,8 @@
  *   es:<id>          find the emails of the people at the signal's company (the same entry, with signal: true)
  *   cd:<id>          create draft (queued as draft:<id>, drafts.yml dispatched; the Sheet's /cd link does the same)
  *   br:<id> / dr:<id> send the brief / the email draft, which the digest stored with POST /tg-store (bearer LABEL_SECRET)
- * Extra secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TG_WEBHOOK_SECRET.
+ * Extra secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TG_WEBHOOK_SECRET, JOB_SECRET (the jobs' bearer for the read
+ * endpoints; LABEL_SECRET only signs links).
  */
 
 // cron expression (UTC) -> workflow file to dispatch
@@ -68,17 +69,32 @@ function sameText(a, b) {
   for (let i = 0; i < a.length; i++) x |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return x === 0;
 }
-async function valid(env, d, v, s) {
-  return !!env.LABEL_SECRET && UUID.test(d ?? "") && LABELS.has(v) && sameText(s, await sign(env.LABEL_SECRET, d, v));
+/** Links carry the day they were issued (`t`, days since 1970) inside the signature and work for LINK_DAYS after it,
+ *  so a forwarded or leaked link stops working on its own. Links made before this (no `t`) keep working until
+ *  OLD_LINKS_UNTIL, so the ones already in your Sheet and messages aren't broken. */
+const LINK_DAYS = 45;
+const OLD_LINKS_UNTIL = Date.parse("2027-01-31T00:00:00Z");
+async function signedOk(env, d, action, t, s, now = Date.now()) {
+  if (!env.LABEL_SECRET || !UUID.test(d ?? "")) return false;
+  if (t == null || t === "") return now < OLD_LINKS_UNTIL && sameText(s, await sign(env.LABEL_SECRET, d, action));
+  if (!/^\d{4,6}$/.test(String(t))) return false;
+  const today = Math.floor(now / 86_400_000), day = Number(t);
+  if (day > today + 1 || today - day > LINK_DAYS) return false;
+  return sameText(s, await sign(env.LABEL_SECRET, d, `${action}|${day}`));
+}
+/** The jobs' bearer for the read endpoints: JOB_SECRET (LABEL_SECRET only signs links; it is the bearer until JOB_SECRET is set) */
+const jobAuth = (request, env) => { const k = env.JOB_SECRET || env.LABEL_SECRET; return !!k && sameText(request.headers.get("authorization") ?? "", `Bearer ${k}`); };
+async function valid(env, d, v, s, t) {
+  return LABELS.has(v) && signedOk(env, d, v, t, s);
 }
 
 /** side "signal" = the people at the signal's company (its own signature, so a contact link can't ask for it) */
-async function validEnrich(env, d, s, side = "person") {
-  return !!env.LABEL_SECRET && UUID.test(d ?? "") && sameText(s, await sign(env.LABEL_SECRET, d, side === "signal" ? "enrich-signal" : "enrich"));
+async function validEnrich(env, d, s, side = "person", t) {
+  return signedOk(env, d, side === "signal" ? "enrich-signal" : "enrich", t, s);
 }
 
-async function validDraft(env, d, s) {
-  return !!env.LABEL_SECRET && UUID.test(d ?? "") && sameText(s, await sign(env.LABEL_SECRET, d, "draft"));
+async function validDraft(env, d, s, t) {
+  return signedOk(env, d, "draft", t, s);
 }
 
 /** Read or ack queued requests ("<prefix>:<delivery id>" keys) for a job holding the secret. */
@@ -103,16 +119,16 @@ async function queue(request, env, prefix) {
 async function enrich(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "GET") {
-    const d = url.searchParams.get("d"), s = url.searchParams.get("s"), side = url.searchParams.get("side") === "signal" ? "signal" : "person";
-    if (!(await validEnrich(env, d, s, side))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    const d = url.searchParams.get("d"), s = url.searchParams.get("s"), t = url.searchParams.get("t") ?? "", side = url.searchParams.get("side") === "signal" ? "signal" : "person";
+    if (!(await validEnrich(env, d, s, side, t))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
     return page("Find email", `<p>${side === "signal" ? "Find the work emails of the people on the signal's side?" : "Find their work emails?"}</p><p style="color:#6b7280;font-size:14px">Runs the email waterfall once (free checks first, then finders that bill only on a find). Only a verified address is written.</p>
-<form method="post" action="/e"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}"><input type="hidden" name="side" value="${side}">
+<form method="post" action="/e"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}"><input type="hidden" name="side" value="${side}"><input type="hidden" name="t" value="${t}">
 <button style="font-size:18px;padding:12px 24px;border-radius:8px;border:0;background:#1d4ed8;color:#fff">Find email</button></form>`);
   }
   if (request.method === "POST") {
     const f = await request.formData();
-    const d = f.get("d"), s = f.get("s"), side = f.get("side") === "signal" ? "signal" : "person";
-    if (!(await validEnrich(env, d, s, side))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    const d = f.get("d"), s = f.get("s"), t = f.get("t") ?? "", side = f.get("side") === "signal" ? "signal" : "person";
+    if (!(await validEnrich(env, d, s, side, t))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
     // one dispatch per minute at most: a run processes every queued request
     await queueEnrich(env, ctx, d, side);
     return page("Finding email", "<p>Finding the email now. It appears in your Sheet's <b>Enrich email</b> column in about 2 minutes.</p>");
@@ -148,18 +164,18 @@ async function queueDraft(env, ctx, d) {
 async function createDraft(request, env, ctx) {
   const url = new URL(request.url);
   if (request.method === "GET") {
-    const d = url.searchParams.get("d"), s = url.searchParams.get("s");
-    if (!(await validDraft(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    const d = url.searchParams.get("d"), s = url.searchParams.get("s"), t = url.searchParams.get("t") ?? "";
+    if (!(await validDraft(env, d, s, t))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
     return page("Create draft", `<p>Write the opening email for this lead?</p><p style="color:#6b7280;font-size:14px">One draft, checked against the lead's facts. It replaces this link in your Sheet's <b>Email draft</b> column.</p>
-<form method="post" action="/cd"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}">
+<form method="post" action="/cd"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}"><input type="hidden" name="t" value="${t}">
 <button style="font-size:18px;padding:12px 24px;border-radius:8px;border:0;background:#1d4ed8;color:#fff">Create draft</button></form>`);
   }
   if (request.method === "POST") {
     const f = await request.formData();
-    const d = f.get("d"), s = f.get("s");
-    if (!(await validDraft(env, d, s))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
+    const d = f.get("d"), s = f.get("s"), t = f.get("t") ?? "";
+    if (!(await validDraft(env, d, s, t))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
     await queueDraft(env, ctx, d);
-    return page("Writing the draft", "<p>Writing it now. It appears in your Sheet's <b>Email draft</b> column (and on Telegram) in about 2 minutes.</p>");
+    return page("Writing the draft", "<p>Writing it now. It arrives in your inbox (and your Sheet's <b>Email draft</b> column) in about 2 minutes.</p>");
   }
   return new Response("method not allowed", { status: 405 });
 }
@@ -210,7 +226,7 @@ async function telegram(request, env, ctx) {
 /** The digest stores each lead's brief and draft here for the Telegram buttons (bearer LABEL_SECRET, kept 30 days). */
 async function tgStore(request, env) {
   if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
-  if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
+  if (!jobAuth(request, env)) return new Response("forbidden", { status: 403 });
   const items = ((await request.json().catch(() => [])) ?? []).filter((x) => x && UUID.test(x.d ?? "")).slice(0, 100);
   for (const x of items) await env.LABELS.put(`tgtext:${x.d}`, JSON.stringify({ brief: typeof x.brief === "string" ? x.brief.slice(0, 20000) : null, draft: typeof x.draft === "string" ? x.draft.slice(0, 8000) : null }), { expirationTtl: 60 * 60 * 24 * 30 });
   return Response.json({ stored: items.length });
@@ -221,17 +237,17 @@ async function labels(request, env, ctx) {
   if (url.pathname === "/tg") return telegram(request, env, ctx);
   if (url.pathname === "/tg-store") return tgStore(request, env);
   if (url.pathname === "/enrich-requests" || url.pathname === "/enrich-requests/ack") {
-    if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
+    if (!jobAuth(request, env)) return new Response("forbidden", { status: 403 });
     return queue(request, env, "enrich");
   }
   if (url.pathname === "/e") return enrich(request, env, ctx);
   if (url.pathname === "/cd") return createDraft(request, env, ctx);
   if (url.pathname === "/draft-requests" || url.pathname === "/draft-requests/ack") {
-    if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
+    if (!jobAuth(request, env)) return new Response("forbidden", { status: 403 });
     return queue(request, env, "draft");
   }
   if (url.pathname === "/taps" || url.pathname === "/taps/ack") {
-    if (!env.LABEL_SECRET || !sameText(request.headers.get("authorization") ?? "", `Bearer ${env.LABEL_SECRET}`)) return new Response("forbidden", { status: 403 });
+    if (!jobAuth(request, env)) return new Response("forbidden", { status: 403 });
     if (url.pathname === "/taps/ack") {
       // the sync has stored these taps: delete them so a label you later clear in the Sheet isn't refilled
       if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
@@ -250,16 +266,16 @@ async function labels(request, env, ctx) {
   }
   if (url.pathname !== "/l") return null;
   if (request.method === "GET") {
-    const d = url.searchParams.get("d"), v = url.searchParams.get("v"), s = url.searchParams.get("s");
-    if (!(await valid(env, d, v, s))) return page("Link not valid", "<p>This label link isn't valid.</p>", 400);
+    const d = url.searchParams.get("d"), v = url.searchParams.get("v"), s = url.searchParams.get("s"), t = url.searchParams.get("t") ?? "";
+    if (!(await valid(env, d, v, s, t))) return page("Link not valid", "<p>This label link isn't valid.</p>", 400);
     return page("Label this lead", `<p>Mark this lead as <b>${v === "good" ? "Good 👍" : "Bad 👎"}</b>?</p>
-<form method="post" action="/l"><input type="hidden" name="d" value="${d}"><input type="hidden" name="v" value="${v}"><input type="hidden" name="s" value="${s}">
+<form method="post" action="/l"><input type="hidden" name="d" value="${d}"><input type="hidden" name="v" value="${v}"><input type="hidden" name="s" value="${s}"><input type="hidden" name="t" value="${t}">
 <button style="font-size:18px;padding:12px 24px;border-radius:8px;border:0;background:${v === "good" ? "#065f46" : "#991b1b"};color:#fff">Yes, ${v}</button></form>`);
   }
   if (request.method === "POST") {
     const f = await request.formData();
-    const d = f.get("d"), v = f.get("v"), s = f.get("s");
-    if (!(await valid(env, d, v, s))) return page("Link not valid", "<p>This label link isn't valid.</p>", 400);
+    const d = f.get("d"), v = f.get("v"), s = f.get("s"), t = f.get("t") ?? "";
+    if (!(await valid(env, d, v, s, t))) return page("Link not valid", "<p>This label link isn't valid.</p>", 400);
     await env.LABELS.put(`tap:${d}`, JSON.stringify({ v, at: new Date().toISOString() }), { expirationTtl: 60 * 60 * 24 * 30 });
     return page("Saved", `<p>Saved as <b>${v}</b>. It reaches your Sheet with tomorrow's digest run.</p>`);
   }

@@ -420,6 +420,3 @@ export function signalSummary(evidence: Evidence[]): string {
     .map(([t, n]) => `${SIGNAL_LABEL[t] ?? t.replace(/_/g, " ")}${n > 1 ? ` ×${n}` : ""}`).join(", ");
 }
 
-export function gigSheetRow(g: DigestGig, date: string): string[] {
-  return [date, g.title, g.company ?? "", g.employmentType ?? "", g.location ?? "", g.applyUrl ?? g.url, `${SOURCE_NAME[g.source] ?? g.source}: ${g.url}`, "", "", g.id];
-}

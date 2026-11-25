@@ -154,15 +154,6 @@ export async function fetchRecalls(kind: Recall["kind"], since: Date, now = new 
   return parseRecalls(kind, ((await res.json()) as { results?: unknown[] }).results ?? []);
 }
 
-/** Other 510(k) holders for a device product code (competitors of a recalling firm). */
-export async function fetchProductCodeHolders(code: string, apiKey = process.env.OPENFDA_API_KEY): Promise<{ applicant: string; kNumber: string; country: string; url: string }[]> {
-  const res = await fetch(`https://api.fda.gov/device/510k.json?search=product_code:${encodeURIComponent(code)}+AND+decision_date:%5B20200101+TO+20991231%5D&limit=100${apiKey ? `&api_key=${apiKey}` : ""}`, { headers: { "user-agent": userAgent() }, signal: AbortSignal.timeout(45_000) });
-  if (res.status === 404) return [];
-  if (!res.ok) throw new Error(`openFDA 510k ${res.status}`);
-  const rows = (((await res.json()) as { results?: Record<string, string>[] }).results ?? []);
-  return rows.filter((r) => r.applicant && r.k_number).map((r) => ({ applicant: r.applicant!.trim(), kNumber: r.k_number!, country: r.country_code ?? "", url: `https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfpmn/pmn.cfm?ID=${r.k_number}` }));
-}
-
 // ------------------------------------------------------------------------------------------------ Maps (websites)
 
 export interface PlaceHit { name: string; website: string | null; address: string }

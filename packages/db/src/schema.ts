@@ -296,14 +296,6 @@ export const deletionRequests = pgTable("deletion_requests", {
   completedAt: ts("completed_at"),
 });
 
-export const configVersions = pgTable("config_versions", {
-  id: id(),
-  gitSha: text("git_sha").notNull(),
-  status: text("status").notNull(), // champion|challenger|retired
-  metrics: jsonb("metrics"),
-  promotedAt: ts("promoted_at"),
-});
-
 export const trendSnapshots = pgTable("trend_snapshots", {
   id: id(),
   period: text("period").notNull(), // week|month

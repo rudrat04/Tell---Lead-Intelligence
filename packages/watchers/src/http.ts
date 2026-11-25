@@ -1,3 +1,4 @@
+import { publicFetch } from "@tell/config";
 import { createHash } from "node:crypto";
 
 import { userAgent } from "./identity.js";
@@ -13,7 +14,7 @@ export async function politeGet(url: string, minGapMs = 1000): Promise<string> {
   for (let attempt = 0; ; attempt++) {
     let res: Response;
     try {
-      res = await fetch(url, { headers: { "user-agent": userAgent(), accept: "*/*" }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
+      res = await publicFetch(url, { headers: { "user-agent": userAgent(), accept: "*/*" }, redirect: "follow", signal: AbortSignal.timeout(30_000) });
     } catch (e) {
       // a timeout or dropped connection is usually momentary (the HN API does this a few times a day): one more try
       if (attempt < 1) { await new Promise((r) => setTimeout(r, 2_000)); lastHit.set(host, Date.now()); continue; }

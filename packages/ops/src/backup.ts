@@ -10,7 +10,7 @@ import { getDb, sql } from "@tell/db";
  */
 export const BACKUP_TABLES = [
   "labels", "deliveries", "people", "people_searches", "plays_matched", "signals", "accounts",
-  "suppression_list", "deletion_requests", "config_versions", "exemplars", "analyses", "gigs",
+  "suppression_list", "deletion_requests", "exemplars", "analyses", "gigs",
 ] as const;
 
 const DAILY_KEEP = 30;

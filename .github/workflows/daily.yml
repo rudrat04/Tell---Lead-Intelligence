@@ -14,7 +14,6 @@ concurrency:
 
 permissions:
   contents: read
-  actions: write # keep-alive re-enables scheduled workflows
 
 jobs:
   daily:
@@ -132,6 +131,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
@@ -155,6 +155,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
@@ -199,6 +200,7 @@ jobs:
           # one-tap Good/Bad links (Worker URL + signing secret); without them the digest has no buttons
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # public GitHub org commits for email patterns (5000 req/h instead of 60)
@@ -242,6 +244,7 @@ jobs:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -260,6 +263,7 @@ jobs:
           ANALYST_EFFORT: ${{ vars.ANALYST_EFFORT || 'low' }}
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
+          JOB_SECRET: ${{ secrets.JOB_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
@@ -299,14 +303,3 @@ jobs:
         run: pnpm ops
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
-      # GitHub disables scheduled workflows after 60 days without repository activity.
-      # Re-enabling them through the API keeps them alive without commits.
-      - name: Keep scheduled workflows alive
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for wf in tick.yml boards.yml daily.yml; do
-            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$wf/enable" >/dev/null && echo "enabled $wf"
-          done

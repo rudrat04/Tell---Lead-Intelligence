@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 // @ts-expect-error plain JS Worker module
 import worker from "./worker.js";
 
@@ -32,6 +32,10 @@ describe("scheduler worker", () => {
     await expect(run("0 2 * * *", 403)).rejects.toThrow("HTTP 403");
   });
 });
+
+// a fixed clock: links made before issue days (no `t`) are only valid until 31 Jan 2027
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-26T08:00:00Z")); });
+afterEach(() => { vi.useRealTimers(); });
 
 describe("one-tap labels", () => {
   const D = "11111111-2222-4333-8444-555555555555";
@@ -159,5 +163,38 @@ describe("telegram buttons", () => {
     expect((await worker.fetch(new Request("https://w.test/draft-requests"), e, ctx)).status).toBe(403);
     const list = await (await worker.fetch(new Request("https://w.test/draft-requests", { headers: { authorization: "Bearer s3cret" } }), e, ctx)).json();
     expect(list.map((x: { d: string }) => x.d)).toEqual([D]);
+  });
+});
+
+describe("links expire and the jobs have their own secret", () => {
+  const D = "11111111-2222-4333-8444-555555555555";
+  const kv = () => { const m = new Map<string, string>(); return { m, put: async (k: string, v: string) => void m.set(k, v), get: async (k: string) => JSON.parse(m.get(k) ?? "null"), delete: async (k: string) => void m.delete(k),
+    list: async ({ prefix }: { prefix: string }) => ({ keys: [...m.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }) }; };
+  const req = (path: string, init?: RequestInit) => new Request(`https://w.test${path}`, init);
+  const today = () => Math.floor(Date.now() / 86_400_000);
+  it("a link with its issue day works for 45 days, then never; a forged day fails the signature", async () => {
+    const { sign } = await import("./sign.js");
+    const env = { LABEL_SECRET: "s3cret", LABELS: kv() };
+    const t = today(), s = await sign("s3cret", D, `good|${t}`);
+    expect((await worker.fetch(req(`/l?d=${D}&v=good&t=${t}&s=${s}`), env)).status).toBe(200);
+    expect((await worker.fetch(req(`/l?d=${D}&v=good&t=${t + 3}&s=${s}`), env)).status).toBe(400); // day changed, signature no longer matches
+    const old = t - 46, so = await sign("s3cret", D, `good|${old}`);
+    expect((await worker.fetch(req(`/l?d=${D}&v=good&t=${old}&s=${so}`), env)).status).toBe(400);
+    const ok = t - 45, sk = await sign("s3cret", D, `draft|${ok}`);
+    expect((await worker.fetch(req(`/cd?d=${D}&t=${ok}&s=${sk}`), env)).status).toBe(200);
+  });
+  it("old links without a day stop working after 31 Jan 2027", async () => {
+    const { sign } = await import("./sign.js");
+    const env = { LABEL_SECRET: "s3cret", LABELS: kv() };
+    const s = await sign("s3cret", D, "enrich");
+    expect((await worker.fetch(req(`/e?d=${D}&s=${s}`), env)).status).toBe(200);
+    vi.setSystemTime(new Date("2027-02-01T00:00:00Z"));
+    expect((await worker.fetch(req(`/e?d=${D}&s=${s}`), env)).status).toBe(400);
+  });
+  it("with JOB_SECRET set, the read endpoints take only it (the link secret no longer opens them)", async () => {
+    const env = { LABEL_SECRET: "s3cret", JOB_SECRET: "j0b", LABELS: kv() };
+    expect((await worker.fetch(req("/taps", { headers: { authorization: "Bearer s3cret" } }), env)).status).toBe(403);
+    expect((await worker.fetch(req("/taps", { headers: { authorization: "Bearer j0b" } }), env)).status).toBe(200);
+    expect((await worker.fetch(req("/enrich-requests", { headers: { authorization: "Bearer s3cret" } }), env)).status).toBe(403);
   });
 });

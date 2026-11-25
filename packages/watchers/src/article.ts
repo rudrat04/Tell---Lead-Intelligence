@@ -1,3 +1,4 @@
+import { publicFetch } from "@tell/config";
 import * as cheerio from "cheerio";
 import { robotsAllows } from "./robots.js";
 import { userAgent } from "./identity.js";
@@ -32,7 +33,7 @@ export async function readArticle(url: string, timeoutMs = 15_000): Promise<{ ur
   if ((u.protocol !== "https:" && u.protocol !== "http:") || BLOCKED_HOSTS.test(u.hostname) || isRecordUrl(url)) return null;
   if (!(await robotsAllows(u.toString()))) return null;
   try {
-    const res = await fetch(u, { headers: { "user-agent": userAgent(), accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
+    const res = await publicFetch(u, { headers: { "user-agent": userAgent(), accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok || !/html/i.test(res.headers.get("content-type") ?? "html")) return null;
     const text = articleText((await res.text()).slice(0, 3_000_000));
     return text.length >= 200 ? { url: res.url, text } : null;

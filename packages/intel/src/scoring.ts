@@ -38,13 +38,3 @@ export function timing(daysSinceNewest: number, halfLife = 14): number {
 
 export const priority = (intent: number, fit: number, timingScore: number) => intent * fit * timingScore;
 
-export interface FastLaneInput {
-  explicitIntent: boolean;
-  maxStrength: number;
-  provenPlayPrecision?: number; // best matched play's measured precision
-}
-
-/** Fast lane (8d-2): strong single signals skip the combined threshold. Still must pass fit + critic. */
-export function isFastLane(i: FastLaneInput): boolean {
-  return i.explicitIntent || i.maxStrength >= 5 || (i.provenPlayPrecision ?? 0) > 0.6;
-}

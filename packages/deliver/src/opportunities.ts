@@ -8,7 +8,7 @@ import { assignDeliveryIds, enrichLink, enrichSignalLink, draftLink, fetchDraftR
 import type { SignalPerson } from "@tell/intel";
 import { emailCells, fillColumnById, ensureLeadHeaders, type OppRow } from "./sheets.js";
 import { appendPendingLeads } from "./sheet-sync.js";
-import { sendTelegram, storeTelegramTexts, telegramConfigured, tgEsc, type TgMessage } from "./telegram.js";
+import { sendTelegram, telegramConfigured, tgEsc, type TgMessage } from "./telegram.js";
 import { greeting, emailText, sureEmail } from "./render.js";
 import { gmailSender, type Sender } from "./gmail.js";
 
@@ -323,7 +323,6 @@ export async function runOpportunityDigest(opts: { pack: Pack; dryRun?: boolean;
   }
   let telegram = 0;
   if (pack.delivery.channels.includes("telegram") && telegramConfigured()) {
-    if (real) await storeTelegramTexts(ranked.leads.map((l) => ({ d: ids.get(l.account.id)!, brief: oppBrief(l, now) }))).catch(() => false);
     const head: TgMessage = { text: `${opts.test ? "[TEST] " : ""}<b>${ranked.leads.length} opportunit${ranked.leads.length === 1 ? "y lead" : "y leads"} for ${tgEsc(day)}</b>\n<i>Each signal, then the businesses that can act on it. Tap Create draft to write the email.</i>` };
     // one message per signal, then each business that can act on it (federal recompetes: one message each, as before)
     const msgs: TgMessage[] = [head];
@@ -400,7 +399,7 @@ export async function runDraftRequests(pack: Pack, opts: { writer?: LlmClient; s
   const db = getDb();
   const rows = await db.select({ id: deliveries.id, row: deliveries.sheetRow, context: deliveries.context }).from(deliveries).where(inArray(deliveries.id, reqs.map((r) => r.d)));
   const w = opts.writer ? { llm: opts.writer as LlmClient & { spent: number }, service: "", cap: 0 } : await draftWriter();
-  const cells = new Map<string, string>(), done: string[] = [], tg: TgMessage[] = [], store: { d: string; brief?: string; draft?: string }[] = [];
+  const cells = new Map<string, string>(), done: string[] = [], tg: TgMessage[] = [];
   for (const req of reqs) {
     const r = rows.find((x) => x.id === req.d);
     const ctx = r?.context as OppContext | null | undefined;
@@ -428,14 +427,12 @@ export async function runDraftRequests(pack: Pack, opts: { writer?: LlmClient; s
     const text = draftText(ctx, d, pack);
     cells.set(req.d, text);
     await db.update(deliveries).set({ sheetRow: { ...((r!.row ?? {}) as OppRow), "Email draft": text } }).where(eq(deliveries.id, req.d));
-    store.push({ d: req.d, brief: ctx.brief, draft: text });
     if (sender) mails.push(draftMail(ctx, d, text, ((r!.row ?? {}) as OppRow)));
     else tg.push({ text: `✍️ <b>Draft for ${tgEsc(ctx.company)}</b>${ctx.contact ? ` (to ${tgEsc(firstName(ctx.contact.name))})` : ""}\n\n${tgEsc(text)}` });
     done.push(req.d);
   }
   const sheetId = pack.delivery.sheet.spreadsheet_id;
   if (sheetId && cells.size) { try { await ensureLeadHeaders(sheetId, "Opportunities"); await fillColumnById(sheetId, "Email draft", cells, true, "Opportunities"); } catch { /* the stored row keeps it */ } }
-  if (store.length) await storeTelegramTexts(store).catch(() => false);
   for (const m of mails) {
     try { await sender!.send({ from: from!, fromName: pack.delivery.digest.from_name, to: to!, ...m }); out.mailed = (out.mailed ?? 0) + 1; }
     catch { tg.push({ text: m.text.slice(0, 3500) }); } // mail failed: the draft still reaches you

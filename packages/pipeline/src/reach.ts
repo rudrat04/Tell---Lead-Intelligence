@@ -3,9 +3,6 @@ import { rankAccounts, rankByRegionGroups, enterpriseTitle, displayScore, withBu
 import type { Contact } from "@tell/people";
 import type { ScoredAccount } from "./score.js";
 
-/** Reach factors are on when any multiplier in the pack's icp.reach is below 1 (the buyer part is always scored). */
-export const reachEnabled = (pack: Pack) => Object.entries(pack.icp.reach).some(([k, v]) => (k === "warm_path" ? v > 1 : v < 1));
-
 /** Persona titles that own each lead's problem, from its strongest play that names any. */
 export function preferredPersonas(rows: RankInput<ScoredAccount>[]): Map<string, string[]> {
   return new Map(rows.flatMap((r) => { const p = r.score.plays.find((x) => x.personas?.length); return p ? [[r.account.id, p.personas!]] : []; }));
