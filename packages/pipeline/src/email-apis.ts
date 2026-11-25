@@ -45,7 +45,7 @@ export function keepSureEmails(contacts: Map<string, Contact | null>): number {
 }
 const splitName = (n: string) => { const w = n.replace(/\s+/g, " ").trim().split(" "); return w.length >= 2 ? { first: w[0]!, last: w[w.length - 1]! } : null; };
 
-async function monthUsed(service: string): Promise<number> {
+export async function finderMonthUsed(service: string): Promise<number> {
   const month = new Date().toISOString().slice(0, 7);
   return Number((await getDb().select({ n: sql<number>`coalesce(sum(${usageDaily.used}), 0)` }).from(usageDaily).where(and(eq(usageDaily.service, service), sql`${usageDaily.day}::text like ${`${month}%`}`)))[0]?.n ?? 0);
 }
@@ -79,26 +79,35 @@ export interface WaterfallDeps {
 }
 export interface WaterfallResult { email: Email | null; source: string; steps: string[]; catchAll: boolean }
 
+/** Apollo answered 403 (people/match is not in its plan): not asked again in this process */
+let apolloBlocked = false;
+
 /**
  * Tell's own email waterfall for one person: the first SURE address, or the best unsure one for the record (never shown).
- *   1. the address we already have (published, pattern, Air Waterfall's guess) -> QuickEmailVerification, then InboxTrue
- *   2. web search: the quoted name + "@domain" in public pages (Serper, Tavily when it fails) -> verified
- *   3. the usual formats (learned pattern first, EMAIL_PERMUTATIONS of them) -> each verified until one exists; stopped
- *      at once on a catch-all domain (it accepts any address, so no check there means anything)
- *   4. finders: Hunter, Prospeo (Enrich Person, verified only; by LinkedIn when we have it), Apollo; a finder's
- *      unverified answer goes through the verifiers too
- * Every call is counted in usage_daily before it is made (qev, inboxtrue, serper_email, hunter, prospeo, apollo); a
- * missing key skips that step. Free steps first, the finders' small monthly allowances last.
+ * Finders answer with a verified address or nothing, so they go first; the verifiers (QuickEmailVerification, then
+ * InboxTrue only when QEV gives no verdict) are only for addresses that are still unsure.
+ *   0. what we have: verified = done; bounced / operator-marked = never tried again
+ *   1. what we have but unsure (published, a pattern, an older finder's guess) -> verifiers
+ *   2. finders, free on a miss: Prospeo (Enrich Person, verified emails only; by LinkedIn when known), Hunter (its own
+ *      verification), Apollo (skipped for the run after a 403); a verified address on the company's domain = done,
+ *      an unverified one waits for step 3
+ *   3. the finders' unverified answers -> verifiers
+ *   4. web search: the quoted name + "@domain" in public pages (Serper, Tavily when it fails) -> verifiers
+ *   5. the usual formats (learned pattern first, EMAIL_PERMUTATIONS of them) -> verifiers, stopped at once on a
+ *      catch-all domain (it accepts any address, so no check there means anything)
+ * Verifier and search calls are counted in usage_daily before they are made (qev, inboxtrue, serper_email); a finder
+ * only when it found an address (prospeo, hunter, apollo: a miss costs nothing there). A missing key skips that step.
  */
 export async function findSureEmail(
   p: { name: string; domain: string; linkedin?: string | null; current?: Email | null; learned?: Pattern | null }, deps: WaterfallDeps = {},
 ): Promise<WaterfallResult> {
-  const keys = deps.keys ?? envKeys(), caps = envCaps(), usage = deps.usage ?? neonUsage(), month = deps.monthUsed ?? monthUsed;
+  const keys = deps.keys ?? envKeys(), caps = envCaps(), usage = deps.usage ?? neonUsage(), month = deps.monthUsed ?? finderMonthUsed;
   const steps: string[] = [];
   const name = splitName(p.name), domain = p.domain.toLowerCase();
   let best: Email | null = p.current ?? null, source = "", catchAll = false;
   const sure = (e: Email, src: string): WaterfallResult => ({ email: e, source: src, steps, catchAll });
-  // one address through QEV, then InboxTrue only where QEV gave no verdict
+  const done = (): WaterfallResult => ({ email: best, source, steps, catchAll });
+  // one unsure address through QEV, then InboxTrue only where QEV gave no verdict
   const check = async (x: Email): Promise<{ next: Email; src: string } | null> => {
     let v: Verification | null = null, by = "QuickEmailVerification", src = "quickemailverification";
     if (keys.qev && (await usage.spentToday("qev")) < caps.qev) { await usage.addSpend("qev", 1, caps.qev); v = await (deps.verify ?? verifyEmail)(x.address).catch(() => null); }
@@ -112,11 +121,10 @@ export async function findSureEmail(
     return next.status === x.status && next.note === x.note ? null : { next, src };
   };
   const tried = new Set<string>();
-  /** verify one candidate; a sure answer ends the waterfall */
+  /** verify one unsure candidate; a sure answer ends the waterfall */
   const attempt = async (x: Email, src: string): Promise<Email | null> => {
     if (tried.has(x.address)) return null;
     tried.add(x.address);
-    if (x.status === "verified") return x;
     const r = await check(x);
     if (r?.next.status === "verified") { source = r.src; return r.next; }
     if (r?.next.status === "invalid") { if (!best || best.address === x.address) { best = r.next; source = r.src; } return null; }
@@ -124,21 +132,42 @@ export async function findSureEmail(
     return null;
   };
 
-  // a bounced (or operator-marked) address is never tried again
+  // 0. what we have
+  if (p.current?.status === "verified") return sure(p.current, "");
   if (p.current?.status === "invalid") tried.add(p.current.address);
-  // 1. what we have
-  if (p.current && p.current.status !== "invalid") {
+  // 1. what we have, unsure: the verifiers decide
+  else if (p.current) {
     steps.push("current");
-    if (p.current.status === "verified") return sure(p.current, "");
+    tried.add(p.current.address);
     const r = await check(p.current);
     if (r?.next.status === "invalid") { best = r.next; source = r.src; }
-    else if (p.current.status === "observed") return sure(p.current, ""); // published for this name, not failed
     else if (r?.next.status === "verified") return sure(r.next, r.src);
-    tried.add(p.current.address);
+    else if (p.current.status === "observed") return sure(p.current, ""); // published for this name, not failed
   }
-  if (!name) return { email: best, source, steps, catchAll };
+  if (!name) return done();
 
-  // 2. public web pages that show this person's address
+  // 2. finders that answer with a verified address or nothing (free on a miss)
+  const unverified: { e: Email; src: string }[] = [];
+  const finders: ["prospeo" | "hunter" | "apollo", string, () => Promise<Found | null>][] = [
+    ["prospeo", "Prospeo", () => (deps.prospeo ?? prospeoFind)(name.first, name.last, domain, undefined, { linkedin: p.linkedin ?? null })],
+    ["hunter", "Hunter", () => (deps.hunter ?? hunterFind)(name.first, name.last, domain)],
+    ["apollo", "Apollo", () => (deps.apollo ?? apolloFind)(name.first, name.last, domain)],
+  ];
+  for (const [k, label, call] of finders) {
+    if (!keys[k] || (k === "apollo" && apolloBlocked) || (await month(k)) >= caps[k]) continue;
+    steps.push(k);
+    const f = fromFinder(await call().catch((e: unknown) => { if (k === "apollo" && /403/.test(String(e))) apolloBlocked = true; return null; }), label);
+    // (a miss is free at all three: only a find uses the monthly allowance)
+    if (f) await usage.addSpend(k, 1, caps[k]);
+    // an address on another domain (an old employer, a personal mailbox) is not this company's
+    if (!f || f.address.split("@")[1] !== domain || tried.has(f.address)) continue;
+    if (f.status === "verified") return sure(f, k);
+    unverified.push({ e: f, src: k });
+  }
+  // 3. the finders' unverified answers: the verifiers decide
+  for (const u of unverified) { const e = await attempt(u.e, u.src); if (e) return sure(e, source || u.src); }
+
+  // 4. public web pages that show this person's address
   if (keys.web && (await usage.spentToday("serper_email")) < caps.web) {
     steps.push("web");
     await usage.addSpend("serper_email", 1, caps.web);
@@ -149,8 +178,8 @@ export async function findSureEmail(
     }
   }
 
-  // 3. the usual formats, each checked by a verifier (stops on a catch-all domain)
-  if (keys.qev || keys.inboxtrue) {
+  // 5. the usual formats, each checked by a verifier (stops on a catch-all domain)
+  if ((keys.qev || keys.inboxtrue) && !catchAll) {
     steps.push("formats");
     for (const a of candidateAddresses(p.name, domain, p.learned ?? null, caps.permutations)) {
       if (catchAll) break;
@@ -158,24 +187,7 @@ export async function findSureEmail(
       if (e) return sure({ ...e, note: `${e.note} · company format` }, source);
     }
   }
-
-  // 4. the finders (small monthly allowances)
-  const finders: [keyof WaterfallKeys, string, () => Promise<Found | null>][] = [
-    ["hunter", "Hunter", () => (deps.hunter ?? hunterFind)(name.first, name.last, domain)],
-    ["prospeo", "Prospeo", () => (deps.prospeo ?? prospeoFind)(name.first, name.last, domain, undefined, { linkedin: p.linkedin ?? null })],
-    ["apollo", "Apollo", () => (deps.apollo ?? apolloFind)(name.first, name.last, domain)],
-  ];
-  for (const [k, label, call] of finders) {
-    if (!keys[k] || (await month(k)) >= caps[k as "hunter" | "prospeo" | "apollo"]) continue;
-    steps.push(k);
-    await usage.addSpend(k, 1, caps[k as "hunter" | "prospeo" | "apollo"]);
-    const f = fromFinder(await call().catch(() => null), label);
-    // a finder's address on another domain (an old employer, a personal mailbox) is not this company's
-    if (!f || f.address.split("@")[1] !== domain) continue;
-    const e = await attempt(f, k);
-    if (e) return sure(e, source || k);
-  }
-  return { email: best, source, steps, catchAll };
+  return done();
 }
 
 export async function upgradeEmails(contacts: Map<string, Contact | null>, leadIds: string[], opts: { write?: boolean; usage?: UsageStore; deps?: WaterfallDeps } = {}): Promise<{ verified: number; found: number; invalid: number; skipped?: string }> {

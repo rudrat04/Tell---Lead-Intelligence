@@ -4,7 +4,7 @@
  *
  * Status, strongest first:
  *   observed: this exact address was seen in public for this person
- *   verified: Air Waterfall confirmed it (mailbox check or an email finder agreeing with the pattern)
+ *   verified: a mailbox check (QuickEmailVerification / InboxTrue) or a finder that verified it (Hunter, Prospeo, Apollo)
  *   likely:   built from a pattern learned from at least one name-matched address at this domain
  *   (no guessed tier: without an observed address or a learned pattern, no email is shown)
  *   invalid:  the domain does not receive mail (no MX or a null MX), or a bounce came back

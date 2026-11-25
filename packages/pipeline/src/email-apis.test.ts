@@ -73,7 +73,8 @@ describe("our own email waterfall", () => {
     expect(candidateAddresses("Ravi Sen", "contoso.test", "flast")).toEqual(["rsen@contoso.test", "ravi.sen@contoso.test", "ravi@contoso.test", "ravisen@contoso.test"]);
     const r = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test" }, base({ verify: exists(["ravi@contoso.test"]) }));
     expect(r.email).toMatchObject({ address: "ravi@contoso.test", status: "verified" });
-    expect(r.steps).toEqual(["web", "formats"]);
+    // finders first (they answer verified or nothing), then the free discovery steps the verifiers check
+    expect(r.steps).toEqual(["prospeo", "hunter", "web", "formats"]);
   });
   it("a catch-all domain proves nothing: formats stop at once, finders are asked, nothing unsure is called sure", async () => {
     let hunter = 0;
@@ -94,5 +95,29 @@ describe("our own email waterfall", () => {
       base({ verify: async (a) => { checked.push(a); return { result: "invalid", acceptAll: false, disposable: false }; }, hunter: async () => ({ address: "rs@contoso.test", score: 70, verified: true }) }));
     expect(checked).not.toContain("ravi.sen@contoso.test");
     expect(r.email).toMatchObject({ address: "rs@contoso.test", status: "verified" });
+  });
+});
+
+describe("the waterfall is smart about checks and credits", () => {
+  const usage = () => { const m = new Map<string, number>(); return { m, spentToday: async (s: string) => m.get(s) ?? 0, addSpend: async (s: string, n: number) => { m.set(s, (m.get(s) ?? 0) + n); } }; };
+  const keys = { qev: true, hunter: true, prospeo: true, inboxtrue: true, apollo: false, web: true };
+  it("a finder's verified address ends it with no verifier call and no later finder", async () => {
+    const u = usage(); let checks = 0, hunter = 0;
+    const r = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test" }, { keys, usage: u, monthUsed: async () => 0,
+      prospeo: async () => ({ address: "ravi.sen@contoso.test", score: null, verified: true, domain: "contoso.test" }), hunter: async () => { hunter++; return null; },
+      verify: async () => { checks++; return null; }, web: async () => [] });
+    expect(r.email).toMatchObject({ address: "ravi.sen@contoso.test", status: "verified" });
+    expect([checks, hunter]).toEqual([0, 0]);
+    expect(u.m.get("prospeo")).toBe(1);
+  });
+  it("a miss costs no finder allowance; an unverified finder answer is checked before the web and the formats", async () => {
+    const u = usage(); const checked: string[] = [];
+    const r = await findSureEmail({ name: "Ravi Sen", domain: "contoso.test" }, { keys, usage: u, monthUsed: async () => 0,
+      prospeo: async () => null, hunter: async () => ({ address: "rsen@contoso.test", score: 70, verified: false }),
+      verify: async (a) => { checked.push(a); return { result: a === "rsen@contoso.test" ? "valid" : "invalid", acceptAll: false, disposable: false }; }, web: async () => [] });
+    expect(r.email).toMatchObject({ address: "rsen@contoso.test", status: "verified" });
+    expect(checked).toEqual(["rsen@contoso.test"]);
+    expect(u.m.get("prospeo")).toBeUndefined();
+    expect(u.m.get("hunter")).toBe(1);
   });
 });

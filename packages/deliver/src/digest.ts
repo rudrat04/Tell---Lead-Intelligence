@@ -1,6 +1,6 @@
 import { leadCap, type Pack } from "@tell/config";
 import {
-  runScoring, istDay, buildMissingPlays, judgeAccounts, nicheStats, contactsFor, attachEmails, upgradeEmails, keepSureEmails, waterfallContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
+  runScoring, istDay, buildMissingPlays, judgeAccounts, nicheStats, contactsFor, attachEmails, upgradeEmails, keepSureEmails, domainContacts, fillCompanyFacts, analyzeLeads, rerankByReach, preferredPersonas, gigsForDigest, markGigsDelivered, regionInScopeSql,
   loadNetwork, attachWarmPaths, championsForDigest, markChampionsShown, checkRoleGaps, type ScoreRunResult, type ChampionMove,
 } from "@tell/pipeline";
 import { getDb, runs, deliveries, jobBoards, usageDaily, accounts, eq, and, sql } from "@tell/db";
@@ -129,11 +129,11 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
     write: !opts.dryRun, searchFor: score.ranking.leads.map((l) => l.account.id), preferred,
   });
   const enrich: string[] = [factsNote, gapNote, ...(playNote ? [playNote] : [])];
-  // Air Waterfall lookup: a lead nobody is known for gets one people search there (it would be dropped otherwise)
+  // Hunter domain search: a lead nobody is known for gets one look at the people Hunter lists there (it would be dropped otherwise)
   try {
-    const w = await waterfallContacts(contacts, score.ranking.leads.map((l) => l.account.id), pack, { write: !opts.dryRun, preferred });
-    enrich.push(w.skipped ? `air-waterfall lookup: ${w.skipped}` : `air-waterfall lookup ${w.found}/${w.looked}`);
-  } catch { enrich.push("air-waterfall lookup failed"); }
+    const w = await domainContacts(contacts, score.ranking.leads.map((l) => l.account.id), pack, { write: !opts.dryRun, preferred });
+    enrich.push(w.skipped ? `hunter people: ${w.skipped}` : `hunter people ${w.found}/${w.looked}`);
+  } catch { enrich.push("hunter people failed"); }
   try { const e = await attachEmails(contacts, { write: !opts.dryRun }); enrich.push(`emails ${JSON.stringify(e.byStatus)} (${e.domains} domains checked)`); }
   catch { enrich.push("emails failed"); /* leads still go out with LinkedIn */ }
   // today's leads only: verify guessed addresses, and find one where there is none (QuickEmailVerification, Hunter, Prospeo)
@@ -141,7 +141,7 @@ export async function runDigest(opts: { pack: Pack; sender: Sender | null; dryRu
   catch { enrich.push("email apis failed"); }
   // never a guess: whatever no verifier or finder confirmed is dropped (the Find email button stays for those)
   enrich.push(`unsure emails dropped: ${keepSureEmails(contacts)}`);
-  // Air Waterfall email enrichment runs only when you click "Find email" (digest button / Sheet column): pnpm enrich:requests
+  // the full email waterfall for anyone still unsure runs only when you click "Find email" (digest button / Sheet column): pnpm enrich:requests
   // warm paths through your own network (pnpm network): shown on the lead, and a reach boost (icp.reach.warm_path)
   let champions: ChampionMove[] = [];
   try {

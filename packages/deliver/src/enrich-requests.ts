@@ -1,6 +1,5 @@
 import type { Pack } from "@tell/config";
 import { getDb, deliveries, inArray, eq, sql } from "@tell/db";
-import { airWaterfall } from "@tell/watchers";
 import { enrichContact, enrichStatus, enrichSignalPeople } from "@tell/pipeline";
 import { signalSideText, type OppContext } from "./opportunities.js";
 import { sendTelegram, tgEsc, type TgMessage } from "./telegram.js";
@@ -10,17 +9,15 @@ import { fillColumnById, ensureLeadHeaders, sheetsCall, storedRow, emailCells, t
 
 /**
  * Find-email clicks (digest button / Sheet "Enrich email" link, queued by the Worker): each delivery's contact goes
- * through Air Waterfall once (then our verifiers and finders when its answer is a guess): only a verified address goes in
+ * through Tell's own email waterfall once (finders first, verifiers only for unsure addresses): only a verified address goes in
  * Email (address only; never a guess, so a risky or likely answer leaves Email empty), Verified gets yes or no, and
  * the link in "Enrich email" becomes a short status (done, not found). A request is acked only once answered,
- * so an Air Waterfall outage is retried by the next run. Returns counts only (Actions logs are public).
+ * so an outage is retried by the next run. Returns counts only (Actions logs are public).
  */
 export async function runEnrichRequests(pack: Pack): Promise<{ status: "ok" | "skipped"; reason?: string; requests: number; answered: number; byVerdict: Record<string, number>; credits: number; sheetCells: number; signalFound?: number }> {
   const out: { status: "ok"; requests: number; answered: number; byVerdict: Record<string, number>; credits: number; sheetCells: number; signalFound?: number } = { status: "ok" as const, requests: 0, answered: 0, byVerdict: {} as Record<string, number>, credits: 0, sheetCells: 0 };
   const base = process.env.TELL_LABEL_URL, secret = process.env.LABEL_SECRET;
   if (!base || !secret) return { ...out, status: "skipped", reason: "TELL_LABEL_URL / LABEL_SECRET not set" };
-  // Air Waterfall when configured, then our own waterfall (verifiers, web search, formats, Hunter, Prospeo, Apollo)
-  const client = airWaterfall();
   const reqs = await fetchEnrichRequests(base, secret);
   out.requests = reqs.length;
   if (!reqs.length) return out;
@@ -53,17 +50,17 @@ export async function runEnrichRequests(pack: Pack): Promise<{ status: "ok" | "s
     }
     if (!d?.accountId || !row.Person) { put(req.d, { "Enrich email": "no contact to look up" }); done.push(req.d); continue; }
     try {
-      const { result, suppressed, sure } = await enrichContact({ accountId: d.accountId, name: row.Person, role: row.Role || null, linkedin: /linkedin\.com\/in\//i.test(row.LinkedIn ?? "") ? row.LinkedIn! : null }, client);
-      const k = sure ? "verified" : result.verdict;
+      const res = await enrichContact({ accountId: d.accountId, name: row.Person, role: row.Role || null, linkedin: /linkedin\.com\/in\//i.test(row.LinkedIn ?? "") ? row.LinkedIn! : null });
+      const { suppressed, sure } = res;
+      const k = sure ? "verified" : res.catchAll ? "catch_all" : "not_found";
       out.byVerdict[k] = (out.byVerdict[k] ?? 0) + 1;
-      out.credits += result.credits;
       // only a sure address goes in Email; a guess leaves Email empty (and clears one written before this rule)
-      const cells: LeadRow = { "Enrich email": enrichStatus(result, suppressed, sure), ...(sure ? emailCells(sure.address, "verified", false) : row.Verified === "yes" ? {} : { Email: "", Verified: "no", Risky: "", "Catch-all": "" }) };
+      const cells: LeadRow = { "Enrich email": enrichStatus(sure, suppressed, { catchAll: res.catchAll }), ...(sure ? emailCells(sure.address, "verified", false) : row.Verified === "yes" ? {} : { Email: "", Verified: "no", Risky: "", "Catch-all": "" }) };
       // everyone else to reach at the company (opportunity leads keep them in the context): looked up on the same click
       const ctx = d.context as OppContext | null | undefined;
       const found: { name: string; role: string | null; linkedin: string | null; email: string | null }[] = [{ name: row.Person, role: row.Role || null, linkedin: row.LinkedIn || null, email: sure?.address ?? (row.Verified === "yes" ? row.Email ?? null : null) }];
       for (const o of (ctx?.others ?? []).slice(0, 3)) {
-        const r = await enrichContact({ accountId: d.accountId, name: o.name, role: o.role, linkedin: o.linkedin }, client).catch(() => null);
+        const r = await enrichContact({ accountId: d.accountId, name: o.name, role: o.role, linkedin: o.linkedin }).catch(() => null);
         found.push({ ...o, email: r && !r.suppressed ? r.sure?.address ?? null : null });
       }
       if (found.length > 1) (cells as Record<string, string>)["Other contacts"] = found.slice(1).map((p) => `${p.name}${p.role ? `, ${p.role}` : ""}${p.email ? ` · ${p.email} (verified)` : ""}${p.linkedin ? ` (${p.linkedin})` : ""}`).join("\n");

@@ -1,5 +1,5 @@
 /**
- * Answer "Find email" clicks (queued by the Worker) through Air Waterfall and write the results into the Sheet.
+ * Answer "Find email" clicks (queued by the Worker) through Tell's own email waterfall and write the results into the Sheet.
  * Dispatched by the Worker right after a click (enrich.yml); the daily run also picks up anything left.
  * Prints counts only (Actions logs are public).
  * Also fills a find-email link into older Sheet rows that have a contact but no email (empty cells only).

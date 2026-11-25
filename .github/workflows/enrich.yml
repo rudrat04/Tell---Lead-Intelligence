@@ -1,8 +1,8 @@
 name: Find email (on click)
 
 # Dispatched by the Cloudflare Worker (infra/scheduler) right after you click "Find email" in the digest or the Sheet.
-# Runs each queued contact through Air Waterfall, then Tell's own waterfall, and writes only a verified address into the
-# Sheet (the lead's contact, or the people on the signal's side).
+# Runs each queued person through Tell's own email waterfall (finders first, verifiers only for unsure addresses) and
+# writes only a verified address into the Sheet (the lead's people, or the people on the signal's side).
 # Public repo: the script prints counts only.
 on:
   workflow_dispatch:
@@ -36,8 +36,6 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
           TELL_LABEL_URL: ${{ vars.TELL_LABEL_URL }}
           LABEL_SECRET: ${{ secrets.LABEL_SECRET }}
-          AIR_WATERFALL_URL: ${{ vars.AIR_WATERFALL_URL || 'https://enrich.f1rstword.com' }}
-          AIR_WATERFALL_API_KEY: ${{ secrets.AIR_WATERFALL_API_KEY }}
           # our own email waterfall (verifiers, web search, finders): only sure addresses are written
           QUICKEMAILVERIFICATION_API_KEY: ${{ secrets.QUICKEMAILVERIFICATION_API_KEY }}
           INBOXTRUE_API_KEY: ${{ secrets.INBOXTRUE_API_KEY }}

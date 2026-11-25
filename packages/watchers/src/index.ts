@@ -21,7 +21,6 @@ export * from "./formd.js";
 export * from "./web-search.js";
 export * from "./jsearch.js";
 export * from "./pagespeed.js";
-export * from "./air-waterfall.js";
 export * from "./funding-news.js";
 export * from "./gov.js";
 export * from "./gov2.js";

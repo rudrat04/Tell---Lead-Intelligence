@@ -42,6 +42,26 @@ export async function hunterFind(first: string, last: string, domain: string, ke
   return parseHunter(await res.json());
 }
 
+/** One person Hunter's domain search lists for a domain: name, title, their address, and whether Hunter verified it. */
+export interface DomainPerson { firstName: string; lastName: string; position: string | null; linkedin: string | null; address: string; verified: boolean }
+/** Hunter domain-search response -> the named people (generic inboxes left out) and whether the domain is catch-all (pure; exported for tests). */
+export function parseHunterDomain(j: unknown): { people: DomainPerson[]; acceptAll: boolean } {
+  const d = (j as { data?: { accept_all?: boolean; emails?: { value?: string; type?: string; first_name?: string | null; last_name?: string | null; position?: string | null; linkedin?: string | null; verification?: { status?: string | null } }[] } } | null)?.data;
+  const people = (d?.emails ?? []).flatMap((e) => (e.value && e.type !== "generic" && e.first_name ? [{
+    firstName: e.first_name.trim(), lastName: (e.last_name ?? "").trim(), position: e.position?.trim() || null, linkedin: e.linkedin && /linkedin\.com\/in\//i.test(e.linkedin) ? e.linkedin : null,
+    address: e.value.toLowerCase(), verified: e.verification?.status === "valid",
+  }] : []));
+  return { people, acceptAll: d?.accept_all === true };
+}
+/** Hunter domain search (1 request per call that returns people, from the same monthly allowance as the finder). */
+export async function hunterDomainSearch(domain: string, key = process.env.HUNTER_API_KEY, limit = 10): Promise<{ people: DomainPerson[]; acceptAll: boolean } | null> {
+  if (!key) return null;
+  const q = new URLSearchParams({ domain, limit: String(limit), type: "personal", api_key: key });
+  const res = await fetch(`https://api.hunter.io/v2/domain-search?${q}`, { signal: AbortSignal.timeout(30_000) });
+  if (!res.ok) return null;
+  return parseHunterDomain(await res.json());
+}
+
 /** Prospeo Enrich Person response (pure; exported for tests). The old /email-finder endpoint was removed (it answers
  *  400 DEPRECATED). With only_verified_email a match is VERIFIED; an unrevealed (masked) address is no answer. The
  *  company's website comes back too, which is how a signal-side contact found by LinkedIn gets its domain. */
@@ -117,6 +137,8 @@ export async function apolloFind(first: string, last: string, domain: string, ke
   if (!key) return null;
   const q = new URLSearchParams({ first_name: first, last_name: last, domain, reveal_personal_emails: "false" });
   const res = await fetcher(`https://api.apollo.io/api/v1/people/match?${q}`, { method: "POST", headers: { "x-api-key": key, "content-type": "application/json", accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+  // 403 = people/match is not in this Apollo plan: said so, so the waterfall stops asking for the rest of the run
+  if (res.status === 403) throw new Error("apollo: not in plan (403)");
   if (!res.ok) return null;
   return parseApollo(await res.json(), domain);
 }

@@ -18,7 +18,7 @@
  *
  * Find-email on click: the digest and the Sheet link to /e?d=<delivery id>&s=<signature of "<id>|enrich">. The confirm
  * page's button POSTs; the request is queued in KV ("enrich:<id>") and enrich.yml is dispatched at once, which runs the
- * person through Air Waterfall and writes the answer into the Sheet. Nothing is enriched without that click.
+ * people through Tell's email waterfall and writes the answer into the Sheet. Nothing is enriched without that click.
  * The job reads /enrich-requests (and acks them) with the secret as a bearer token.
  *
  * Telegram (when the digest's channels include it): Telegram calls POST /tg for button taps (setWebhook with
@@ -105,7 +105,7 @@ async function enrich(request, env, ctx) {
   if (request.method === "GET") {
     const d = url.searchParams.get("d"), s = url.searchParams.get("s"), side = url.searchParams.get("side") === "signal" ? "signal" : "person";
     if (!(await validEnrich(env, d, s, side))) return page("Link not valid", "<p>This link isn't valid.</p>", 400);
-    return page("Find email", `<p>${side === "signal" ? "Find the work emails of the people on the signal's side?" : "Find this person's work email?"}</p><p style="color:#6b7280;font-size:14px">Runs the email waterfall once (free checks first, then finders that bill only on a find). Only a verified address is written.</p>
+    return page("Find email", `<p>${side === "signal" ? "Find the work emails of the people on the signal's side?" : "Find their work emails?"}</p><p style="color:#6b7280;font-size:14px">Runs the email waterfall once (free checks first, then finders that bill only on a find). Only a verified address is written.</p>
 <form method="post" action="/e"><input type="hidden" name="d" value="${d}"><input type="hidden" name="s" value="${s}"><input type="hidden" name="side" value="${side}">
 <button style="font-size:18px;padding:12px 24px;border-radius:8px;border:0;background:#1d4ed8;color:#fff">Find email</button></form>`);
   }

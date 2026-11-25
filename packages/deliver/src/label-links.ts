@@ -37,7 +37,7 @@ export async function fetchTaps(baseUrl: string, secret: string): Promise<Tap[]>
   return j.filter((t) => /^[0-9a-f-]{36}$/i.test(t.d) && (t.v === "good" || t.v === "bad"));
 }
 
-/** Find-email link (the Worker's /e): queues one Air Waterfall lookup for this delivery's contact, only when clicked. */
+/** Find-email link (the Worker's /e): queues one email lookup for this delivery's people, only when clicked. */
 export function enrichLink(baseUrl: string, secret: string, deliveryId: string): string {
   const sig = createHmac("sha256", secret).update(`${deliveryId}|enrich`).digest("hex").slice(0, 32);
   return `${baseUrl.replace(/\/+$/, "")}/e?d=${deliveryId}&s=${sig}`;

@@ -21,7 +21,7 @@ import { upgradeEmails, keepSureEmails } from "./email-apis.js";
 import { attachSignalContacts, type SignalContactDeps } from "./signal-contacts.js";
 import type { SignalPerson } from "@tell/intel";
 import { decisionPower } from "./reach.js";
-import { waterfallContacts } from "./waterfall.js";
+import { domainContacts } from "./waterfall.js";
 import { readSite, type SitePage } from "@tell/watchers";
 import { HaikuClient, checkFit, STAGE_STRENGTH, stageRank, needFor, EVENT_CHECK_VERSION, type FitVerdict, type LlmClient, type EventNeed, type Stage } from "@tell/extract";
 import { eventChecksFor, gateEvent, type EventCheckDeps, type EventToCheck, type GateResult } from "./event-checks.js";
@@ -587,7 +587,7 @@ async function crossEvents(id: string, op: Exclude<OpportunityDef, { kind: "usas
  * The day's opportunity leads: every beneficiary with live matched events, scored, held back when delivered recently
  * with nothing new, the pool searched for the opportunity's buyers, re-scored with the contact, cut at max_leads.
  */
-export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; upgrade?: typeof upgradeEmails; signalContacts?: SignalContactDeps; explain?: LlmClient | null; waterfall?: typeof waterfallContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
+export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; upgrade?: typeof upgradeEmails; signalContacts?: SignalContactDeps; explain?: LlmClient | null; waterfall?: typeof domainContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
   const db = getDb(), now = opts.now ?? new Date(), cfg = pack.opportunities;
   const since = new Date(now.getTime() - cfg.window_days * DAY);
   // a match belongs to the opportunity that reads its event's opportunity with its roster (events_from shares events)
@@ -673,9 +673,9 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   // the opportunity's buyers first (Head of BD / Capture for a recompete), searched only for the pool
   const preferred = new Map(pool.map((l) => [l.account.id, l.opportunity.buyers]));
   // only the opportunity's buyers are searched (one or two searches a company, not every buyer type), so the budget
-  // reaches the whole pool; Air Waterfall's people lookup then tries the companies still without anyone
+  // reaches the whole pool; Hunter's domain search then tries the companies still without anyone
   const contacts = await (opts.contacts ?? contactsFor)(pool.map((l) => l.account.id), pack, { write: opts.write !== false, searchFor: pool.map((l) => l.account.id), maxSearches: cfg.max_people_searches, preferred, onlyPreferred: true });
-  try { await (opts.waterfall ?? waterfallContacts)(contacts, pool.map((l) => l.account.id), pack, { write: opts.write !== false, preferred }); } catch { /* not configured or down */ }
+  try { await (opts.waterfall ?? domainContacts)(contacts, pool.map((l) => l.account.id), pack, { write: opts.write !== false, preferred }); } catch { /* not configured or down */ }
   try { await (opts.emails ?? attachEmails)(contacts, { write: opts.write !== false }); } catch { /* leads still go out with LinkedIn */ }
   let noContact = 0;
   const leads: OppLead[] = [];

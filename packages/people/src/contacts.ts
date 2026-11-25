@@ -113,7 +113,7 @@ export function companyInTitle(title: string): string | null {
   return m?.[1]?.trim() || null;
 }
 
-/** A person found by the company's domain (Air Waterfall discover) whose title names a company: it must be this one
+/** A person found by the company's domain (Hunter's domain search) whose title names a company: it must be this one
  *  (a "Founder | Studio Harbor Design" found for harbor-design.example is someone else). No company named = accepted. */
 export function titleFitsCompany(title: string, company: string, domain: string): boolean {
   const named = companyInTitle(title);
