@@ -59,8 +59,17 @@ export async function runEnrichRequests(pack: Pack): Promise<{ status: "ok" | "s
       out.credits += result.credits;
       // only a sure address goes in Email; a guess leaves Email empty (and clears one written before this rule)
       const cells: LeadRow = { "Enrich email": enrichStatus(result, suppressed, sure), ...(sure ? emailCells(sure.address, "verified", false) : row.Verified === "yes" ? {} : { Email: "", Verified: "no", Risky: "", "Catch-all": "" }) };
+      // everyone else to reach at the company (opportunity leads keep them in the context): looked up on the same click
+      const ctx = d.context as OppContext | null | undefined;
+      const found: { name: string; role: string | null; linkedin: string | null; email: string | null }[] = [{ name: row.Person, role: row.Role || null, linkedin: row.LinkedIn || null, email: sure?.address ?? (row.Verified === "yes" ? row.Email ?? null : null) }];
+      for (const o of (ctx?.others ?? []).slice(0, 3)) {
+        const r = await enrichContact({ accountId: d.accountId, name: o.name, role: o.role, linkedin: o.linkedin }, client).catch(() => null);
+        found.push({ ...o, email: r && !r.suppressed ? r.sure?.address ?? null : null });
+      }
+      if (found.length > 1) (cells as Record<string, string>)["Other contacts"] = found.slice(1).map((p) => `${p.name}${p.role ? `, ${p.role}` : ""}${p.email ? ` · ${p.email} (verified)` : ""}${p.linkedin ? ` (${p.linkedin})` : ""}`).join("\n");
       put(req.d, cells);
       await getDb().update(deliveries).set({ sheetRow: { ...row, ...cells } }).where(eq(deliveries.id, req.d));
+      if (ctx?.kind === "opportunity") tg.push({ text: [`🔎 <b>Emails at ${tgEsc(ctx.company)}</b>`, ...found.map((p) => `• ${tgEsc(p.name)}${p.role ? `, ${tgEsc(p.role)}` : ""}: ${p.email ? `✉️ <code>${tgEsc(p.email)}</code> (verified)` : "no verified address"}`)].join("\n") });
       done.push(req.d);
       out.answered++;
     } catch { /* service asleep or down: left queued for the next run */ }

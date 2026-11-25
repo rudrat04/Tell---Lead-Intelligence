@@ -8,7 +8,8 @@ import { neonUsage, type UsageStore } from "./usage.js";
 const DAY = 86_400_000;
 const USAGE = "exa_signal_contacts";
 
-export interface SignalContactDeps { search?: PeopleSearch | null; usage?: UsageStore }
+export interface SignalContactDeps { search?: PeopleSearch | null; usage?: UsageStore; llm?: (LlmClient & { spent?: number }) | null }
+const OWNERS_USAGE = "haiku_owners";
 
 /**
  * Who to reach at the company behind each lead's signal (news / signal / jobs events; a federal recompete's buyer is
@@ -17,27 +18,33 @@ export interface SignalContactDeps { search?: PeopleSearch | null; usage?: Usage
  * new searches a run and a day (usage_daily "exa_signal_contacts"). Mutates the leads (`signalContacts`). Written on
  * dry runs too (facts, not deliveries), like the event checks. Returns counts only.
  */
+import { HaikuClient, signalOwners, type LlmClient, type OwnerInput, type SignalOwners } from "@tell/extract";
 type Ev = { entityName: string; quote?: string; need?: { what: string }; factQuote?: string | null; happened?: string; stageQuote?: string | null; entitySells?: string };
-export async function attachSignalContacts<L extends { opportunity: { kind: string }; events: Ev[]; signalContacts?: SignalPerson[]; signalEntity?: string }>(
+export async function attachSignalContacts<L extends { opportunity: { kind: string }; events: Ev[]; signalContacts?: SignalPerson[]; signalEntity?: string; signalOwner?: SignalOwners | null }>(
   leads: L[], pack: Pack, opts: { now?: Date; deps?: SignalContactDeps } = {},
 ): Promise<{ companies: number; searched: number; found: number; skipped?: string }> {
   const cfg = pack.opportunities.signal_contacts, now = opts.now ?? new Date();
   if (!cfg.enabled) return { companies: 0, searched: 0, found: 0, skipped: "off" };
-  const want = new Map<string, { name: string; full: string; topic: string | null; words: string[] }>();
+  const want = new Map<string, { name: string; full: string; topic: string | null; words: string[]; owner: OwnerInput }>();
   for (const l of leads) {
     const e = l.events[0];
     if (l.opportunity.kind === "usaspending_expiring" || !e?.entityName) continue;
     const k = entityKey(e.entityName);
     // a headline acronym is searched by the full name the article gives; titles may name what it does ("Renewable Energy")
     if (k.length >= 3 && !want.has(k)) want.set(k, { name: e.entityName, full: fullEntityName(e.entityName, [e.factQuote, e.happened, e.stageQuote, e.quote]),
-      topic: e.need?.what ?? null, words: topicWords(e.need?.what, e.entitySells) });
+      topic: e.need?.what ?? null, words: topicWords(e.need?.what, e.entitySells),
+      owner: { company: e.entityName, happened: e.happened || e.quote || "", need: e.need?.what ?? null, sells: e.entitySells ?? null, text: [e.factQuote, e.stageQuote].filter(Boolean).join(" ") } });
   }
   if (!want.size) return { companies: 0, searched: 0, found: 0 };
   const db = getDb();
-  const found = new Map<string, SignalPerson[]>();
+  const found = new Map<string, SignalPerson[]>(), owners = new Map<string, SignalOwners | null>();
   for (const r of await db.select().from(signalContacts).where(inArray(signalContacts.entityKey, [...want.keys()]))) {
-    if (now.getTime() - r.searchedAt.getTime() < cfg.refresh_days * DAY) found.set(r.entityKey, (r.people as SignalPerson[]) ?? []);
+    if (now.getTime() - r.searchedAt.getTime() < cfg.refresh_days * DAY) { found.set(r.entityKey, (r.people as SignalPerson[]) ?? []); owners.set(r.entityKey, (r.owner as SignalOwners | null) ?? null); }
   }
+  // who owns the purchase there (department, titles, place): Haiku, inside OWNERS_DAILY_CAP_USD
+  const cap = Number(process.env.OWNERS_DAILY_CAP_USD ?? 0.02);
+  let llm = opts.deps?.llm;
+  if (llm === undefined) { const left = cap - (await (opts.deps?.usage ?? neonUsage()).spentToday(OWNERS_USAGE)); llm = process.env.ANTHROPIC_API_KEY && left > 0.001 ? new HaikuClient({ capUsd: left }) : null; }
   const search = opts.deps?.search === undefined ? (process.env.EXA_API_KEY ? exaPeopleSearch() : null) : opts.deps.search;
   const usage = opts.deps?.usage ?? neonUsage();
   const rx = cfg.patterns.map(toRegex);
@@ -48,12 +55,18 @@ export async function attachSignalContacts<L extends { opportunity: { kind: stri
       if (searched >= cfg.per_run || (await usage.spentToday(USAGE)) >= cfg.per_run) break;
       await usage.addSpend(USAGE, 1, cfg.per_run);
       searched++;
+      let owner: SignalOwners | null = null;
+      if (llm) {
+        const before = llm.spent ?? 0;
+        owner = await signalOwners(llm, { ...w.owner, company: w.full }).catch(() => null);
+        if (llm.spent != null) await usage.addSpend(OWNERS_USAGE, llm.spent - before, cap);
+      }
       let people: SignalPerson[];
-      try { people = pickSignalPeople(await search.search(signalContactQuery(w.full, cfg.titles, w.topic), 10), [w.name, w.full], rx, 2, w.words); }
+      try { people = pickSignalPeople(await search.search(signalContactQuery(w.full, owner?.titles ?? cfg.titles, owner ? null : w.topic, owner?.location), 15), [w.name, w.full], rx, 3, w.words, owner?.titles ?? []); }
       catch { continue; } // search down or out of credit: not cached, tried again next run
-      found.set(k, people);
-      await db.insert(signalContacts).values({ entityKey: k, entityName: w.name, people, searchedAt: now })
-        .onConflictDoUpdate({ target: signalContacts.entityKey, set: { entityName: w.name, people, searchedAt: now } });
+      found.set(k, people); owners.set(k, owner);
+      await db.insert(signalContacts).values({ entityKey: k, entityName: w.name, people, owner, searchedAt: now })
+        .onConflictDoUpdate({ target: signalContacts.entityKey, set: { entityName: w.name, people, owner, searchedAt: now } });
     }
   }
   let n = 0;
@@ -61,7 +74,7 @@ export async function attachSignalContacts<L extends { opportunity: { kind: stri
     const e = l.events[0];
     const k = e?.entityName && l.opportunity.kind !== "usaspending_expiring" ? entityKey(e.entityName) : null;
     const ps = k ? found.get(k) : undefined;
-    if (ps?.length) { l.signalContacts = ps; l.signalEntity = want.get(k!)?.full ?? e!.entityName; n++; }
+    if (ps?.length) { l.signalContacts = ps; l.signalEntity = want.get(k!)?.full ?? e!.entityName; l.signalOwner = owners.get(k!) ?? null; n++; }
   }
   return { companies: want.size, searched, found: n, ...(search ? {} : { skipped: "EXA_API_KEY not set" }) };
 }

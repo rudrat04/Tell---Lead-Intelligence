@@ -4,6 +4,7 @@ import { pickContact, titleFitsCompany, type Contact, type Person } from "@tell/
 import { airWaterfall, type AirWaterfall, type WaterfallEmail } from "@tell/watchers";
 import { getDb, accounts, people, peopleSearches, emails, suppressionList, and, eq, inArray, sql } from "@tell/db";
 import { upgradeEmails, isSureEmail } from "./email-apis.js";
+import { othersFor } from "./contacts.js";
 
 /**
  * Air Waterfall (the operator's own lookup + email service) in the digest, after Tell's free steps:
@@ -61,7 +62,7 @@ export async function waterfallContacts(
         .onConflictDoUpdate({ target: [peopleSearches.accountId, peopleSearches.persona, peopleSearches.provider], set: { found: list.length, searchedAt: new Date() } });
     }
     const c = pickContact(list, pack.icp.personas, a.size, opts.preferred?.get(a.id) ?? []);
-    if (c) { contacts.set(a.id, c); found++; }
+    if (c) { c.others = othersFor(c, list, pack.icp.personas, opts.preferred?.get(a.id) ?? []); contacts.set(a.id, c); found++; }
   }
   return { looked, found };
 }

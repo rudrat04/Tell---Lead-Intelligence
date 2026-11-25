@@ -86,7 +86,7 @@ export async function contactsFor(
             return p ? [{ ...p, workHistory: h.roles.map((r) => ({ title: r.title, company: r.company, from: r.from ?? null, to: r.to ?? null })) }] : [];
           })
             // (one person can come back twice, e.g. under two profile links: one row per name, or the insert fails)
-            .filter((p, i, all) => all.findIndex((q) => q.name === p.name) === i).slice(0, 2);
+            .filter((p, i, all) => all.findIndex((q) => q.name === p.name) === i).slice(0, 3);
           // dated roles in the same results: a new GTM leader, or an ops person who left (only types the pack defines)
           const evs = hits.flatMap((h) => peopleEvents(h, company, acct.domain, opsRx, new Date(), leaderRx)).filter((e) => pack.signals.signals[e.type]);
           if (write && evs.length) {
@@ -121,17 +121,26 @@ export async function contactsFor(
     const contact = champion
       ? { person: champion, persona: null, note: "your past client, new here" }
       : pickContact(list, pack.icp.personas, sizes.get(id) ?? null, opts.preferred?.get(id) ?? []);
-    if (contact) {
-      // other named people matching your personas, for "Also reach"
-      contact.others = pack.icp.personas
-        .filter((p) => p.title !== contact.persona)
-        .flatMap((p) => {
-          const rx = p.patterns.map(toRegex);
-          const hit = list.find((x) => x !== contact.person && x.role && rx.some((r) => r.test(x.role!)));
-          return hit ? [{ persona: p.title, person: hit }] : [];
-        });
-    }
+    if (contact) contact.others = othersFor(contact, list, pack.icp.personas, opts.preferred?.get(id) ?? []);
     out.set(id, contact);
+  }
+  return out;
+}
+
+/** Everyone else worth reaching at the company, for "Also reach" (pure; exported for tests): people whose title matches
+ *  one of your buyers, the lead's own buyers first, at most MAX_OTHERS, one row per name. When the first contact has
+ *  no verified email, these are the next people to try. */
+export const MAX_OTHERS = 3;
+export function othersFor(contact: Contact, list: Person[], personas: Pack["icp"]["personas"], preferred: string[] = []): { persona: string; person: Person }[] {
+  const ordered = [...preferred.map((t) => personas.find((p) => p.title === t)).filter((p): p is (typeof personas)[number] => !!p), ...personas.filter((p) => !preferred.includes(p.title))];
+  const out: { persona: string; person: Person }[] = [];
+  for (const p of ordered) {
+    const rx = p.patterns.map(toRegex);
+    for (const x of list) {
+      if (out.length >= MAX_OTHERS) return out;
+      if (x === contact.person || x.name === contact.person.name || out.some((o) => o.person.name === x.name)) continue;
+      if (x.role && rx.some((r) => r.test(x.role!))) out.push({ persona: p.title, person: x });
+    }
   }
   return out;
 }

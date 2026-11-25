@@ -189,13 +189,13 @@ async function telegram(request, env, ctx) {
       answer = v === "good" ? "Saved 👍 (reaches your Sheet with the next sync)" : "Saved 👎 (reaches your Sheet with the next sync)";
     } else if (op === "e") {
       await queueEnrich(env, ctx, d);
-      answer = "Finding the email: it appears in your Sheet in about 2 minutes";
+      answer = "Finding the emails: the answer arrives here in about 2 minutes";
     } else if (op === "es") {
       await queueEnrich(env, ctx, d, "signal");
       answer = "Finding the signal side's emails: the answer arrives here in about 2 minutes";
     } else if (op === "cd") {
       await queueDraft(env, ctx, d);
-      answer = "Writing the draft: it arrives here in about 2 minutes";
+      answer = "Writing the draft: it arrives in your inbox in about 2 minutes";
     } else if (op === "br" || op === "dr") {
       const t = await env.LABELS.get(`tgtext:${d}`, "json");
       const text = op === "br" ? t?.brief : t?.draft;

@@ -1,0 +1,1 @@
+ALTER TABLE "signal_contacts" ADD COLUMN "owner" jsonb;

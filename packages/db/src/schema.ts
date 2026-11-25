@@ -532,6 +532,8 @@ export const signalContacts = pgTable("signal_contacts", {
   entityName: text("entity_name").notNull(),
   /** [{ name, role, linkedin }] */
   people: jsonb("people").notNull(),
+  /** who owns the purchase there (extract/signal-owners.ts): { department, titles, location } */
+  owner: jsonb("owner"),
   searchedAt: ts("searched_at").notNull().defaultNow(),
 });
 

@@ -63,16 +63,25 @@ const TOPIC_STOP = new Set(["their", "which", "other", "about", "under", "where"
   "contractor", "contractors", "provider", "providers", "systems", "system", "designated", "premises", "buildings", "government", "including", "subsequent", "complete", "execution"]);
 const SENIOR = /\b(head|chief|director|vp|vice president|gm|dgm|agm|general manager|president|lead)\b/i;
 
-/** The people search query for one signal's company (pure; exported for tests). */
-export function signalContactQuery(entity: string, titles: string[], topic?: string | null): string {
+/** The people search query for one signal's company (pure; exported for tests): the titles that own the purchase,
+ *  the company, and where the work is when the article says. */
+export function signalContactQuery(entity: string, titles: string[], topic?: string | null, location?: string | null): string {
   const t = (topic ?? "").replace(/[^\p{L}\p{N} ,/-]+/gu, " ").replace(/\s+/g, " ").trim().split(/,|\band\b|\//)[0]!.trim().split(" ").slice(0, 4).join(" ");
-  return `${titles.slice(0, 3).join(" or ")}${t ? ` for ${t}` : ""} at ${entity}`;
+  return `${titles.slice(0, 3).join(" or ")}${t ? ` for ${t}` : ""} at ${entity}${location ? `, ${location}` : ""}`;
 }
 
 /** The people worth reaching at the signal's company, best first, at most `max` (pure; exported for tests). */
-export function pickSignalPeople(hits: SignalHit[], entity: string | string[], patterns: RegExp[], max = 2, topic: string[] = []): SignalPerson[] {
+const TITLE_FILLER = new Set(["head", "manager", "senior", "general", "deputy", "assistant", "chief", "officer", "director", "lead", "vice", "president", "associate", "executive", "group", "team", "india", "national", "regional"]);
+/** the distinctive words of the owner titles ("projects", "procurement", "engineering") (pure; exported for tests) */
+export const ownerWords = (titles: string[]) => [...new Set(titles.join(" ").toLowerCase().match(/\b[a-z]{4,}\b/g) ?? [])].filter((w) => !TITLE_FILLER.has(w));
+
+export function pickSignalPeople(hits: SignalHit[], entity: string | string[], patterns: RegExp[], max = 3, topic: string[] = [], owners: string[] = []): SignalPerson[] {
   const names = Array.isArray(entity) ? entity : [entity];
-  const fits = (title: string) => patterns.some((rx) => rx.test(title)) || (SENIOR.test(title) && topic.some((w) => title.toLowerCase().includes(w)));
+  const ow = ownerWords(owners);
+  // how close a title is to who owns this purchase: the owner titles' words first, then the pack's buying patterns
+  const fitScore = (title: string) => { const t = title.toLowerCase(); return ow.filter((w) => t.includes(w)).length * 2 + (patterns.some((rx) => rx.test(title)) ? 1 : 0); };
+  // (people who sell never own a purchase)
+  const fits = (title: string) => !/\b(sales|marketing|business development)\b/i.test(title) && (fitScore(title) > 0 || (SENIOR.test(title) && topic.some((w) => title.toLowerCase().includes(w))));
   const out: SignalPerson[] = [];
   for (const h of hits) {
     const name = (h.name ?? "").trim();
@@ -80,9 +89,9 @@ export function pickSignalPeople(hits: SignalHit[], entity: string | string[], p
     const role = h.roles.find((r) => r.current && names.some((n) => worksAt(r.company, n)) && fits(r.title));
     if (!role) continue;
     out.push({ name, role: role.title, linkedin: /linkedin\.com\/in\//i.test(h.url) ? h.url : null });
-    if (out.length >= max) break;
   }
-  return out;
+  // the closest to the purchase first (stable: the search's own order breaks ties)
+  return out.map((p, i) => ({ p, i, s: fitScore(p.role) })).sort((a, b) => b.s - a.s || a.i - b.i).slice(0, max).map((x) => x.p);
 }
 
 /** "Jo Doe, Head of Procurement · Ana Ray, Projects Head" (pure). */

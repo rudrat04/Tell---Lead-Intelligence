@@ -17,7 +17,7 @@ describe("who to reach at the signal's company", () => {
     // one shared word is not enough
     expect(worksAt("Contoso", "Contoso Power")).toBe(false);
   });
-  it("keeps people whose CURRENT role there handles buying, at most two", () => {
+  it("keeps people whose CURRENT role there handles buying, at most three", () => {
     const hits = [
       hit("Asha Rao", "Head of Procurement", "Contoso Power Ltd"),
       hit("Ben Ode", "Head of Procurement", "Fabrikam Solar"), // another company
@@ -29,7 +29,10 @@ describe("who to reach at the signal's company", () => {
     expect(pickSignalPeople(hits, "Contoso Power", rx)).toEqual([
       { name: "Asha Rao", role: "Head of Procurement", linkedin: "https://www.linkedin.com/in/asha-rao" },
       { name: "Eli Sen", role: "GM Projects", linkedin: "https://www.linkedin.com/in/eli-sen" },
+      { name: "Fay Kim", role: "Tender Manager", linkedin: "https://www.linkedin.com/in/fay-kim" },
     ]);
+    // the titles that own this purchase rank first
+    expect(pickSignalPeople(hits, "Contoso Power", rx, 3, [], ["Tender Manager", "Head of Contracts"])[0]!.name).toBe("Fay Kim");
     // a profile that isn't a LinkedIn person page is no link
     expect(pickSignalPeople([hit("Gus Ali", "Procurement Lead", "Contoso Power", true, "https://example.test/gus")], "Contoso Power", rx)[0]!.linkedin).toBeNull();
   });

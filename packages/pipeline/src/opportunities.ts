@@ -25,7 +25,8 @@ import { waterfallContacts } from "./waterfall.js";
 import { readSite, type SitePage } from "@tell/watchers";
 import { HaikuClient, checkFit, STAGE_STRENGTH, stageRank, needFor, EVENT_CHECK_VERSION, type FitVerdict, type LlmClient, type EventNeed, type Stage } from "@tell/extract";
 import { eventChecksFor, gateEvent, type EventCheckDeps, type EventToCheck, type GateResult } from "./event-checks.js";
-import type { EventCheck } from "@tell/extract";
+import type { EventCheck, SignalOwners, LeadExplain } from "@tell/extract";
+import { explainLead } from "@tell/extract";
 import { eventChecks } from "@tell/db";
 import { tradeId, isTrade, tradesFrom, upsertTrades, activeTrades, withTrades } from "./trades.js";
 import { fitChecks } from "@tell/db";
@@ -110,6 +111,10 @@ export interface OppLead {
   signalContacts?: SignalPerson[];
   /** the signal's company by its full name (a headline acronym spelled out from the article) */
   signalEntity?: string;
+  /** who owns the purchase there: department, titles, where the work is */
+  signalOwner?: SignalOwners | null;
+  /** the lead explained for you (why them, the play, the next step), written from its facts (extract/lead-explain.ts) */
+  explain?: LeadExplain | null;
 }
 
 type Fetch = typeof searchFedAwards;
@@ -582,7 +587,7 @@ async function crossEvents(id: string, op: Exclude<OpportunityDef, { kind: "usas
  * The day's opportunity leads: every beneficiary with live matched events, scored, held back when delivered recently
  * with nothing new, the pool searched for the opportunity's buyers, re-scored with the contact, cut at max_leads.
  */
-export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; upgrade?: typeof upgradeEmails; signalContacts?: SignalContactDeps; waterfall?: typeof waterfallContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
+export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; upgrade?: typeof upgradeEmails; signalContacts?: SignalContactDeps; explain?: LlmClient | null; waterfall?: typeof waterfallContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
   const db = getDb(), now = opts.now ?? new Date(), cfg = pack.opportunities;
   const since = new Date(now.getTime() - cfg.window_days * DAY);
   // a match belongs to the opportunity that reads its event's opportunity with its roster (events_from shares events)
@@ -690,7 +695,33 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   keepSureEmails(contacts);
   // who to reach on the signal's side (the tender's owner, the plant's builder), one search per signal company
   try { await attachSignalContacts(out, pack, { now, ...(opts.signalContacts ? { deps: opts.signalContacts } : {}) }); } catch { /* table not migrated yet or search down: leads go out without them */ }
+  try { await explainLeads(out, { ...(opts.explain !== undefined ? { llm: opts.explain } : {}) }); } catch { /* the template lines stand */ }
   return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, leads: out.length, proven: proven.proven, unproven: proven.unproven, fitChecks: proven.checks, eventChecks: gated.made, eventDropped: gated.dropped } };
+}
+
+// ------------------------------------------------------------------------------------------------ lead explanation
+
+/**
+ * Today's news / signal leads explained for you (why them, the play, the next step) from their own facts, one Haiku
+ * call each inside EXPLAIN_DAILY_CAP_USD (usage_daily "haiku_explain"); a lead whose answer fails the checks keeps the
+ * template lines. Federal recompetes keep theirs (their record says it). Mutates the leads.
+ */
+export async function explainLeads(leads: OppLead[], opts: { llm?: (LlmClient & { spent?: number }) | null; usage?: UsageStore } = {}): Promise<number> {
+  const usage = opts.usage ?? neonUsage(), cap = Number(process.env.EXPLAIN_DAILY_CAP_USD ?? 0.03);
+  let llm = opts.llm;
+  if (llm === undefined) { const left = cap - (await usage.spentToday("haiku_explain")); llm = process.env.ANTHROPIC_API_KEY && left > 0.001 ? new HaikuClient({ capUsd: left }) : null; }
+  if (!llm) return 0;
+  let n = 0;
+  for (const l of leads) {
+    const e = l.events[0];
+    if (!e || l.opportunity.kind === "usaspending_expiring") continue;
+    const before = llm.spent ?? 0;
+    l.explain = await explainLead(llm, { company: l.account.name ?? l.account.domain, description: l.account.description, signal: e.happened || e.quote, entity: l.signalEntity ?? e.entityName,
+      stage: e.stage ?? null, need: e.need?.what ?? null, proof: l.proof?.quote ?? null, reasons: e.reasons.filter((r) => !r.startsWith("their site:") && !r.startsWith("stage:")), opportunity: l.opportunity.label }).catch(() => null);
+    if (llm.spent != null) await usage.addSpend("haiku_explain", llm.spent - before, cap);
+    if (l.explain) n++;
+  }
+  return n;
 }
 
 // ------------------------------------------------------------------------------------------------ event fact-check

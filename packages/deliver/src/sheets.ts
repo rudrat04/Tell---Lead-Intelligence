@@ -27,9 +27,9 @@ export type LeadColumn = (typeof LEAD_COLUMNS)[number];
  * brief. Found by header name like the Leads tab, ID hidden.
  */
 export const OPP_COLUMNS = [
-  "Date", "Signal", "Signal link", "Signal date", "About", "More signals",
-  "Opportunity", "The play", "Company", "Website", "What they do", "Why they benefit", "Score", "Timing", "Region",
-  "Person", "Role", "LinkedIn", "Email", "Verified", "Enrich email", "Signal-side contact", "Signal-side email",
+  "Date", "Signal", "Signal link", "Signal date", "Signal strength", "About", "More signals",
+  "Opportunity", "The play", "Company", "Website", "What they do", "Why they benefit", "Next step", "Score", "Timing", "Region",
+  "Person", "Role", "LinkedIn", "Email", "Verified", "Enrich email", "Other contacts", "Signal-side contact", "Signal-side email",
   "Label", "Reason", "Outcome", "Notes",
   "Email draft", "Brief", "ID",
 ] as const;

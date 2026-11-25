@@ -16,16 +16,19 @@ const lead: OppLead = {
 };
 
 describe("opportunity lead out", () => {
-  it("Telegram: the opportunity, who to reach, the event with why it fits, and the buttons (Create draft, no draft text)", () => {
+  it("Telegram: the signal, the company and why, the play, the next step, the people, and the buttons (no Brief button)", () => {
     const m = oppMessage(lead, "11111111-2222-4333-8444-555555555555", NOW);
     expect(m.text).toContain("Federal recompete");
-    expect(m.text.indexOf("THE SIGNAL")).toBeLessThan(m.text.indexOf("WHO CAN BENEFIT"));
-    expect(m.text.indexOf("WHO CAN BENEFIT")).toBeLessThan(m.text.indexOf("THE PLAY"));
-    expect(m.text.indexOf("THE PLAY")).toBeLessThan(m.text.indexOf("THE OPPORTUNITY"));
-    expect(m.text).toContain("<b>Reach:</b> Asha Rao, VP Business Development");
-    expect(m.text).toContain("<b>How:</b> won 3 contracts in NAICS 541512");
+    expect(m.text.indexOf("SIGNAL")).toBeLessThan(m.text.indexOf("Why them"));
+    expect(m.text.indexOf("Why them")).toBeLessThan(m.text.indexOf("The play"));
+    expect(m.text.indexOf("The play")).toBeLessThan(m.text.indexOf("Next step"));
+    expect(m.text).toContain("People to reach at Northwind Systems");
+    expect(m.text).toContain("Asha Rao</a> · VP Business Development");
+    expect(m.text).toContain("won 3 contracts in NAICS 541512");
     expect(m.text).not.toContain("Subject:");
-    expect(m.buttons!.flat().map((b) => b.data)).toEqual(expect.arrayContaining(["cd:11111111-2222-4333-8444-555555555555", "br:11111111-2222-4333-8444-555555555555", "e:11111111-2222-4333-8444-555555555555"]));
+    const data = m.buttons!.flat().map((b) => b.data);
+    expect(data).toEqual(expect.arrayContaining(["cd:11111111-2222-4333-8444-555555555555", "e:11111111-2222-4333-8444-555555555555"]));
+    expect(data).not.toContain("br:11111111-2222-4333-8444-555555555555");
     expect(oppMessage(lead, null, NOW, true).buttons).toBeUndefined();
   });
   it("a fact-checked news lead shows what happened, the stage with its quote and what they will need", () => {
@@ -35,10 +38,12 @@ describe("opportunity lead out", () => {
         need: { what: "tablet compression and granulation machines", supplier: "pharma process equipment maker", industry: "manufacturing", quote: "will make 2 billion tablets a year" },
         reasons: ["based in India", "they will need tablet compression and granulation machines", "stage: committed (\"has started construction\")"] }] };
     const m = oppMessage(news, "11111111-2222-4333-8444-555555555555", NOW).text;
-    expect(m).toContain("Fact-checked: Contoso Lifesciences has started construction");
-    expect(m).toContain("Stage: committed (approved, funded, building, ordering): \"has started construction of its new oral solid dosage plant\"");
-    expect(m).toContain("<b>They will need:</b> tablet compression and granulation machines");
-    expect(m).not.toMatch(/How:.*stage:/); // the stage shows once, under the signal
+    expect(m).toContain("What happened</b>\nContoso Lifesciences has started construction");
+    expect(m).toContain("“has started construction of its new oral solid dosage plant”");
+    expect(m).toContain("committed (funded / building / ordering)");
+    expect(m).toContain("What it makes them buy</b>\n• tablet compression and granulation machines");
+    expect(m).toContain("Example News");
+    expect(m).not.toMatch(/Why them<\/b>\n[^\n]*stage:/); // the stage shows once, under the signal
     expect(oppBrief(news, NOW)).toContain("They will need: tablet compression and granulation machines (from: \"will make 2 billion tablets a year\")");
   });
   it("one signal, several businesses: grouped under one signal message, each business sent without repeating it", () => {
@@ -51,7 +56,9 @@ describe("opportunity lead out", () => {
     const groups = bySignal([mk("a", "Northwind Builders", 60, "factory construction"), other, mk("b", "Contoso Filling", 65, "bottling lines")]);
     expect(groups.map((g) => g.map((l) => l.account.name))).toEqual([["Woodgrove Staffing"], ["Contoso Filling", "Northwind Builders"]]);
     const head = signalMessage(groups[1]!, NOW).text;
-    expect(head).toContain("2 businesses can act on it:</b> Contoso Filling · Northwind Builders");
+    expect(head).toContain("2 businesses can act on it</b>");
+    expect(head).toContain("1. Contoso Filling");
+    expect(head).toContain("2. Northwind Builders");
     expect(head).toContain("• bottling lines");
     expect(oppMessage(groups[1]![0]!, null, NOW, true, true).text).not.toContain("THE SIGNAL");
   });
@@ -96,11 +103,11 @@ describe("only verified emails, and who deals with it on the signal's side", () 
     expect(oppMessage(sure, "11111111-2222-4333-8444-555555555555", NOW).buttons!.flat().map((b) => b.data)).not.toContain("e:11111111-2222-4333-8444-555555555555");
   });
   it("the signal's company contact shows on the signal message, the lead, the brief and the Sheet", () => {
-    expect(signalMessage([news], NOW).text).toContain("Who deals with it at Contoso Power:</b>");
-    expect(signalMessage([news], NOW).text).toContain(">Ravi Sen</a>, Head of Procurement");
+    expect(signalMessage([news], NOW).text).toContain("Who owns it at Contoso Power</b>");
+    expect(signalMessage([news], NOW).text).toContain(">Ravi Sen</a> · Head of Procurement");
     expect(oppMessage(news, null, NOW, true).text).toContain("Ravi Sen");
     expect(oppMessage(news, null, NOW, true, true).text).not.toContain("Ravi Sen"); // compact: the signal message has it
-    expect(oppBrief(news, NOW)).toContain("On the signal's side (Contoso Power, who deals with it): Ravi Sen, Head of Procurement (https://www.linkedin.com/in/ravi-sen)");
+    expect(oppBrief(news, NOW)).toContain("On the signal's side (Contoso Power):\n- Ravi Sen, Head of Procurement (https://www.linkedin.com/in/ravi-sen)");
     expect(oppSheetRow(news, "2026-11-21", NOW, {})["Signal-side contact"]).toBe("Contoso Power: Ravi Sen, Head of Procurement (https://www.linkedin.com/in/ravi-sen)");
   });
 });
@@ -117,5 +124,33 @@ describe("signal-side emails on a click", () => {
     const done = { ...news, signalContacts: [{ ...news.signalContacts![0]!, email: { address: "ravi.sen@cpwr.example", status: "verified" as const, note: "" } }] };
     expect(oppMessage(done, "11111111-2222-4333-8444-555555555555", NOW).buttons!.flat().map((b) => b.data)).not.toContain("es:11111111-2222-4333-8444-555555555555");
     expect(oppSheetRow(done, "2026-11-21", NOW, {})["Signal-side contact"]).toContain("ravi.sen@cpwr.example (verified)");
+  });
+});
+
+import { signalStrength, splitSource, draftMail } from "./opportunities.js";
+describe("signal strength, sources and drafts by mail", () => {
+  const ev = (stage: "buying" | "committed" | "early", daysAgo: number, what = "inverters") => ({ ...lead.events[0]!, stage, endDate: new Date(NOW.getTime() - daysAgo * 86_400_000), need: { what, supplier: "x", industry: "x", quote: "q" } });
+  const mk = (e: ReturnType<typeof ev>, proof = false): OppLead => ({ ...lead, opportunity: { ...lead.opportunity, kind: "news" }, events: [e], ...(proof ? { proof: { need: "n", quote: "q", url: "u" } } : {}) });
+  it("a fresh open tender with two needs is very strong; one job post is moderate; old early news is weak; recompetes have none", () => {
+    expect(signalStrength([mk(ev("buying", 2), true), mk(ev("buying", 2, "mounting"))], NOW)).toMatchObject({ level: 5, band: "Very strong", bar: "▰▰▰▰▰" });
+    expect(signalStrength([mk(ev("buying", 2))], NOW)).toMatchObject({ level: 4, band: "Strong" });
+    expect(signalStrength([{ ...mk(ev("buying", 2)), opportunity: { ...lead.opportunity, kind: "jobs" } }], NOW)).toMatchObject({ level: 3, band: "Moderate" });
+    expect(signalStrength([mk(ev("committed", 10))], NOW)).toMatchObject({ level: 3, band: "Moderate" });
+    expect(signalStrength([mk(ev("early", 40))], NOW)).toMatchObject({ level: 1, band: "Weak" });
+    expect(signalStrength([lead], NOW)).toBeNull();
+  });
+  it("the outlet comes off the headline", () => {
+    expect(splitSource("Contoso invites bids for rooftop solar (Example News)")).toEqual({ headline: "Contoso invites bids for rooftop solar", outlet: "Example News" });
+    expect(splitSource("No outlet here")).toEqual({ headline: "No outlet here", outlet: null });
+  });
+  it("the draft mail says who it's for, the verified address or that there is none, then the draft and the signal", () => {
+    const ctx = { ...oppContext(lead, NOW), others: [{ name: "Ben Ode", role: "Head of Sales", linkedin: null }] };
+    const m = draftMail(ctx, { subject: "a va contract is ending" }, "Subject: x\n\nHi Asha,\n\nBody?", { Email: "asha@northwind.example", Verified: "yes" });
+    expect(m.subject).toBe("Draft · Northwind Systems: a va contract is ending");
+    expect(m.text).toContain("Send to: asha@northwind.example (verified)");
+    expect(m.text).toContain("- Ben Ode, Head of Sales");
+    expect(m.text).toContain("Hi Asha,");
+    expect(draftMail(ctx, { subject: "s" }, "t", {}).text).toContain("no verified email yet");
+    expect(draftMail(ctx, null, "", {}).subject).toContain("write this one yourself");
   });
 });
