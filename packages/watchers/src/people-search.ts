@@ -30,9 +30,15 @@ const EXA_REFUSED = new Set([401, 402, 403, 429]);
  */
 export async function exaRequest(body: Record<string, unknown>, apiKey: string, fetcher: typeof fetch = fetch, second = process.env.EXA_API_KEY_2): Promise<Response> {
   const go = (k: string) => fetcher("https://api.exa.ai/search", { method: "POST", headers: { "x-api-key": k, "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+  const other = !!second && second !== apiKey;
+  // a key out of credit stays out for the run: later requests go straight to the second key instead of asking twice
+  if (other && SPENT_KEYS.has(apiKey)) return go(second!);
   const res = await go(apiKey);
-  return !res.ok && EXA_REFUSED.has(res.status) && second && second !== apiKey ? go(second) : res;
+  if (res.ok || !EXA_REFUSED.has(res.status) || !other) return res;
+  if (res.status !== 429) SPENT_KEYS.add(apiKey); // (a rate limit passes; a refused or spent key doesn't)
+  return go(second!);
 }
+const SPENT_KEYS = new Set<string>();
 
 export const exaPeopleSearch = (apiKey = process.env.EXA_API_KEY): PeopleSearch => ({
   async search(query, num = 5) {

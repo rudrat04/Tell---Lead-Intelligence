@@ -129,6 +129,15 @@ describe("Exa second key", () => {
     expect(bodies[0]).toBe(bodies[1]);
     expect(res.status).toBe(200);
   });
+  it("a spent first key is skipped for the rest of the run; a rate limit isn't remembered", async () => {
+    const keys: string[] = [];
+    const f = vi.fn(async (_u: string, init: RequestInit) => { const k = (init.headers as Record<string, string>)["x-api-key"]!; keys.push(k); return k === "spent1" ? json({}, 402) : k === "busy1" ? json({}, 429) : json({ results: [] }); });
+    await exaRequest(body, "spent1", f as unknown as typeof fetch, "key2");
+    await exaRequest(body, "spent1", f as unknown as typeof fetch, "key2");
+    await exaRequest(body, "busy1", f as unknown as typeof fetch, "key2");
+    await exaRequest(body, "busy1", f as unknown as typeof fetch, "key2");
+    expect(keys).toEqual(["spent1", "key2", "key2", "busy1", "key2", "busy1", "key2"]);
+  });
   it("a server error is not a refused key: no retry; no second key: the refusal stands", async () => {
     const f = vi.fn(async () => json({}, 500));
     expect((await exaRequest(body, "key1", f as unknown as typeof fetch, "key2")).status).toBe(500);

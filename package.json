@@ -42,7 +42,8 @@
     "plays:report": "tsx scripts/plays-report.ts",
     "freelist": "tsx scripts/freelist.ts",
     "followups": "tsx scripts/followups.ts",
-    "alerts": "tsx scripts/alerts.ts"
+    "alerts": "tsx scripts/alerts.ts",
+    "credits": "tsx scripts/credits.ts"
   },
   "devDependencies": {
     "@tell/config": "workspace:*",
