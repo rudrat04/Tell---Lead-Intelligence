@@ -13,9 +13,9 @@ import {
   type MemberFacts, type OppEvent, type BeneficiaryScore, type GeneralEvent, type ScoredMatch,
 } from "@tell/intel";
 import type { Contact } from "@tell/people";
-import { getDb, accounts, companySeeds, deliveries, marketEvents, rosterMembers, opportunityMatches, and, eq, inArray, sql } from "@tell/db";
+import { getDb, accounts, companySeeds, deliveries, marketEvents, rosterMembers, opportunityMatches, people, peopleSearches, and, eq, inArray, sql } from "@tell/db";
 import { persistNicheRecords, type NicheRecord, type NicheResult } from "./niche.js";
-import { contactsFor } from "./contacts.js";
+import { contactsFor, PEOPLE_REFRESH_DAYS } from "./contacts.js";
 import { attachEmails } from "./emails.js";
 import { upgradeEmails, keepSureEmails } from "./email-apis.js";
 import { attachSignalContacts, type SignalContactDeps } from "./signal-contacts.js";
@@ -81,7 +81,7 @@ async function markQuery(source: string, q: string, now: Date) {
 export interface OppRunStats {
   rosters: Record<string, { refreshed: boolean; awards: number; members: number; looked: number; resolved: number; pending: number; sam?: { requests: number; checked: number; withSite: number } }>;
   events: Record<string, { fetched: number; stored: number; errors: number; skipped?: boolean }>;
-  matches: number; beneficiaries: number; held: number; pool: number; noContact: number; leads: number;
+  matches: number; beneficiaries: number; held: number; pool: number; noContact: number; deadEnds?: number; leads: number;
   proven?: number; unproven?: number; fitChecks?: number;
   /** the trades verified needs named this run, and how many are active (searched and matched) */
   trades?: { named: number; active: number; checks: number };
@@ -587,7 +587,7 @@ async function crossEvents(id: string, op: Exclude<OpportunityDef, { kind: "usas
  * The day's opportunity leads: every beneficiary with live matched events, scored, held back when delivered recently
  * with nothing new, the pool searched for the opportunity's buyers, re-scored with the contact, cut at max_leads.
  */
-export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; upgrade?: typeof upgradeEmails; signalContacts?: SignalContactDeps; explain?: LlmClient | null; waterfall?: typeof domainContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
+export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write?: boolean; contacts?: typeof contactsFor; emails?: typeof attachEmails; upgrade?: typeof upgradeEmails; signalContacts?: SignalContactDeps; explain?: LlmClient | null; waterfall?: typeof domainContacts; fit?: FitDeps; events?: EventCheckDeps } = {}): Promise<{ leads: OppLead[]; stats: Pick<OppRunStats, "beneficiaries" | "held" | "pool" | "noContact" | "deadEnds" | "leads" | "proven" | "unproven" | "fitChecks" | "eventChecks" | "eventDropped"> }> {
   const db = getDb(), now = opts.now ?? new Date(), cfg = pack.opportunities;
   const since = new Date(now.getTime() - cfg.window_days * DAY);
   // a match belongs to the opportunity that reads its event's opportunity with its roster (events_from shares events)
@@ -668,7 +668,9 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   // proof is tried in turns across opportunities (each one's strongest first), so a trade's companies get their checks
   // instead of the highest-scoring list using them all
   const proven = await proveFits(roundRobin(scored, scored.length, scored.length), pack, { now, write: opts.write !== false, want: max * cfg.pool_multiplier * 2, ...(opts.fit ? { fit: opts.fit } : {}) });
-  const pool = roundRobin(proven.leads, max * cfg.pool_multiplier, cfg.max_per_opportunity * cfg.pool_multiplier);
+  // companies nobody can be found at (searched recently, nothing) give their pool slot to the next one
+  const dead = await deadEndAccounts(proven.leads, pack);
+  const pool = roundRobin(proven.leads.filter((l) => !dead.has(l.account.id)), max * cfg.pool_multiplier, cfg.max_per_opportunity * cfg.pool_multiplier);
 
   // the opportunity's buyers first (Head of BD / Capture for a recompete), searched only for the pool
   const preferred = new Map(pool.map((l) => [l.account.id, l.opportunity.buyers]));
@@ -696,7 +698,7 @@ export async function rankOpportunityLeads(pack: Pack, opts: { now?: Date; write
   // who to reach on the signal's side (the tender's owner, the plant's builder), one search per signal company
   try { await attachSignalContacts(out, pack, { now, ...(opts.signalContacts ? { deps: opts.signalContacts } : {}) }); } catch { /* table not migrated yet or search down: leads go out without them */ }
   try { await explainLeads(out, { ...(opts.explain !== undefined ? { llm: opts.explain } : {}) }); } catch { /* the template lines stand */ }
-  return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, leads: out.length, proven: proven.proven, unproven: proven.unproven, fitChecks: proven.checks, eventChecks: gated.made, eventDropped: gated.dropped } };
+  return { leads: out, stats: { beneficiaries: byAccount.size, held, pool: pool.length, noContact, deadEnds: dead.size, leads: out.length, proven: proven.proven, unproven: proven.unproven, fitChecks: proven.checks, eventChecks: gated.made, eventDropped: gated.dropped } };
 }
 
 // ------------------------------------------------------------------------------------------------ lead explanation
@@ -790,6 +792,46 @@ export const siteWords = (quote: string, keywords: string[]) => [...new Set([...
  * Haiku by FIT_DAILY_CAP_USD (usage_daily "haiku_fit"), Firecrawl renders by FIRECRAWL_PER_DAY ("firecrawl").
  * Unproven leads are dropped: without a site that shows the fit, the email would be a guess.
  */
+async function deadEndAccounts(leads: OppLead[], pack: Pack): Promise<Set<string>> {
+  const ids = [...new Set(leads.map((l) => l.account.id))];
+  if (!ids.length) return new Set();
+  const db = getDb(), since = new Date(Date.now() - PEOPLE_REFRESH_DAYS * DAY);
+  const known = new Set(pack.icp.personas.map((p) => p.title));
+  // the buyers contactsFor searches for (onlyPreferred): the opportunity's, else every persona
+  const buyers = new Map(leads.map((l) => [l.account.id, (l.opportunity.buyers ?? []).filter((b) => known.has(b)).length ? (l.opportunity.buyers ?? []).filter((b) => known.has(b)) : [...known]]));
+  const withPeople = new Set((await db.select({ a: people.accountId }).from(people).where(inArray(people.accountId, ids))).map((r) => r.a));
+  const searched = await db.select({ accountId: peopleSearches.accountId, persona: peopleSearches.persona, provider: peopleSearches.provider, found: peopleSearches.found })
+    .from(peopleSearches).where(and(inArray(peopleSearches.accountId, ids), sql`${peopleSearches.searchedAt} > ${since}`));
+  return contactDeadEnds(ids, buyers, withPeople, searched, !!process.env.HUNTER_API_KEY);
+}
+
+const fitEventKey = (e: { url: string; need?: unknown }) => (e.need ? `${e.url}#need` : e.url);
+
+/** True when the cache alone decides a lead's proof (pure; exported for tests): every event tried, in order, up to
+ *  the first cached yes, has a cached verdict, so no fresh check would be made. */
+export function fitSettled(keys: string[], cached: Map<string, { verdict: string; proof?: string | null; proofUrl?: string | null }>): boolean {
+  for (const k of keys) {
+    const v = cached.get(k);
+    if (!v) return false;
+    if (v.verdict === "yes" && v.proof && v.proofUrl) return true;
+  }
+  return true;
+}
+
+/** Accounts no contact can come from today (pure; exported for tests): nobody stored for them, every buyer the lead
+ *  searches for was searched recently with nothing found, and Hunter's domain search already tried (or isn't set up).
+ *  They'd take a pool slot every run and drop out as "no contact", keeping companies that might have one out. */
+export function contactDeadEnds(
+  ids: string[], buyers: Map<string, string[]>, withPeople: Set<string>,
+  searched: { accountId: string; persona: string; provider: string; found: number }[], hunterOn: boolean,
+): Set<string> {
+  const empty = new Set(searched.filter((r) => r.found === 0).map((r) => `${r.accountId}|${r.provider}|${r.persona}`));
+  return new Set(ids.filter((id) => {
+    const want = buyers.get(id) ?? [];
+    return !withPeople.has(id) && want.length > 0 && want.every((p) => empty.has(`${id}|exa|${p}`)) && (!hunterOn || empty.has(`${id}|hunter-domain|*`));
+  }));
+}
+
 export async function proveFits(cands: OppLead[], pack: Pack, opts: { now: Date; write: boolean; want: number; fit?: FitDeps }): Promise<{ leads: OppLead[]; proven: number; unproven: number; checks: number }> {
   const db = getDb(), usage = opts.fit?.usage ?? neonUsage();
   const cap = Number(process.env.FIT_DAILY_CAP_USD ?? 0.03), perRun = Number(process.env.FIT_CHECKS_PER_RUN ?? 30), fcCap = Number(process.env.FIRECRAWL_PER_DAY ?? 10);
@@ -811,11 +853,13 @@ export async function proveFits(cands: OppLead[], pack: Pack, opts: { now: Date;
   for (const c of cands) {
     const op = pack.opportunities.opportunities[c.opportunity.id];
     if (!op || op.kind === "usaspending_expiring" || !op.verify) { out.push(c); continue; }
-    if (tried++ >= opts.want) continue;
+    // a lead whose verdict is already in the cache costs nothing: only leads that need a fresh check use the room,
+    // or the same companies rejected on earlier days take it every run and new matches are never checked
+    if (!fitSettled(c.events.slice(0, EVENTS_TRIED).map((e) => `${c.account.id}|${fitEventKey(e)}`), cached) && tried++ >= opts.want) continue;
     let hit: { event: OppLead["events"][number]; v: { need: string; proof: string; url: string } } | null = null;
     for (const e of c.events.slice(0, EVENTS_TRIED)) {
       // (a check against the event's verified need is a different question from the old play-label one)
-      const eventKey = e.need ? `${e.url}#need` : e.url, k = `${c.account.id}|${eventKey}`;
+      const eventKey = fitEventKey(e), k = `${c.account.id}|${eventKey}`;
       const prior = cached.get(k);
       let v: FitVerdict | null = prior ? { verdict: prior.verdict as FitVerdict["verdict"], need: prior.need ?? "", proof: prior.proof, url: prior.proofUrl, reason: prior.reason ?? "" } : null;
       if (!v) {

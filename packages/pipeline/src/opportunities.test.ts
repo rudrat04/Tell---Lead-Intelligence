@@ -75,3 +75,34 @@ describe("foreign domains", () => {
     expect(foreignDomain("acme.de", "United States of America")).toBe(true);
   });
 });
+
+import { fitSettled, contactDeadEnds } from "./opportunities.js";
+
+describe("proof-of-fit room", () => {
+  const no = { verdict: "no", proof: "", proofUrl: "" }, yes = { verdict: "yes", proof: "We machine API flanges", proofUrl: "https://a.example/p" };
+  it("a lead decided by cached verdicts needs no fresh check, so it doesn't use the room", () => {
+    const cached = new Map([["a|u1", no], ["a|u2", no], ["b|u1", yes]]);
+    expect(fitSettled(["a|u1", "a|u2"], cached)).toBe(true); // rejected before on both events
+    expect(fitSettled(["b|u1", "b|u2"], cached)).toBe(true); // a cached yes on the first event ends it
+    expect(fitSettled(["a|u1", "a|u3"], cached)).toBe(false); // a new event still has to be checked
+    expect(fitSettled(["c|u1"], cached)).toBe(false); // a new company
+  });
+});
+
+describe("contact dead ends", () => {
+  const s = (accountId: string, persona: string, provider: string, found = 0) => ({ accountId, persona, provider, found });
+  const buyers = new Map([["a", ["Founder / CEO", "Head of Sales"]], ["b", ["Founder / CEO", "Head of Sales"]], ["c", ["Founder / CEO"]], ["d", ["Founder / CEO"]]]);
+  it("drops a company only when every buyer search and Hunter came back empty and nobody is stored", () => {
+    const searched = [
+      s("a", "Founder / CEO", "exa"), s("a", "Head of Sales", "exa"), s("a", "*", "hunter-domain"), // dead end
+      s("b", "Founder / CEO", "exa"), s("b", "*", "hunter-domain"), // Head of Sales never searched
+      s("c", "Founder / CEO", "exa"), s("c", "*", "hunter-domain"), // has a stored person
+      s("d", "Founder / CEO", "exa", 2), s("d", "*", "hunter-domain"), // the search found people
+    ];
+    expect([...contactDeadEnds(["a", "b", "c", "d"], buyers, new Set(["c"]), searched, true)]).toEqual(["a"]);
+    // Hunter not searched yet: it may still find someone
+    expect(contactDeadEnds(["a"], buyers, new Set(), searched.filter((r) => r.provider !== "hunter-domain"), true).size).toBe(0);
+    // no Hunter key: the people searches decide
+    expect(contactDeadEnds(["a"], buyers, new Set(), searched.filter((r) => r.provider !== "hunter-domain"), false).size).toBe(1);
+  });
+});
