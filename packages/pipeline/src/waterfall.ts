@@ -3,7 +3,7 @@ import { toRegex, type Pack } from "@tell/config";
 import { pickContact, titleFitsCompany, type Contact, type Person } from "@tell/people";
 import { hunterDomainSearch, type DomainPerson } from "@tell/watchers";
 import { getDb, accounts, people, peopleSearches, emails, suppressionList, and, eq, inArray, sql } from "@tell/db";
-import { findSureEmail, isSureEmail, finderMonthUsed as monthUsed, type WaterfallDeps } from "./email-apis.js";
+import { findSureEmail, isSureEmail, finderMonthUsed as monthUsed, hunterHasRoom, hunterSpent, type WaterfallDeps } from "./email-apis.js";
 import { neonUsage, type UsageStore } from "./usage.js";
 import { othersFor } from "./contacts.js";
 
@@ -32,7 +32,7 @@ export function domainPeople(list: DomainPerson[], pack: Pick<Pack, "icp">, comp
 /** Contacts for leads nobody is known for (they'd be dropped), from Hunter's domain search. Mutates `contacts`. */
 export async function domainContacts(
   contacts: Map<string, Contact | null>, targets: string[], pack: Pack,
-  opts: { write?: boolean; search?: typeof hunterDomainSearch; max?: number; preferred?: Map<string, string[]>; usage?: UsageStore } = {},
+  opts: { write?: boolean; search?: typeof hunterDomainSearch; max?: number; preferred?: Map<string, string[]>; usage?: UsageStore; hunterLeft?: () => Promise<number | null> } = {},
 ): Promise<{ looked: number; found: number; skipped?: string }> {
   if (!process.env.HUNTER_API_KEY && !opts.search) return { looked: 0, found: 0, skipped: "HUNTER_API_KEY not set" };
   const write = opts.write !== false, usage = opts.usage ?? neonUsage(), cap = Number(process.env.HUNTER_PER_MONTH ?? 45);
@@ -46,11 +46,12 @@ export async function domainContacts(
   let budget = opts.max ?? Number(process.env.HUNTER_DOMAIN_PER_RUN ?? 5), looked = 0, found = 0;
   for (const a of accts) {
     if (recent.has(a.id) || budget <= 0) continue;
-    if ((await monthUsed("hunter")) >= cap) return { looked, found, skipped: "Hunter's monthly allowance is spent" };
+    if (!(await hunterHasRoom(monthUsed, cap, opts.hunterLeft))) return { looked, found, skipped: "Hunter's credits are spent" };
     budget--; looked++;
-    await usage.addSpend("hunter", 1, cap);
     const r = await (opts.search ?? hunterDomainSearch)(a.domain).catch(() => null);
     if (!r) continue; // down: try again next run
+    // (Hunter charges a domain search only when it lists someone)
+    if (r.people.length) { await usage.addSpend("hunter", 1, cap); hunterSpent(); }
     const list = domainPeople(r.people, pack, a.name ?? a.domain, a.domain);
     if (write) {
       for (const p of list) {

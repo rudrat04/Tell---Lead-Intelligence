@@ -121,3 +121,24 @@ describe("the waterfall is smart about checks and credits", () => {
     expect(u.m.get("hunter")).toBe(1);
   });
 });
+
+import { hunterHasRoom, hunterSpent, resetHunterRoom } from "./email-apis.js";
+describe("Hunter's room", () => {
+  it("trusts Hunter's own balance over Tell's count, counted down as it is spent", async () => {
+    resetHunterRoom();
+    let asked = 0;
+    const ask = async () => { asked++; return 2; };
+    const month = async () => 45; // Tell's own count says the month is spent
+    expect(await hunterHasRoom(month, 45, ask)).toBe(true);
+    hunterSpent(); hunterSpent();
+    expect(await hunterHasRoom(month, 45, ask)).toBe(false);
+    expect(asked).toBe(1); // asked once a run
+    resetHunterRoom();
+  });
+  it("falls back to Tell's count when Hunter can't answer", async () => {
+    resetHunterRoom();
+    expect(await hunterHasRoom(async () => 10, 45, async () => null)).toBe(true);
+    expect(await hunterHasRoom(async () => 45, 45, async () => null)).toBe(false);
+    resetHunterRoom();
+  });
+});

@@ -33,3 +33,12 @@ describe("addresses in web search results", () => {
     ], "contoso.test")).toEqual([{ address: "ravi.sen@contoso.test", url: "https://dir.example/a" }, { address: "sales@contoso.test", url: "https://dir.example/a" }]);
   });
 });
+
+import { parseHunterAccount } from "./mail-apis.js";
+describe("Hunter account balance", () => {
+  it("reads the credit pool, else searches; nothing usable is null", () => {
+    expect(parseHunterAccount({ data: { requests: { credits: { used: 23, available: 50 }, searches: { used: 9, available: 25 } } } })).toBe(27);
+    expect(parseHunterAccount({ data: { requests: { searches: { used: 30, available: 25 } } } })).toBe(0);
+    expect(parseHunterAccount({ errors: [{ id: "authentication_failed" }] })).toBeNull();
+  });
+});

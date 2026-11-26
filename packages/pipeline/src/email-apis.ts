@@ -1,5 +1,5 @@
 import type { Contact } from "@tell/people";
-import { verifyEmail, hunterFind, prospeoFind, inboxTrueVerify, apolloFind, webEmailSearch, type Verification, type Found } from "@tell/watchers";
+import { verifyEmail, hunterFind, prospeoFind, inboxTrueVerify, apolloFind, webEmailSearch, hunterCreditsLeft, type Verification, type Found } from "@tell/watchers";
 import { localPart, patternsFor, isRoleAddress, type Pattern } from "@tell/people";
 import { getDb, accounts, people, emails, usageDaily, domainMail, and, eq, inArray, sql } from "@tell/db";
 import { neonUsage, type UsageStore } from "./usage.js";
@@ -50,6 +50,19 @@ export async function finderMonthUsed(service: string): Promise<number> {
   return Number((await getDb().select({ n: sql<number>`coalesce(sum(${usageDaily.used}), 0)` }).from(usageDaily).where(and(eq(usageDaily.service, service), sql`${usageDaily.day}::text like ${`${month}%`}`)))[0]?.n ?? 0);
 }
 
+/** Hunter's room this run: what Hunter itself says is left (asked once a run, counted down as Tell spends it), or, when
+ *  it can't answer, Tell's own count against HUNTER_PER_MONTH. Tell's count overstated use (it charged searches that
+ *  found nobody, which Hunter doesn't) and reset on the 1st while Hunter resets on its billing day. */
+let hunterLive: { left: number } | null | undefined; // undefined = not asked yet this run
+export async function hunterHasRoom(month: (service: string) => Promise<number>, cap: number, ask: () => Promise<number | null> = hunterCreditsLeft): Promise<boolean> {
+  if (hunterLive === undefined) { const n = await ask().catch(() => null); hunterLive = n == null ? null : { left: n }; }
+  return hunterLive ? hunterLive.left > Number(process.env.HUNTER_RESERVE ?? 0) : (await month("hunter")) < cap;
+}
+/** A Hunter credit spent (a find, or a domain search that listed people). */
+export function hunterSpent(n = 1): void { if (hunterLive) hunterLive.left -= n; }
+/** Forget the asked balance (tests, or a long-lived process). */
+export function resetHunterRoom(): void { hunterLive = undefined; }
+
 /** The usual company formats, most common first (a pattern learned from the domain goes ahead of them). */
 const PERMUTATIONS: Pattern[] = ["first.last", "first", "firstlast", "flast", "f.last", "first_last", "firstl", "last.first"];
 /** Addresses to try for a name at a domain, learned pattern first, at most `n` (pure; exported for tests). These are
@@ -75,7 +88,7 @@ const envCaps = () => ({ qev: Number(process.env.QEV_PER_DAY ?? 90), hunter: Num
 /** The step calls (tests pass fakes). */
 export interface WaterfallDeps {
   verify?: typeof verifyEmail; inboxTrue?: typeof inboxTrueVerify; hunter?: typeof hunterFind; prospeo?: typeof prospeoFind; apollo?: typeof apolloFind;
-  web?: typeof webEmailSearch; usage?: UsageStore; monthUsed?: (service: string) => Promise<number>; keys?: WaterfallKeys;
+  web?: typeof webEmailSearch; usage?: UsageStore; monthUsed?: (service: string) => Promise<number>; keys?: WaterfallKeys; hunterLeft?: () => Promise<number | null>;
 }
 export interface WaterfallResult { email: Email | null; source: string; steps: string[]; catchAll: boolean }
 
@@ -154,11 +167,12 @@ export async function findSureEmail(
     ["apollo", "Apollo", () => (deps.apollo ?? apolloFind)(name.first, name.last, domain)],
   ];
   for (const [k, label, call] of finders) {
-    if (!keys[k] || (k === "apollo" && apolloBlocked) || (await month(k)) >= caps[k]) continue;
+    if (!keys[k] || (k === "apollo" && apolloBlocked)) continue;
+    if (k === "hunter" ? !(await hunterHasRoom(month, caps.hunter, deps.hunterLeft)) : (await month(k)) >= caps[k]) continue;
     steps.push(k);
     const f = fromFinder(await call().catch((e: unknown) => { if (k === "apollo" && /403/.test(String(e))) apolloBlocked = true; return null; }), label);
     // (a miss is free at all three: only a find uses the monthly allowance)
-    if (f) await usage.addSpend(k, 1, caps[k]);
+    if (f) { await usage.addSpend(k, 1, caps[k]); if (k === "hunter") hunterSpent(); }
     // an address on another domain (an old employer, a personal mailbox) is not this company's
     if (!f || f.address.split("@")[1] !== domain || tried.has(f.address)) continue;
     if (f.status === "verified") return sure(f, k);

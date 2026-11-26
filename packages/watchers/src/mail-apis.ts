@@ -42,6 +42,21 @@ export async function hunterFind(first: string, last: string, domain: string, ke
   return parseHunter(await res.json());
 }
 
+/** Credits left on the Hunter account, from its /account answer (pure; exported for tests): the newer plans report one
+ *  pool of `credits`, older ones `searches` (finder + domain search); null when the answer says neither. */
+export function parseHunterAccount(j: unknown): number | null {
+  const r = (j as { data?: { requests?: { credits?: { used?: number; available?: number }; searches?: { used?: number; available?: number } } } } | null)?.data?.requests;
+  const pool = r?.credits ?? r?.searches;
+  return pool && Number.isFinite(pool.available) && Number.isFinite(pool.used) ? Math.max(0, pool.available! - pool.used!) : null;
+}
+/** What Hunter itself says is left this billing period (a free call). Null without a key or when it can't answer. */
+export async function hunterCreditsLeft(key = process.env.HUNTER_API_KEY): Promise<number | null> {
+  if (!key) return null;
+  const res = await fetch(`https://api.hunter.io/v2/account?api_key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(20_000) }).catch(() => null);
+  if (!res?.ok) return null;
+  return parseHunterAccount(await res.json().catch(() => null));
+}
+
 /** One person Hunter's domain search lists for a domain: name, title, their address, and whether Hunter verified it. */
 export interface DomainPerson { firstName: string; lastName: string; position: string | null; linkedin: string | null; address: string; verified: boolean }
 /** Hunter domain-search response -> the named people (generic inboxes left out) and whether the domain is catch-all (pure; exported for tests). */
