@@ -2,6 +2,8 @@
  * Opportunity-led leads (pack opportunities.yaml): the event first, then the companies that can benefit from it.
  *   pnpm opps                    rosters (when due) -> events -> matches -> rank -> people -> Telegram + Sheet (once per IST day)
  *   pnpm opps roster|events|match   one collection step only (no delivery)
+ *   pnpm opps --again [--no-collect]   a second send today: the leads the first one left out (companies already
+ *                                sent today are skipped by the once-a-day index)
  *   pnpm opps --dry [--show]     everything but delivery; --show prints the leads (local only: lead names never go to CI logs)
  *   pnpm opps --test             sends to Telegram with [TEST], no buttons, records nothing
  *   pnpm opps --force            re-read rosters and events now (they normally refresh every refresh_days)
@@ -29,7 +31,7 @@ const has = (f: string) => args.includes(f);
 if ((has("--show") || has("--test")) && process.env.CI) { console.error("--show / --test print or send lead details: local only"); process.exit(1); }
 const only = (["roster", "events", "match"] as const).find((c) => args.includes(c));
 const pack = await loadPack();
-const r = await runOpportunityDigest({ pack, dryRun: has("--dry") || has("--show"), test: has("--test"), only, skipCollect: has("--no-collect"), force: has("--force") });
+const r = await runOpportunityDigest({ pack, dryRun: has("--dry") || has("--show"), test: has("--test"), only, skipCollect: has("--no-collect"), force: has("--force"), again: has("--again") });
 const { shown, ...counts } = r;
 console.log(JSON.stringify(counts, null, 2));
 if (has("--show") && shown) {

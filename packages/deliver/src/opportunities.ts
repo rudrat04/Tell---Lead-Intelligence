@@ -281,14 +281,14 @@ export function oppContext(l: OppLead, now: Date): OppContext {
 
 export interface OppDigestResult extends Partial<OppRunStats> { status: "sent" | "dry" | "skipped" | "empty"; reason?: string; telegram?: number; sheetRows?: number; leads: number; shown?: OppLead[] }
 
-export async function runOpportunityDigest(opts: { pack: Pack; dryRun?: boolean; test?: boolean; skipCollect?: boolean; only?: "roster" | "events" | "match"; force?: boolean }): Promise<OppDigestResult> {
+export async function runOpportunityDigest(opts: { pack: Pack; dryRun?: boolean; test?: boolean; skipCollect?: boolean; only?: "roster" | "events" | "match"; force?: boolean; again?: boolean }): Promise<OppDigestResult> {
   const { pack } = opts;
   if (!pack.opportunities.enabled) return { status: "skipped", reason: "opportunities.enabled is false", leads: 0 };
   const db = getDb(), now = new Date(), day = istDay(now), key = `opps:${day}`;
   const real = !opts.dryRun && !opts.test;
   if (real) {
     const [prior] = await db.select({ status: runs.status }).from(runs).where(eq(runs.idempotencyKey, key)).limit(1);
-    if (prior?.status === "ok") return { status: "skipped", reason: `already sent today (${key})`, leads: 0 };
+    if (prior?.status === "ok" && !opts.again) return { status: "skipped", reason: `already sent today (${key})`, leads: 0 };
   }
   // (the collection hands back the pack with today's trades in it; never spread into the counts: CI logs are public)
   const { pack: withT, ...collected } = opts.skipCollect ? { pack: withTrades(pack, await activeTrades(pack, now)) } : await collectOpportunities(pack, { now, only: opts.only, force: opts.force });
